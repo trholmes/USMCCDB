@@ -34,7 +34,7 @@ from app.security import get_current_user, is_office, require_office
 router = APIRouter(prefix="/people", tags=["membership"])
 
 # Fields a member may edit on their own profile.
-SELF_EDITABLE = {"preferred_name", "email", "orcid", "career_stage"}
+SELF_EDITABLE = {"preferred_name", "email", "orcid", "career_stage", "expertise"}
 
 
 def _get_person(db: Session, person_id: int) -> Person:
@@ -63,6 +63,8 @@ def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
         orcid=body.orcid,
         career_stage=body.career_stage,
         status=MemberStatus.pending,
+        is_voting=body.is_voting,
+        expertise=body.expertise,
         notes=body.notes,
     )
     db.add(person)

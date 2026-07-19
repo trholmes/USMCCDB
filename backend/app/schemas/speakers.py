@@ -48,6 +48,7 @@ class TalkCreate(BaseModel):
     working_group_id: int | None = None
     speaker_person_id: int | None = None
     status: TalkStatus = TalkStatus.open
+    is_invited: bool = False
     notes: str | None = None
 
 
@@ -59,6 +60,7 @@ class TalkUpdate(BaseModel):
     working_group_id: int | None = None
     speaker_person_id: int | None = None
     status: TalkStatus | None = None
+    is_invited: bool | None = None
     notes: str | None = None
 
 
@@ -91,6 +93,7 @@ class TalkOut(ORMModel):
     working_group_id: int | None
     speaker_person_id: int | None
     status: TalkStatus
+    is_invited: bool
     notes: str | None
     speaker: PersonSummary | None = None
     nominations: list[NominationOut] = []
@@ -101,3 +104,4 @@ class TalkStatRow(BaseModel):
     key_id: int
     year: int
     talks: int
+    invited: int = 0

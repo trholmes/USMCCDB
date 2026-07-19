@@ -69,6 +69,10 @@ class Person(TimestampedBase):
         Enum(MemberStatus, name="member_status"), default=MemberStatus.pending, nullable=False
     )
     status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Voting member per the USMCC charter (PhD-holding physicist at a US
+    # institution, actively contributing).
+    is_voting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expertise: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
     user = relationship("User", back_populates="person", uselist=False)

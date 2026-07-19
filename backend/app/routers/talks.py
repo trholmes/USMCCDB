@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import extract, func, select
+from sqlalchemy import case, extract, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -241,6 +241,7 @@ def talk_stats(
     """Talks per person (or per current primary institution) per year, for
     talks that have a speaker and a date."""
     year = extract("year", Talk.date).label("year")
+    invited = func.sum(case((Talk.is_invited, 1), else_=0)).label("invited")
     if by == "institution":
         stmt = (
             select(
@@ -248,6 +249,7 @@ def talk_stats(
                 Institution.id,
                 year,
                 func.count(Talk.id),
+                invited,
             )
             .join(Affiliation, Affiliation.institution_id == Institution.id)
             .join(
@@ -267,6 +269,7 @@ def talk_stats(
                 Person.id,
                 year,
                 func.count(Talk.id),
+                invited,
             )
             .join(Talk, Talk.speaker_person_id == Person.id)
             .where(Talk.date.isnot(None))
@@ -275,5 +278,6 @@ def talk_stats(
         )
     rows = db.execute(stmt).all()
     return [
-        TalkStatRow(key=r[0], key_id=r[1], year=int(r[2]), talks=r[3]) for r in rows
+        TalkStatRow(key=r[0], key_id=r[1], year=int(r[2]), talks=r[3], invited=int(r[4] or 0))
+        for r in rows
     ]

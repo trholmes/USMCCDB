@@ -84,6 +84,8 @@ class PersonApply(BaseModel):
     career_stage: CareerStage = CareerStage.other
     institution_id: int | None = None
     institution_name: str | None = None  # free text if not in the list yet
+    is_voting: bool = False
+    expertise: str | None = None
     notes: str | None = None
 
     @field_validator("email")
@@ -99,6 +101,8 @@ class PersonUpdate(BaseModel):
     email: EmailStr | None = None
     orcid: str | None = Field(default=None, pattern=ORCID_RE)
     career_stage: CareerStage | None = None
+    is_voting: bool | None = None
+    expertise: str | None = None
     notes: str | None = None
 
     @field_validator("email")
@@ -121,9 +125,11 @@ class PersonSummary(ORMModel):
     orcid: str | None
     career_stage: CareerStage
     status: MemberStatus
+    is_voting: bool
 
 
 class PersonOut(PersonSummary):
+    expertise: str | None
     notes: str | None
     status_changed_at: datetime | None
     affiliations: list[AffiliationOut] = []

@@ -1,0 +1,162 @@
+import {
+  Button,
+  Card,
+  Center,
+  Checkbox,
+  Select,
+  Stack,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+} from '@mantine/core'
+import { notifications } from '@mantine/notifications'
+import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { api } from '../api/client'
+
+const STAGES = [
+  { value: 'faculty', label: 'Faculty' },
+  { value: 'staff', label: 'Lab / research scientist' },
+  { value: 'postdoc', label: 'Postdoc' },
+  { value: 'grad', label: 'Graduate student' },
+  { value: 'undergrad', label: 'Undergraduate' },
+  { value: 'engineer', label: 'Engineer' },
+  { value: 'other', label: 'Other' },
+]
+
+export default function ApplyPage() {
+  const [form, setForm] = useState({
+    given_name: '',
+    family_name: '',
+    preferred_name: '',
+    email: '',
+    orcid: '',
+    career_stage: 'other',
+    institution_name: '',
+    is_voting: false,
+    expertise: '',
+    notes: '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await api.post('/people/apply', {
+        ...form,
+        preferred_name: form.preferred_name || null,
+        orcid: form.orcid || null,
+        institution_name: form.institution_name || null,
+        expertise: form.expertise || null,
+        notes: form.notes || null,
+      })
+      setDone(true)
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (done) {
+    return (
+      <Center mih="60vh">
+        <Card withBorder w={480} p="xl">
+          <Title order={3}>Application received</Title>
+          <Text mt="sm">
+            Thanks! The USMCC office will review your application. You'll be able to sign in
+            once it's approved.
+          </Text>
+          <Button mt="md" onClick={() => navigate('/login')}>
+            Back to sign in
+          </Button>
+        </Card>
+      </Center>
+    )
+  }
+
+  return (
+    <Center p="md">
+      <Card withBorder w={560} p="xl">
+        <Stack>
+          <div>
+            <Title order={3}>Apply to join USMCC</Title>
+            {params.get('welcome') === 'orcid' && (
+              <Text c="green" size="sm">
+                Your ORCID sign-in worked — please complete your membership application.
+              </Text>
+            )}
+          </div>
+          <form onSubmit={submit}>
+            <Stack gap="sm">
+              <TextInput
+                label="First / given name"
+                required
+                value={form.given_name}
+                onChange={(e) => set('given_name', e.currentTarget.value)}
+              />
+              <TextInput
+                label="Last / family name"
+                required
+                value={form.family_name}
+                onChange={(e) => set('family_name', e.currentTarget.value)}
+              />
+              <TextInput
+                label="Preferred name (optional)"
+                value={form.preferred_name}
+                onChange={(e) => set('preferred_name', e.currentTarget.value)}
+              />
+              <TextInput
+                label="Email"
+                type="email"
+                required
+                value={form.email}
+                onChange={(e) => set('email', e.currentTarget.value)}
+              />
+              <TextInput
+                label="ORCID iD (0000-0000-0000-0000)"
+                value={form.orcid}
+                onChange={(e) => set('orcid', e.currentTarget.value)}
+              />
+              <Select
+                label="Position"
+                data={STAGES}
+                value={form.career_stage}
+                onChange={(v) => set('career_stage', v || 'other')}
+              />
+              <TextInput
+                label="Primary institution"
+                value={form.institution_name}
+                onChange={(e) => set('institution_name', e.currentTarget.value)}
+              />
+              <Checkbox
+                label="Registering as a voting member (PhD-holding physicist at a US institution, actively contributing to the muon collider effort)"
+                checked={form.is_voting}
+                onChange={(e) => set('is_voting', e.currentTarget.checked)}
+              />
+              <Textarea
+                label="Areas of expertise"
+                value={form.expertise}
+                onChange={(e) => set('expertise', e.currentTarget.value)}
+              />
+              <Textarea
+                label="Anything you want to tell us?"
+                value={form.notes}
+                onChange={(e) => set('notes', e.currentTarget.value)}
+              />
+              <Button type="submit" loading={busy}>
+                Submit application
+              </Button>
+            </Stack>
+          </form>
+        </Stack>
+      </Card>
+    </Center>
+  )
+}

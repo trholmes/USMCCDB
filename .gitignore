@@ -19,6 +19,8 @@ frontend/dist/
 .idea/
 .vscode/
 
-# Local data
+# Local data — member/speaker spreadsheets and converted imports live here.
+# NEVER commit these: this is a public repo and they contain personal data.
+data/
 backups/
 *.dump
