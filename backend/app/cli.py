@@ -172,6 +172,193 @@ def import_members(
             typer.echo(f"Imported: {created} created, {updated} updated, {skipped} skipped")
 
 
+# --- Demo data -------------------------------------------------------------------
+
+DEMO_INSTITUTIONS = [
+    ("University of Springfield", "USpring", "University of Springfield, Springfield, IL 62901, USA"),
+    ("Lakeview National Laboratory", "LNL", "Lakeview National Laboratory, Lakeview, IL 60510, USA"),
+    ("Coastal State University", "CSU", "Coastal State University, Santa Rosa, CA 95401, USA"),
+    ("Midwest Institute of Technology", "MIT-W", "Midwest Institute of Technology, Des Moines, IA 50309, USA"),
+    ("Bayside University", "Bayside", "Bayside University, Gulfport, MS 39501, USA"),
+    ("Northern Plains University", "NPU", "Northern Plains University, Fargo, ND 58102, USA"),
+]
+
+# (given, family, stage, voting, institution index, orcid)
+DEMO_PEOPLE = [
+    ("Maria", "Alvarez", CareerStage.faculty, True, 0, "0000-0002-0000-0001"),
+    ("James", "O'Connor", CareerStage.faculty, True, 1, "0000-0002-0000-0002"),
+    ("Wei", "Chen", CareerStage.postdoc, True, 1, "0000-0002-0000-0003"),
+    ("Priya", "Sharma", CareerStage.faculty, True, 2, None),
+    ("Sam", "Taylor", CareerStage.grad, False, 0, None),
+    ("Fatima", "Hassan", CareerStage.staff, True, 1, "0000-0002-0000-0005"),
+    ("Émile", "Dubois", CareerStage.postdoc, True, 3, None),
+    ("Grace", "Kim", CareerStage.faculty, True, 4, "0000-0002-0000-0007"),
+    ("Diego", "Martínez", CareerStage.grad, False, 2, None),
+    ("Anna", "Kowalski", CareerStage.staff, True, 5, None),
+    ("Ravi", "Patel", CareerStage.engineer, False, 1, None),
+    ("Lucy", "Wright", CareerStage.undergrad, False, 0, None),
+    ("Tomás", "Silva", CareerStage.postdoc, True, 5, "0000-0002-0000-0011"),
+    ("Nina", "Volkova", CareerStage.faculty, True, 3, None),
+]
+
+# (title, conference idx, type, date, speaker idx or None, invited, status)
+DEMO_EVENTS = [
+    ("Future Colliders Workshop 2024", "Chicago, IL", date(2024, 9, 16), date(2024, 9, 20)),
+    ("Accelerator Science Symposium 2025", "Berkeley, CA", date(2025, 3, 10), date(2025, 3, 14)),
+    ("Particle Physics Frontiers 2025", "Knoxville, TN", date(2025, 10, 6), date(2025, 10, 10)),
+    ("Community Summer Study 2026", "Boulder, CO", date(2026, 7, 20), date(2026, 7, 31)),
+]
+
+DEMO_TALKS = [
+    ("Muon Collider Physics Overview", 0, "plenary", date(2024, 9, 17), 0, True, "given"),
+    ("Cooling Channel Design Status", 0, "parallel", date(2024, 9, 18), 2, False, "given"),
+    ("Detector Concepts for 10 TeV", 0, "parallel", date(2024, 9, 19), 7, False, "given"),
+    ("High-Field Magnets for Muon Colliders", 1, "plenary", date(2025, 3, 11), 5, True, "given"),
+    ("RF Systems for Rapid Acceleration", 1, "parallel", date(2025, 3, 12), 6, False, "given"),
+    ("Beam-Induced Background Mitigation", 1, "parallel", date(2025, 3, 13), 2, True, "given"),
+    ("Tracking in a High-Occupancy Environment", 2, "parallel", date(2025, 10, 7), 12, False, "given"),
+    ("Calorimetry R&D Progress", 2, "parallel", date(2025, 10, 8), 3, False, "given"),
+    ("US Muon Collider Program Status", 2, "plenary", date(2025, 10, 9), 1, True, "given"),
+    ("Higgs Couplings at a Muon Collider", 3, "plenary", date(2026, 7, 21), 13, True, "assigned"),
+    ("Neutrino Flux Opportunities", 3, "parallel", date(2026, 7, 23), 9, False, "assigned"),
+    ("Machine-Detector Interface Design", 3, "parallel", date(2026, 7, 24), None, False, "nominations"),
+]
+
+
+@cli.command()
+def seed_demo():
+    """Populate the database with FICTIONAL demo data (for screenshots,
+    demos, and development). Safe to run only on an empty/dev database."""
+    from app.models import (
+        AuthorList,
+        Event,
+        Nomination,
+        Publication,
+        PublicationPerson,
+        PublicationPersonRole,
+        PublicationStatus,
+        PublicationType,
+        Talk,
+        TalkStatus,
+        TalkType,
+        User,
+    )
+    from app.services.author_list import build_snapshot
+
+    with SessionLocal() as db:
+        if db.execute(select(Person.id).limit(1)).first() is not None:
+            typer.echo("Database already has people — refusing to seed demo data.")
+            raise typer.Exit(1)
+
+        insts = []
+        for name, short, address in DEMO_INSTITUTIONS:
+            inst = Institution(name=name, short_name=short, latex_address=address)
+            db.add(inst)
+            insts.append(inst)
+        db.flush()
+
+        people = []
+        for i, (given, family, stage, voting, inst_idx, orcid) in enumerate(DEMO_PEOPLE):
+            person = Person(
+                given_name=given,
+                family_name=family,
+                email=f"{given}.{family}".lower()
+                .replace(" ", "")
+                .replace("'", "")
+                .translate(str.maketrans("éíáóú", "eiaou"))
+                + "@example.edu",
+                orcid=orcid,
+                career_stage=stage,
+                status=MemberStatus.active,
+                is_voting=voting,
+                expertise="Muon collider R&D",
+            )
+            db.add(person)
+            db.flush()
+            db.add(
+                Affiliation(
+                    person_id=person.id,
+                    institution_id=insts[inst_idx].id,
+                    is_primary=True,
+                    start_date=date(2024, 1 + i % 12, 1),
+                )
+            )
+            if voting:
+                db.add(AuthorPeriod(person_id=person.id, start_date=date(2024, 6, 1)))
+            people.append(person)
+
+        for name, slug in DEFAULT_WGS:
+            if not db.execute(
+                select(WorkingGroup).where(WorkingGroup.slug == slug)
+            ).scalar_one_or_none():
+                db.add(WorkingGroup(name=name, slug=slug))
+
+        events = []
+        for name, location, start, end in DEMO_EVENTS:
+            ev = Event(name=name, location=location, start_date=start, end_date=end)
+            db.add(ev)
+            events.append(ev)
+        db.flush()
+
+        admin_user = db.execute(select(User).limit(1)).scalar_one_or_none()
+        for title, ev_idx, ttype, tdate, sp_idx, invited, status in DEMO_TALKS:
+            talk = Talk(
+                title=title,
+                event_id=events[ev_idx].id,
+                talk_type=TalkType(ttype),
+                date=tdate,
+                speaker_person_id=people[sp_idx].id if sp_idx is not None else None,
+                status=TalkStatus(status),
+                is_invited=invited,
+            )
+            db.add(talk)
+            db.flush()
+            if status == "nominations":
+                for cand in (6, 10):
+                    db.add(
+                        Nomination(
+                            talk_id=talk.id,
+                            person_id=people[cand].id,
+                            nominated_by_user_id=admin_user.id if admin_user else None,
+                        )
+                    )
+
+        pub = Publication(
+            title="Detector Performance Studies for a 10 TeV Muon Collider",
+            short_code="USMCC-WHIT-2026-001",
+            pub_type=PublicationType.white_paper,
+            status=PublicationStatus.collab_review,
+            target_journal="arXiv",
+            abstract="We present simulation studies of tracking, calorimetry, and "
+            "beam-induced background rejection for a detector at a 10 TeV "
+            "center-of-mass muon collider. (Fictional demo entry.)",
+            author_cutoff_date=date(2026, 7, 1),
+        )
+        db.add(pub)
+        db.flush()
+        db.add(
+            PublicationPerson(
+                publication_id=pub.id,
+                person_id=people[0].id,
+                role=PublicationPersonRole.editor,
+            )
+        )
+        snapshot = build_snapshot(db, date(2026, 7, 1))
+        db.add(
+            AuthorList(
+                publication_id=pub.id,
+                cutoff_date=date(2026, 7, 1),
+                generated_by_user_id=admin_user.id if admin_user else None,
+                snapshot=snapshot,
+            )
+        )
+        db.commit()
+        typer.echo(
+            f"Seeded demo data: {len(DEMO_PEOPLE)} people, {len(DEMO_INSTITUTIONS)} "
+            f"institutions, {len(DEMO_TALKS)} talks, 1 publication with author list."
+        )
+
+
 # --- Direct xlsx imports (match the USMCC Google-form exports) -----------------
 
 ORCID_RE = re.compile(r"(\d{4}-\d{4}-\d{4}-\d{3}[\dX])")
