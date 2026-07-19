@@ -29,6 +29,10 @@ services:
       ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
       ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
       ORCID_HOST: ${ORCID_HOST:-orcid.org}
+    volumes:
+      # Drop spreadsheets/CSVs here (gitignored) to import them, e.g.:
+      #   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
+      - ./data:/data:ro
     depends_on:
       db:
         condition: service_healthy

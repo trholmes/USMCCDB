@@ -19,6 +19,13 @@ frontend/dist/
 .idea/
 .vscode/
 
-# Local data
+# Local compose overrides (sandbox/dev tweaks that must not ship)
+docker-compose.override.yml
+Dockerfile.sandbox
+sandbox-ca.crt
+
+# Local data — member/speaker spreadsheets and converted imports live here.
+# NEVER commit these: this is a public repo and they contain personal data.
+data/
 backups/
 *.dump

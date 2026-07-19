@@ -1,0 +1,13 @@
+# Overlay: run from prebuilt images on GitHub Container Registry instead of
+# building locally. CI publishes images for every branch, tagged with the
+# branch name ("main" → also "latest").
+#
+#   IMAGE_TAG=main docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --no-build --pull always
+#
+services:
+  backend:
+    image: ghcr.io/trholmes/usmccdb-backend:${IMAGE_TAG:-latest}
+  frontend:
+    image: ghcr.io/trholmes/usmccdb-frontend:${IMAGE_TAG:-latest}
+  backup:
+    image: ghcr.io/trholmes/usmccdb-backup:${IMAGE_TAG:-latest}

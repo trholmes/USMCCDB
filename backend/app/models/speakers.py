@@ -3,6 +3,7 @@ from datetime import date
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Date,
     Enum,
     ForeignKey,
@@ -75,6 +76,7 @@ class Talk(TimestampedBase):
     status: Mapped[TalkStatus] = mapped_column(
         Enum(TalkStatus, name="talk_status"), default=TalkStatus.open, nullable=False
     )
+    is_invited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
 
     event = relationship("Event", back_populates="talks")

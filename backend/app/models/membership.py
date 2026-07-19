@@ -14,7 +14,9 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
+from sqlalchemy.dialects.postgresql import ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import TimestampedBase
@@ -67,6 +69,10 @@ class Person(TimestampedBase):
         Enum(MemberStatus, name="member_status"), default=MemberStatus.pending, nullable=False
     )
     status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Voting member per the USMCC charter (PhD-holding physicist at a US
+    # institution, actively contributing).
+    is_voting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expertise: Mapped[str | None] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text)
 
     user = relationship("User", back_populates="person", uselist=False)
@@ -105,8 +111,15 @@ class Institution(TimestampedBase):
 
 class Affiliation(TimestampedBase):
     __tablename__ = "affiliations"
-    # A partial unique index (one open primary affiliation per person) is
-    # created in the Alembic migration.
+    __table_args__ = (
+        # At most one open (end_date IS NULL) primary affiliation per person.
+        Index(
+            "uq_one_open_primary_affiliation",
+            "person_id",
+            unique=True,
+            postgresql_where=text("is_primary AND end_date IS NULL"),
+        ),
+    )
 
     person_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True
@@ -206,6 +219,15 @@ class AuthorPeriod(TimestampedBase):
     """Authorship eligibility period — distinct from membership status."""
 
     __tablename__ = "author_periods"
+    __table_args__ = (
+        # Forbid overlapping eligibility periods per person (btree_gist ext).
+        ExcludeConstraint(
+            (text("person_id"), "="),
+            (text("daterange(start_date, end_date, '[]')"), "&&"),
+            using="gist",
+            name="no_overlapping_author_periods",
+        ),
+    )
 
     person_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True

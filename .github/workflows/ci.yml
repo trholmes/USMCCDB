@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend tests (pytest + PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: usmccdb_test
+          POSTGRES_USER: usmccdb
+          POSTGRES_PASSWORD: ci-test-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U usmccdb"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+      - name: Run tests
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://usmccdb:ci-test-password@localhost:5432/usmccdb_test
+        run: pytest -v
+
+  frontend-build:
+    name: Frontend typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Typecheck and build
+        working-directory: frontend
+        run: npm run build
+
+  docker-images:
+    name: Build & push images to GHCR
+    # Push images for branch pushes only (not PRs from forks — no secrets there).
+    if: github.event_name == 'push'
+    needs: [backend-tests, frontend-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - image: backend
+            context: ./backend
+          - image: frontend
+            context: ./frontend
+          - image: backup
+            context: ./docker/backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata (tag = branch name)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/usmccdb-${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
