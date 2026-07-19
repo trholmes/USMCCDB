@@ -73,6 +73,8 @@ class Person(TimestampedBase):
     # institution, actively contributing).
     is_voting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     expertise: Mapped[str | None] = mapped_column(Text)
+    # Filename (relative to the photos volume) of the member's photo.
+    photo_file: Mapped[str | None] = mapped_column(String(120))
     notes: Mapped[str | None] = mapped_column(Text)
 
     user = relationship("User", back_populates="person", uselist=False)

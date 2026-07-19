@@ -37,3 +37,16 @@ export const api = {
 
 export const exportUrl = (listId: number, format: string) =>
   `${BASE}/author-lists/${listId}/export?format=${format}`
+
+// photo_file in the URL busts caches when the photo is replaced.
+export const photoUrl = (personId: number, photoFile: string) =>
+  `${BASE}/people/${personId}/photo?v=${encodeURIComponent(photoFile)}`
+
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const body = new FormData()
+  body.append('file', file)
+  const resp = await fetch(`${BASE}${path}`, { method: 'POST', body, credentials: 'same-origin' })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new ApiError(resp.status, data?.detail ?? `Upload failed (${resp.status})`)
+  return data as T
+}

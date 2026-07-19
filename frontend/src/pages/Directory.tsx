@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary } from '../api/types'
+import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 
@@ -77,7 +78,12 @@ export default function DirectoryPage() {
               onClick={() => navigate(`/people/${p.id}`)}
             >
               <Table.Td>
-                {p.family_name}, {p.preferred_name || p.given_name}
+                <Group gap="xs" wrap="nowrap">
+                  <PersonAvatar person={p} />
+                  <span>
+                    {p.family_name}, {p.preferred_name || p.given_name}
+                  </span>
+                </Group>
               </Table.Td>
               <Table.Td>{p.email}</Table.Td>
               <Table.Td>{p.career_stage}</Table.Td>

@@ -126,6 +126,7 @@ class PersonSummary(ORMModel):
     career_stage: CareerStage
     status: MemberStatus
     is_voting: bool
+    photo_file: str | None = None
 
 
 class PersonOut(PersonSummary):

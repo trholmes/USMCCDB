@@ -634,5 +634,159 @@ def import_talks_xlsx(
             )
 
 
+# --- Photo imports ---------------------------------------------------------------
+
+DRIVE_ID_RE = re.compile(r"(?:id=|/d/)([-\w]{20,})")
+IMAGE_EXTS = {".jpg": ".jpg", ".jpeg": ".jpg", ".png": ".png", ".webp": ".webp", ".gif": ".gif"}
+CONTENT_EXTS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+
+
+def _photos_dir() -> Path:
+    from app.config import get_settings
+
+    d = Path(get_settings().photos_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _save_photo(db, person: Person, content: bytes, ext: str) -> None:
+    from datetime import datetime, timezone
+
+    name = f"{person.id}-{int(datetime.now(timezone.utc).timestamp())}{ext}"
+    (_photos_dir() / name).write_bytes(content)
+    old = person.photo_file
+    person.photo_file = name
+    db.flush()
+    if old and old != name and (_photos_dir() / old).is_file():
+        (_photos_dir() / old).unlink()
+
+
+@cli.command()
+def import_photos_xlsx(
+    xlsx_path: Path = typer.Argument(..., exists=True, readable=True),
+    sheet: str = typer.Option("Members", help="Worksheet name"),
+    overwrite: bool = typer.Option(False, help="Replace photos that already exist"),
+):
+    """Download the member photos linked in the registration spreadsheet's
+    'Photo link' column (Google Drive links).
+
+    NOTE: Google-Form uploads are often restricted to the form owner. Links
+    that are not shared 'anyone with the link' will fail here — download
+    those from your Drive and use import-photos-dir instead."""
+    import httpx
+    import openpyxl
+
+    wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+    ws = wb[sheet]
+    header = [str(c or "").strip() for c in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+    try:
+        c_email = next(i for i, h in enumerate(header) if h.lower().startswith("email"))
+        c_photo = next(i for i, h in enumerate(header) if h.lower().startswith("photo"))
+    except StopIteration:
+        raise typer.BadParameter("Email / Photo link columns not found")
+
+    ok = skipped = failed = 0
+    failures: list[str] = []
+    with SessionLocal() as db, httpx.Client(follow_redirects=True, timeout=30) as client:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            email = str(row[c_email] or "").strip().lower()
+            link = str(row[c_photo] or "").strip()
+            if not (email and link):
+                continue
+            person = db.execute(select(Person).where(Person.email == email)).scalar_one_or_none()
+            if person is None:
+                failures.append(f"{email}: not in database")
+                failed += 1
+                continue
+            if person.photo_file and not overwrite:
+                skipped += 1
+                continue
+            m = DRIVE_ID_RE.search(link)
+            url = (
+                f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+                if m
+                else link
+            )
+            try:
+                resp = client.get(url)
+                ctype = resp.headers.get("content-type", "").split(";")[0].strip()
+                if resp.status_code != 200 or ctype not in CONTENT_EXTS:
+                    # Large-file interstitial: retry via usercontent endpoint.
+                    if m and "text/html" in ctype:
+                        resp = client.get(
+                            "https://drive.usercontent.google.com/download",
+                            params={"id": m.group(1), "export": "download", "confirm": "t"},
+                        )
+                        ctype = resp.headers.get("content-type", "").split(";")[0].strip()
+                if resp.status_code != 200 or ctype not in CONTENT_EXTS:
+                    failures.append(
+                        f"{person.given_name} {person.family_name}: got {resp.status_code} "
+                        f"{ctype or 'unknown type'} (probably not shared publicly)"
+                    )
+                    failed += 1
+                    continue
+                _save_photo(db, person, resp.content, CONTENT_EXTS[ctype])
+                ok += 1
+            except httpx.HTTPError as exc:
+                failures.append(f"{person.given_name} {person.family_name}: {exc}")
+                failed += 1
+        db.commit()
+
+    typer.echo(f"Photos: {ok} downloaded, {skipped} already present, {failed} failed")
+    if failures:
+        typer.echo("\nFailed (fix sharing, or bulk-download from Drive and run import-photos-dir):")
+        for f in failures:
+            typer.echo(f"  - {f}")
+
+
+@cli.command()
+def import_photos_dir(
+    dir_path: Path = typer.Argument(..., exists=True, file_okay=False),
+    overwrite: bool = typer.Option(False, help="Replace photos that already exist"),
+):
+    """Import photos from a directory, matching people by name in the file
+    name (Google-Form uploads are named like 'IMG_1234 - Jane Doe.jpg').
+    Unmatched files are listed at the end."""
+    ok = skipped = 0
+    unmatched: list[str] = []
+    with SessionLocal() as db:
+        people = db.execute(select(Person)).scalars().all()
+        # All name variants, longest first so "Mary Jane Smith" wins over "Jane Smith".
+        variants: list[tuple[str, Person]] = []
+        for p in people:
+            names = {
+                f"{p.given_name} {p.family_name}",
+                f"{p.given_name.split()[0]} {p.family_name}" if p.given_name else "",
+                f"{p.preferred_name} {p.family_name}" if p.preferred_name else "",
+            }
+            variants.extend((n.lower(), p) for n in names if n)
+        variants.sort(key=lambda v: -len(v[0]))
+
+        for path in sorted(dir_path.iterdir()):
+            ext = IMAGE_EXTS.get(path.suffix.lower())
+            if not path.is_file() or ext is None:
+                continue
+            stem = path.stem.lower()
+            person = next((p for n, p in variants if n in stem), None)
+            if person is None:
+                unmatched.append(path.name)
+                continue
+            if person.photo_file and not overwrite:
+                skipped += 1
+                continue
+            _save_photo(db, person, path.read_bytes(), ext)
+            ok += 1
+        db.commit()
+
+    typer.echo(f"Photos: {ok} imported, {skipped} already present, {len(unmatched)} unmatched")
+    for name in unmatched:
+        typer.echo(f"  unmatched: {name}")
+
+
 if __name__ == "__main__":
     cli()

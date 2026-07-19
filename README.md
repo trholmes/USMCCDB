@@ -91,8 +91,34 @@ form export (names, affiliations, ORCID, position, voting status, expertise)
 and opens an authorship period for each voting member (`--no-authors-from-voting`
 to disable). The talks importer creates conferences, matches speakers by name,
 and keeps unmatched names in the talk notes. There are also `import-members`
-(plain CSV), `create-admin`, and `seed-wgs` commands — see
-`python -m app.cli --help`.
+(plain CSV), `create-admin`, `seed-wgs`, and `seed-demo` (fictional demo data)
+commands — see `python -m app.cli --help`.
+
+### Member photos
+
+Photos live in a dedicated `photos` volume, are served (to signed-in members
+only) at `/api/v1/people/{id}/photo`, appear as avatars in the directory and
+profiles, and are included in the nightly backups. Members and the office can
+also upload/replace a photo by clicking the avatar on a profile page. To import
+the photos linked in the registration spreadsheet:
+
+```bash
+docker compose exec backend python -m app.cli import-photos-xlsx /data/USMCC_Membership.xlsx
+```
+
+Google-Form uploads are usually **restricted to the form owner**, so many
+links will fail with a "not shared publicly" message. For those, select the
+form's upload folder in your Google Drive, download it as a zip, unpack it
+into `data/photos/`, and run:
+
+```bash
+docker compose exec backend python -m app.cli import-photos-dir /data/photos
+```
+
+It matches people by the name embedded in the file names (form uploads are
+named like `IMG_1234 - Jane Doe.jpg`) and lists anything it couldn't match.
+Both commands skip people who already have a photo unless you pass
+`--overwrite`.
 
 ## Day-to-day operation
 

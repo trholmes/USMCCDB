@@ -18,17 +18,24 @@ echo "[backup] dumping ${PGDATABASE} -> ${dump}"
 pg_dump -Fc --no-owner -f "${dump}.tmp"
 mv "${dump}.tmp" "${dump}"
 
+# Member photos live outside the DB — snapshot them alongside the dump.
+if [ -d /photos ] && [ -n "$(ls -A /photos 2>/dev/null)" ]; then
+    tar czf "/backups/daily/photos-${today}.tar.gz.tmp" -C /photos .
+    mv "/backups/daily/photos-${today}.tar.gz.tmp" "/backups/daily/photos-${today}.tar.gz"
+fi
+
 # Promote copies on Sundays / 1st of the month.
 [ "$(date -u +%u)" = "7" ] && cp "${dump}" "/backups/weekly/${PGDATABASE}-${today}.dump"
 [ "$(date -u +%d)" = "01" ] && cp "${dump}" "/backups/monthly/${PGDATABASE}-${today}.dump"
 
 rotate() {
-    dir="$1"; keep="$2"
-    ls -1 "$dir"/*.dump 2>/dev/null | sort | head -n -"$keep" | while read -r old; do
+    dir="$1"; keep="$2"; pattern="${3:-*.dump}"
+    ls -1 "$dir"/$pattern 2>/dev/null | sort | head -n -"$keep" | while read -r old; do
         echo "[backup] rotating out ${old}"
         rm -f "$old"
     done
 }
+rotate /backups/daily "$KEEP_DAILY" "photos-*.tar.gz"
 rotate /backups/daily "$KEEP_DAILY"
 rotate /backups/weekly "$KEEP_WEEKLY"
 rotate /backups/monthly "$KEEP_MONTHLY"
