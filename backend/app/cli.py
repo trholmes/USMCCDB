@@ -436,7 +436,8 @@ def import_members_xlsx(
     c_voting = col("According to this definition")
     c_first, c_middle, c_last = col("First Name"), col("Middle Name"), col("Last Name")
     c_primary = col("Primary Affiliation")
-    c_addl = col("Any additional affiliations")
+    # The "Any additional affiliations" column is deliberately ignored:
+    # secondary institutions are out of scope for now (issue #3, first pass).
     c_email, c_orcid, c_position = col("Email"), col("ORCID"), col("Position")
     c_expertise = col("Area(s) of Expertise")
 
@@ -488,14 +489,9 @@ def import_members_xlsx(
                 person.expertise = expertise or person.expertise
                 updated += 1
 
-            # Primary + additional affiliations.
             primary_name = str(row[c_primary] or "").strip()
-            names = [(primary_name, True)] if primary_name else []
-            for extra in str(row[c_addl] or "").split(";"):
-                if extra.strip():
-                    names.append((extra.strip(), False))
-            for name, is_primary in names:
-                inst = _get_or_create_institution(db, name)
+            if primary_name:
+                inst = _get_or_create_institution(db, primary_name)
                 open_affil = db.execute(
                     select(Affiliation).where(
                         Affiliation.person_id == person.id,
@@ -508,7 +504,7 @@ def import_members_xlsx(
                         Affiliation(
                             person_id=person.id,
                             institution_id=inst.id,
-                            is_primary=is_primary,
+                            is_primary=True,
                             start_date=start,
                         )
                     )
