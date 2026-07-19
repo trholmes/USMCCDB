@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     access_token_hours: int = 12
     cookie_secure: str = "auto"  # auto | true | false
 
+    photos_dir: str = "/photos"
+
     orcid_client_id: str = ""
     orcid_client_secret: str = ""
     orcid_host: str = "orcid.org"

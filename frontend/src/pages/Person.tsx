@@ -12,10 +12,11 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, uploadFile } from '../api/client'
 import type { Person } from '../api/types'
+import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 
@@ -25,11 +26,23 @@ export default function PersonPage() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const { me, isOffice } = useSession()
+  const fileInput = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
     api.get<Person>(`/people/${id}`).then(setPerson).catch(() => setPerson(null))
   }, [id])
   useEffect(load, [load])
+
+  const uploadPhoto = async (file: File | undefined) => {
+    if (!file || !person) return
+    try {
+      await uploadFile(`/people/${person.id}/photo`, file)
+      notifications.show({ message: 'Photo updated' })
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
 
   if (!person) return <Text c="dimmed">Loading…</Text>
 
@@ -76,6 +89,21 @@ export default function PersonPage() {
   return (
     <Stack>
       <Group justify="space-between">
+        <Group align="flex-start">
+          <div
+            style={{ cursor: isSelf || isOffice ? 'pointer' : undefined }}
+            title={isSelf || isOffice ? 'Click to upload a photo' : undefined}
+            onClick={() => (isSelf || isOffice) && fileInput.current?.click()}
+          >
+            <PersonAvatar person={person} size={72} />
+          </div>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            hidden
+            onChange={(e) => uploadPhoto(e.currentTarget.files?.[0])}
+          />
         <div>
           <Title order={3}>
             {person.given_name} {person.family_name}{' '}
@@ -93,6 +121,7 @@ export default function PersonPage() {
             )}
           </Group>
         </div>
+        </Group>
         <Group>
           {isOffice && (
             <Select

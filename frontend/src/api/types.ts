@@ -55,6 +55,7 @@ export interface PersonSummary {
   career_stage: string
   status: string
   is_voting: boolean
+  photo_file: string | null
 }
 
 export interface Person extends PersonSummary {

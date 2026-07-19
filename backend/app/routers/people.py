@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, date
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -29,7 +31,16 @@ from app.schemas.membership import (
     PersonUpdate,
     StatusChange,
 )
+from app.config import get_settings
 from app.security import get_current_user, is_office, require_office
+
+PHOTO_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
 router = APIRouter(prefix="/people", tags=["membership"])
 
@@ -224,6 +235,71 @@ def list_events(person_id: int, db: Session = Depends(get_db)) -> list[Membershi
         .all()
     )
     return [MembershipEventOut.model_validate(e) for e in events]
+
+
+# --- Photos ---------------------------------------------------------------------
+
+
+@router.get("/{person_id}/photo")
+def get_photo(
+    person_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> FileResponse:
+    person = _get_person(db, person_id)
+    if not person.photo_file:
+        raise HTTPException(404, "No photo")
+    path = Path(get_settings().photos_dir) / person.photo_file
+    if not path.is_file():
+        raise HTTPException(404, "Photo file missing")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.post("/{person_id}/photo", status_code=201)
+async def upload_photo(
+    person_id: int,
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PersonSummary:
+    person = _get_person(db, person_id)
+    if not (is_office(user) or user.person_id == person_id):
+        raise HTTPException(403, "You can only upload your own photo")
+    ext = PHOTO_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(422, f"Unsupported type; use one of {sorted(PHOTO_TYPES)}")
+    content = await file.read()
+    if len(content) > MAX_PHOTO_BYTES:
+        raise HTTPException(413, "Photo too large (max 10 MB)")
+    photos = Path(get_settings().photos_dir)
+    photos.mkdir(parents=True, exist_ok=True)
+    # Fixed name per person, timestamped to bust caches on replacement.
+    old = person.photo_file
+    name = f"{person_id}-{int(datetime.now(UTC).timestamp())}{ext}"
+    (photos / name).write_bytes(content)
+    person.photo_file = name
+    db.commit()
+    if old and old != name and (photos / old).is_file():
+        (photos / old).unlink()
+    db.refresh(person)
+    return PersonSummary.model_validate(person)
+
+
+@router.delete("/{person_id}/photo", status_code=204)
+def delete_photo(
+    person_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    person = _get_person(db, person_id)
+    if not (is_office(user) or user.person_id == person_id):
+        raise HTTPException(403, "You can only remove your own photo")
+    if person.photo_file:
+        path = Path(get_settings().photos_dir) / person.photo_file
+        if path.is_file():
+            path.unlink()
+        person.photo_file = None
+        db.commit()
 
 
 # --- Affiliations (office) ----------------------------------------------------

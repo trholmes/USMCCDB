@@ -33,6 +33,8 @@ services:
       # Drop spreadsheets/CSVs here (gitignored) to import them, e.g.:
       #   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
       - ./data:/data:ro
+      # Member photos (served at /api/v1/people/{id}/photo)
+      - photos:/photos
     depends_on:
       db:
         condition: service_healthy
@@ -86,6 +88,7 @@ services:
       KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
     volumes:
       - backups:/backups
+      - photos:/photos:ro
     depends_on:
       db:
         condition: service_healthy
@@ -94,5 +97,6 @@ services:
 volumes:
   pgdata: {}
   backups: {}
+  photos: {}
   caddy_data: {}
   caddy_config: {}

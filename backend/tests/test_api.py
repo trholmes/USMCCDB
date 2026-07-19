@@ -173,6 +173,40 @@ def test_member_cannot_do_office_things(admin):
     assert member.post("/api/v1/publications", json={"title": "Nope"}).status_code == 403
 
 
+def test_photo_upload_and_serve(admin, tmp_path_factory):
+    os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    person = admin.get("/api/v1/people").json()[0]
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+        "01f15c4890000000d49444154789c6260010000000500010d0a2db400"
+        "00000049454e44ae426082"
+    )
+    r = admin.post(
+        f"/api/v1/people/{person['id']}/photo",
+        files={"file": ("me.png", png, "image/png")},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["photo_file"]
+
+    served = admin.get(f"/api/v1/people/{person['id']}/photo")
+    assert served.status_code == 200
+    assert served.content == png
+
+    # Wrong content type is rejected.
+    bad = admin.post(
+        f"/api/v1/people/{person['id']}/photo",
+        files={"file": ("evil.svg", b"<svg/>", "image/svg+xml")},
+    )
+    assert bad.status_code == 422
+
+    assert admin.delete(f"/api/v1/people/{person['id']}/photo").status_code == 204
+    assert admin.get(f"/api/v1/people/{person['id']}/photo").status_code == 404
+
+
 def test_speakers_flow(admin):
     event = admin.post("/api/v1/events", json={"name": "Snowmass 2026"}).json()
     talk = admin.post(
