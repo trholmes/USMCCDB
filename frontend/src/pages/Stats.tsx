@@ -56,19 +56,38 @@ export default function StatsPage() {
         />
       </Group>
 
-      <Card withBorder mb="md" h={300}>
-        <Text size="sm" c="dimmed" mb="xs">
-          Talks per year (all {by === 'person' ? 'speakers' : 'institutions'})
+      <Card withBorder mb="md" h={320}>
+        <Text size="sm" fw={600} mb={2}>
+          USMCC talks per year
         </Text>
+        <Text size="xs" c="dimmed" mb="xs">
+          All talks vs. invited, {by === 'person' ? 'all speakers' : 'all institutions'}
+        </Text>
+        {/* Colors are the validated 2-slot categorical palette (blue, green);
+            identity is also carried by the legend, never color alone. */}
         <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={perYear}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="year" />
-            <YAxis allowDecimals={false} />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="talks" name="All talks" fill="#4c6ef5" />
-            <Bar dataKey="invited" name="Invited" fill="#ae3ec9" />
+          <BarChart data={perYear} barGap={2} barCategoryGap="28%">
+            <CartesianGrid vertical={false} stroke="#e7e6e2" />
+            <XAxis
+              dataKey="year"
+              tickLine={false}
+              axisLine={{ stroke: '#e7e6e2' }}
+              tick={{ fill: '#52514e', fontSize: 12 }}
+            />
+            <YAxis
+              allowDecimals={false}
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: '#52514e', fontSize: 12 }}
+              width={32}
+            />
+            <Tooltip
+              cursor={{ fill: 'rgba(42, 120, 214, 0.06)' }}
+              contentStyle={{ borderRadius: 8, border: '1px solid #e7e6e2', fontSize: 13 }}
+            />
+            <Legend wrapperStyle={{ fontSize: 13 }} iconType="circle" iconSize={9} />
+            <Bar dataKey="talks" name="All talks" fill="#2a78d6" radius={[4, 4, 0, 0]} maxBarSize={28} />
+            <Bar dataKey="invited" name="Invited" fill="#008300" radius={[4, 4, 0, 0]} maxBarSize={28} />
           </BarChart>
         </ResponsiveContainer>
       </Card>

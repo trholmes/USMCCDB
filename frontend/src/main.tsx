@@ -8,8 +8,15 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { SessionProvider } from './auth/SessionContext'
 
+// Primary blue matches the validated chart palette (slot 1, #2a78d6).
 const theme = createTheme({
-  primaryColor: 'indigo',
+  primaryColor: 'blue',
+  colors: {
+    blue: [
+      '#e8f1fb', '#cfe1f6', '#9cc2ec', '#67a2e2', '#3d88da',
+      '#2a78d6', '#1f6cc9', '#155cb0', '#0d4f99', '#004283',
+    ],
+  },
   defaultRadius: 'md',
 })
 
