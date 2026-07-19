@@ -1,0 +1,94 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-usmccdb}
+      POSTGRES_USER: ${POSTGRES_USER:-usmccdb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-usmccdb} -d ${POSTGRES_DB:-usmccdb}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-usmccdb}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-usmccdb}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      SITE_URL: ${SITE_URL:-}
+      SITE_DOMAIN: ${SITE_DOMAIN:-}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      ACCESS_TOKEN_HOURS: ${ACCESS_TOKEN_HOURS:-12}
+      COOKIE_SECURE: ${COOKIE_SECURE:-auto}
+      ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
+      ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
+      ORCID_HOST: ${ORCID_HOST:-orcid.org}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      # Bound to localhost by default so plain HTTP is never exposed to the
+      # network; the caddy service below fronts it with HTTPS in production.
+      - "${BIND_HOST:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # HTTPS reverse proxy in its own container. Runs only under the "tls"
+  # profile, which scripts/start.sh enables automatically when SITE_DOMAIN is
+  # set in .env. Obtains and renews the Let's Encrypt certificate itself.
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    command: caddy reverse-proxy --from ${SITE_DOMAIN:-}:${HTTPS_PORT:-443} --to frontend:80
+    ports:
+      - "${HTTP_REDIRECT_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:${HTTPS_PORT:-443}"
+    volumes:
+      - caddy_data:/data      # persists issued certificates across restarts
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+  # Nightly pg_dump with daily/weekly/monthly rotation, plus on-demand dumps
+  # via scripts/backup.sh. Dumps land in the "backups" named volume.
+  backup:
+    build: ./docker/backup
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-usmccdb}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-usmccdb}
+      BACKUP_HOUR: ${BACKUP_HOUR:-02}
+      KEEP_DAILY: ${BACKUP_KEEP_DAILY:-14}
+      KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-8}
+      KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
+    volumes:
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata: {}
+  backups: {}
+  caddy_data: {}
+  caddy_config: {}
