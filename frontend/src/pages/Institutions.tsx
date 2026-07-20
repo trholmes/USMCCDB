@@ -11,6 +11,7 @@ const ACCESSORS: Accessors<Institution> = {
   name: (i) => i.name,
   short_name: (i) => i.short_name,
   latex_address: (i) => i.latex_address,
+  people_count: (i) => i.people_count,
 }
 
 export default function InstitutionsPage() {
@@ -86,6 +87,7 @@ export default function InstitutionsPage() {
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
             <SortableTh label="Short name" k="short_name" sort={sort} toggle={toggle} />
             <SortableTh label="Author-list address" k="latex_address" sort={sort} toggle={toggle} />
+            <SortableTh label="People" k="people_count" sort={sort} toggle={toggle} />
             <Table.Th />
           </Table.Tr>
         </Table.Thead>
@@ -99,6 +101,7 @@ export default function InstitutionsPage() {
               <Table.Td>{i.name}</Table.Td>
               <Table.Td>{i.short_name}</Table.Td>
               <Table.Td>{i.latex_address}</Table.Td>
+              <Table.Td>{i.people_count}</Table.Td>
               <Table.Td onClick={(e) => e.stopPropagation()}>
                 {isOffice && (
                   <Button size="compact-xs" variant="subtle" onClick={() => open(i)}>

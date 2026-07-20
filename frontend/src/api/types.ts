@@ -27,6 +27,7 @@ export interface Institution {
   country: string | null
   latex_address: string | null
   is_active: boolean
+  people_count: number
 }
 
 export interface Affiliation {

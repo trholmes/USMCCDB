@@ -59,6 +59,8 @@ class InstitutionUpdate(BaseModel):
 
 class InstitutionOut(ORMModel, InstitutionBase):
     id: int
+    # People currently affiliated (open affiliations); filled by the router.
+    people_count: int = 0
 
 
 class InstitutionRef(ORMModel):

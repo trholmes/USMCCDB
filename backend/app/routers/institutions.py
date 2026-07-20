@@ -1,13 +1,26 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Institution, User
+from app.models import Affiliation, Institution, User
 from app.schemas.membership import InstitutionCreate, InstitutionOut, InstitutionUpdate
 from app.security import get_current_user, require_office
 
 router = APIRouter(prefix="/institutions", tags=["membership"])
+
+
+def _people_counts(db: Session, institution_id: int | None = None) -> dict[int, int]:
+    """Currently affiliated people (open affiliations) per institution,
+    matching what GET /people?institution_id= lists on the detail page."""
+    stmt = (
+        select(Affiliation.institution_id, func.count(func.distinct(Affiliation.person_id)))
+        .where(Affiliation.end_date.is_(None))
+        .group_by(Affiliation.institution_id)
+    )
+    if institution_id is not None:
+        stmt = stmt.where(Affiliation.institution_id == institution_id)
+    return dict(db.execute(stmt).all())
 
 
 @router.get("")
@@ -15,7 +28,13 @@ def list_institutions(
     db: Session = Depends(get_db), _user: User = Depends(get_current_user)
 ) -> list[InstitutionOut]:
     rows = db.execute(select(Institution).order_by(Institution.name)).scalars().all()
-    return [InstitutionOut.model_validate(i) for i in rows]
+    counts = _people_counts(db)
+    out = []
+    for i in rows:
+        item = InstitutionOut.model_validate(i)
+        item.people_count = counts.get(i.id, 0)
+        out.append(item)
+    return out
 
 
 @router.get("/{institution_id}")
@@ -27,7 +46,9 @@ def get_institution(
     inst = db.get(Institution, institution_id)
     if inst is None:
         raise HTTPException(404, "Institution not found")
-    return InstitutionOut.model_validate(inst)
+    item = InstitutionOut.model_validate(inst)
+    item.people_count = _people_counts(db, institution_id).get(institution_id, 0)
+    return item
 
 
 @router.post("", dependencies=[Depends(require_office)], status_code=201)
