@@ -146,6 +146,11 @@ class Affiliation(TimestampedBase):
         BigInteger, ForeignKey("institutions.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Career stage held while at this institution (last known, for the open
+    # affiliation); nullable for rows predating this field or unknown history.
+    career_stage: Mapped[CareerStage | None] = mapped_column(
+        Enum(CareerStage, name="career_stage")
+    )
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date)
 

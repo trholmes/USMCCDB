@@ -151,6 +151,7 @@ def import_members(
                             person_id=person.id,
                             institution_id=inst.id,
                             is_primary=True,
+                            career_stage=stage,
                             start_date=start,
                         )
                     )
@@ -284,6 +285,7 @@ def seed_demo():
                     person_id=person.id,
                     institution_id=insts[inst_idx].id,
                     is_primary=True,
+                    career_stage=stage,
                     start_date=date(2024, 1 + i % 12, 1),
                 )
             )
@@ -531,6 +533,7 @@ def import_members_xlsx(
                             person_id=person.id,
                             institution_id=inst.id,
                             is_primary=True,
+                            career_stage=stage,
                             start_date=start,
                         )
                     )

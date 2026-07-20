@@ -84,6 +84,10 @@ def test_apply_and_approve_flow(admin):
     events = admin.get(f"/api/v1/people/{pid}/events").json()
     assert [e["to_status"] for e in events] == ["pending", "active"]
 
+    # The initial affiliation records the stage the applicant applied at.
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert person["affiliations"][0]["career_stage"] == "postdoc"
+
 
 def test_author_list_generation(admin):
     # Institution with a formal address.
@@ -291,6 +295,52 @@ def test_member_self_institution_move_keeps_history(admin):
     open_affils = [x for x in person["affiliations"] if x["end_date"] is None]
     assert len(open_affils) == 1 and open_affils[0]["institution"]["id"] == a["id"]
     assert all(x["institution"]["id"] != b["id"] for x in person["affiliations"])
+
+
+def test_institution_history_records_career_stage(admin):
+    member, pid = _linked_member(
+        admin, given="Cara", family="Stage", email="cara.stage@example.edu", career_stage="grad"
+    )
+    a = admin.post("/api/v1/institutions", json={"name": "Gamma College"}).json()
+    b = admin.post("/api/v1/institutions", json={"name": "Delta Lab"}).json()
+
+    # A move without a stage stamps the person's current stage.
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": a["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
+    person = member.get(f"/api/v1/people/{pid}").json()
+    assert person["affiliations"][0]["career_stage"] == "grad"
+
+    # A move with a new stage updates the profile and the new affiliation,
+    # while the closed affiliation keeps the old stage.
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": b["id"], "start_date": "2026-06-01", "career_stage": "postdoc"},
+    ).status_code == 201
+    person = member.get(f"/api/v1/people/{pid}").json()
+    assert person["career_stage"] == "postdoc"
+    affils = sorted(person["affiliations"], key=lambda x: x["start_date"])
+    assert [x["career_stage"] for x in affils] == ["grad", "postdoc"]
+
+    # Editing the stage on the profile keeps the open affiliation in step.
+    assert member.patch(f"/api/v1/people/{pid}", json={"career_stage": "staff"}).status_code == 200
+    person = member.get(f"/api/v1/people/{pid}").json()
+    open_affil = next(x for x in person["affiliations"] if x["end_date"] is None)
+    assert open_affil["career_stage"] == "staff"
+
+    # A voting member cannot become a student via an institution move (same
+    # rule as a profile edit); nothing about the move is applied.
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 200
+    r = member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": a["id"], "start_date": "2026-07-01", "career_stage": "grad"},
+    )
+    assert r.status_code == 422
+    person = member.get(f"/api/v1/people/{pid}").json()
+    assert person["career_stage"] == "staff"
+    open_affil = next(x for x in person["affiliations"] if x["end_date"] is None)
+    assert open_affil["institution"]["id"] == b["id"]
 
 
 def test_member_voting_eligibility(admin):

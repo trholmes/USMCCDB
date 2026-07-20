@@ -178,6 +178,7 @@ def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
                 person_id=person.id,
                 institution_id=institution_id,
                 is_primary=True,
+                career_stage=body.career_stage,
                 start_date=datetime.now(UTC).date(),
             )
         )
@@ -304,6 +305,12 @@ def update_person(
             raise HTTPException(409, "ORCID iD already in use")
     for field, value in changes.items():
         setattr(person, field, value)
+    # The open primary affiliation records the stage held at the current
+    # institution — keep it in step with the profile.
+    if "career_stage" in changes:
+        open_primary = _open_primary(db, person_id)
+        if open_primary is not None:
+            open_primary.career_stage = person.career_stage
     db.commit()
     return get_person(person_id, db, user)
 
@@ -455,11 +462,24 @@ def change_institution(
 ) -> AffiliationOut:
     """Move a person to a new primary institution as of a date, preserving
     history: the current open primary affiliation is closed the day before
-    that date and a new open primary is opened. Available to the person
-    themselves or office."""
-    _get_person(db, person_id)
+    that date and a new open primary is opened. Optionally updates the
+    person's career stage along with the move; either way the stage taken up
+    at the new institution is stamped on the new affiliation. Available to
+    the person themselves or office."""
+    person = _get_person(db, person_id)
     _require_self_or_office(user, person_id, "change the institution of")
     _validate_entered_date(body.start_date, "start_date")
+
+    if body.career_stage is not None and body.career_stage != person.career_stage:
+        # Same eligibility rule as a profile edit: a voting member cannot
+        # become a student while keeping the flag.
+        if person.is_voting and not _voting_eligible(person.status, body.career_stage):
+            raise HTTPException(
+                422,
+                "Voting membership requires an active, non-student member "
+                "(not undergrad or grad student). Update your voting status first.",
+            )
+        person.career_stage = body.career_stage
 
     institution_id = _resolve_institution_id(db, body.institution_id, body.institution_name)
 
@@ -473,6 +493,7 @@ def change_institution(
         person_id=person_id,
         institution_id=institution_id,
         is_primary=True,
+        career_stage=person.career_stage,
         start_date=body.start_date,
         end_date=None,
     )

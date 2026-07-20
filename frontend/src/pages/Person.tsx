@@ -23,6 +23,7 @@ import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 import {
   CAREER_STAGES,
+  careerStageLabel,
   joinList,
   RESEARCH_AREAS,
   SELF_STATUSES,
@@ -58,6 +59,7 @@ export default function PersonPage() {
   const [instId, setInstId] = useState<string | null>(null)
   const [instName, setInstName] = useState('')
   const [instDate, setInstDate] = useState(today())
+  const [instStage, setInstStage] = useState<string | null>(null) // null = keep current
   const [instBusy, setInstBusy] = useState(false)
 
   // Status change form (self-service).
@@ -192,11 +194,13 @@ export default function PersonPage() {
         institution_id: instId ? Number(instId) : null,
         institution_name: instId ? null : instName.trim(),
         start_date: instDate,
+        career_stage: instStage,
       })
       notifications.show({ message: 'Institution updated' })
       setInstId(null)
       setInstName('')
       setInstDate(today())
+      setInstStage(null)
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -421,6 +425,14 @@ export default function PersonPage() {
                   onChange={(e) => setInstName(e.currentTarget.value)}
                 />
               )}
+              <Select
+                label="Career stage at the new institution"
+                placeholder={`Keep current (${careerStageLabel(person.career_stage)})`}
+                data={CAREER_STAGES}
+                value={instStage}
+                onChange={setInstStage}
+                clearable
+              />
               <TextInput
                 label="Effective date"
                 type="date"
@@ -466,6 +478,7 @@ export default function PersonPage() {
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Institution</Table.Th>
+            <Table.Th>Position</Table.Th>
             <Table.Th>Primary</Table.Th>
             <Table.Th>From</Table.Th>
             <Table.Th>To</Table.Th>
@@ -477,6 +490,7 @@ export default function PersonPage() {
               <Table.Td>
                 <Link to={`/institutions/${a.institution.id}`}>{a.institution.name}</Link>
               </Table.Td>
+              <Table.Td>{careerStageLabel(a.career_stage) || '—'}</Table.Td>
               <Table.Td>{a.is_primary ? 'yes' : ''}</Table.Td>
               <Table.Td>{a.start_date}</Table.Td>
               <Table.Td>{a.end_date ?? 'present'}</Table.Td>
