@@ -3,6 +3,7 @@ import {
   Card,
   Center,
   Checkbox,
+  MultiSelect,
   Select,
   Stack,
   TagsInput,
@@ -15,7 +16,7 @@ import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { CAREER_STAGES, EXPERTISE_AREAS, joinExpertise } from '../constants'
+import { CAREER_STAGES, joinList, RESEARCH_AREAS } from '../constants'
 
 export default function ApplyPage() {
   const [form, setForm] = useState({
@@ -27,6 +28,7 @@ export default function ApplyPage() {
     career_stage: 'other',
     institution_name: '',
     is_voting: false,
+    research_areas: [] as string[],
     expertise: [] as string[],
     notes: '',
   })
@@ -45,7 +47,8 @@ export default function ApplyPage() {
         preferred_name: form.preferred_name || null,
         orcid: form.orcid || null,
         institution_name: form.institution_name || null,
-        expertise: joinExpertise(form.expertise),
+        research_areas: joinList(form.research_areas),
+        expertise: joinList(form.expertise),
         notes: form.notes || null,
       })
       setDone(true)
@@ -132,11 +135,18 @@ export default function ApplyPage() {
                 checked={form.is_voting}
                 onChange={(e) => set('is_voting', e.currentTarget.checked)}
               />
+              <MultiSelect
+                label="Research area(s)"
+                placeholder="Select all that apply…"
+                data={RESEARCH_AREAS}
+                value={form.research_areas}
+                onChange={(v) => set('research_areas', v)}
+                clearable
+              />
               <TagsInput
-                label="Areas of expertise"
-                description="Pick from the list or type your own and press Enter."
-                placeholder="Select or type…"
-                data={EXPERTISE_AREAS}
+                label="Topics of focus"
+                description="Type a topic and press Enter (e.g. muon cooling, tracking detectors)."
+                placeholder="Add a topic…"
                 value={form.expertise}
                 onChange={(v) => set('expertise', v)}
                 clearable

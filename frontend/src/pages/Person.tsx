@@ -4,6 +4,7 @@ import {
   Card,
   Checkbox,
   Group,
+  MultiSelect,
   Select,
   Stack,
   Table,
@@ -22,10 +23,11 @@ import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 import {
   CAREER_STAGES,
-  EXPERTISE_AREAS,
-  joinExpertise,
+  joinList,
+  RESEARCH_AREAS,
+  researchAreaLabel,
   SELF_STATUSES,
-  splitExpertise,
+  splitList,
   STUDENT_STAGES,
 } from '../constants'
 
@@ -43,6 +45,7 @@ export default function PersonPage() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const [voting, setVoting] = useState(false)
+  const [researchAreas, setResearchAreas] = useState<string[]>([])
   const [expertise, setExpertise] = useState<string[]>([])
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -114,7 +117,8 @@ export default function PersonPage() {
       orcid: person.orcid ?? '',
       career_stage: person.career_stage,
     })
-    setExpertise(splitExpertise(person.expertise))
+    setResearchAreas(splitList(person.research_areas))
+    setExpertise(splitList(person.expertise))
     setVoting(person.is_voting)
     setEditing(true)
   }
@@ -140,10 +144,11 @@ export default function PersonPage() {
     // Compare canonical forms so an untouched field (possibly stored with
     // older free-text separators) isn't rewritten on every save.
     changed(
-      'expertise',
-      joinExpertise(expertise),
-      joinExpertise(splitExpertise(person.expertise)),
+      'research_areas',
+      joinList(researchAreas),
+      joinList(splitList(person.research_areas)),
     )
+    changed('expertise', joinList(expertise), joinList(splitList(person.expertise)))
     changed('is_voting', effectiveVoting, person.is_voting)
     if (Object.keys(payload).length === 0) {
       setEditing(false)
@@ -314,11 +319,18 @@ export default function PersonPage() {
               value={form.career_stage}
               onChange={(v) => setForm({ ...form, career_stage: v || 'other' })}
             />
+            <MultiSelect
+              label="Research area(s)"
+              placeholder="Select all that apply…"
+              data={RESEARCH_AREAS}
+              value={researchAreas}
+              onChange={setResearchAreas}
+              clearable
+            />
             <TagsInput
-              label="Areas of expertise"
-              description="Pick from the list or type your own and press Enter."
-              placeholder="Select or type…"
-              data={EXPERTISE_AREAS}
+              label="Topics of focus"
+              description="Type a topic and press Enter (e.g. muon cooling, tracking detectors)."
+              placeholder="Add a topic…"
               value={expertise}
               onChange={setExpertise}
               clearable
@@ -353,14 +365,26 @@ export default function PersonPage() {
                 <b>Institution:</b> {currentPrimary.institution.name}
               </Text>
             )}
+            {person.research_areas && (
+              <Group gap={6}>
+                <Text size="sm">
+                  <b>Research areas:</b>
+                </Text>
+                {splitList(person.research_areas).map((area) => (
+                  <Badge key={area} variant="light" size="sm">
+                    {researchAreaLabel(area)}
+                  </Badge>
+                ))}
+              </Group>
+            )}
             {person.expertise && (
               <Group gap={6}>
                 <Text size="sm">
-                  <b>Expertise:</b>
+                  <b>Topics:</b>
                 </Text>
-                {splitExpertise(person.expertise).map((area) => (
-                  <Badge key={area} variant="light" color="gray" size="sm">
-                    {area}
+                {splitList(person.expertise).map((topic) => (
+                  <Badge key={topic} variant="light" color="gray" size="sm">
+                    {topic}
                   </Badge>
                 ))}
               </Group>

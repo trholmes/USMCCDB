@@ -60,6 +60,7 @@ export interface PersonSummary {
 }
 
 export interface Person extends PersonSummary {
+  research_areas: string | null
   expertise: string | null
   notes: string | null
   status_changed_at: string | null
