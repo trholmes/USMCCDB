@@ -1,4 +1,4 @@
-import { Anchor, Group, Table, Text, Title } from '@mantine/core'
+import { Anchor, Checkbox, Group, Table, Text, Title } from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
@@ -69,6 +69,7 @@ function RoleRows({ roles, past }: { roles: CollabRole[]; past?: boolean }) {
 
 export default function LeadershipPage() {
   const [roles, setRoles] = useState<CollabRole[]>([])
+  const [showPast, setShowPast] = useState(false)
   const { isOffice } = useSession()
 
   useEffect(() => {
@@ -108,10 +109,20 @@ export default function LeadershipPage() {
 
       {former.length > 0 && (
         <>
-          <Title order={4} mt="xl" mb="xs">
-            Past leadership
-          </Title>
-          <RoleRows roles={former} past />
+          <Checkbox
+            mt="xl"
+            label="Show past leadership"
+            checked={showPast}
+            onChange={(e) => setShowPast(e.currentTarget.checked)}
+          />
+          {showPast && (
+            <>
+              <Title order={4} mt="md" mb="xs">
+                Past leadership
+              </Title>
+              <RoleRows roles={former} past />
+            </>
+          )}
         </>
       )}
     </>
