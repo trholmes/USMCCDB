@@ -11,19 +11,28 @@ ORCID_RE = r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$"
 
 def _normalize_research_areas(v: str | None) -> str | None:
     """people.research_areas is a comma-separated subset of RESEARCH_AREAS:
-    normalize case/spacing, drop duplicates, reject unknown values."""
+    match case-insensitively, normalize to the canonical names, drop
+    duplicates, reject unknown values."""
     if v is None:
         return None
-    values = list(dict.fromkeys(t.strip().lower() for t in v.split(",") if t.strip()))
-    if not values:
-        return None
-    unknown = sorted(set(values) - set(RESEARCH_AREAS))
+    canonical = {a.lower(): a for a in RESEARCH_AREAS}
+    values: list[str] = []
+    unknown: list[str] = []
+    for token in v.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        area = canonical.get(token.lower())
+        if area is None:
+            unknown.append(token)
+        elif area not in values:
+            values.append(area)
     if unknown:
         raise ValueError(
             f"unknown research area(s): {', '.join(unknown)}; "
             f"allowed: {', '.join(RESEARCH_AREAS)}"
         )
-    return ", ".join(values)
+    return ", ".join(values) or None
 
 
 class InstitutionBase(BaseModel):

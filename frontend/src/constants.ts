@@ -18,17 +18,15 @@ export const STUDENT_STAGES = ['undergrad', 'grad']
 export const SELF_STATUSES = ['active', 'inactive', 'alumni']
 
 // Standard research areas (mirrors RESEARCH_AREAS in
-// backend/app/models/membership.py); people.research_areas stores a
-// comma-separated subset of the values.
+// backend/app/models/membership.py) — the options from the membership
+// registration form plus a catch-all; people.research_areas stores a
+// comma-separated subset of these names.
 export const RESEARCH_AREAS = [
-  { value: 'accelerator', label: 'Accelerator' },
-  { value: 'experiment', label: 'Experiment' },
-  { value: 'theory', label: 'Theory' },
-  { value: 'other', label: 'Other' },
+  'Experimental Particle Physics',
+  'Theoretical Particle Physics',
+  'Accelerator Physics',
+  'Other/Multiple',
 ]
-
-export const researchAreaLabel = (value: string): string =>
-  RESEARCH_AREAS.find((r) => r.value === value)?.label ?? value
 
 // people.research_areas and people.expertise are comma-separated text
 // columns; these round-trip them to arrays for the multi-value inputs

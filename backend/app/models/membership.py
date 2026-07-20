@@ -32,10 +32,17 @@ class CareerStage(str, enum.Enum):
     other = "other"
 
 
-# Standard research areas; people.research_areas holds a comma-separated
-# subset of these (normalized and validated in the schemas). A plain tuple
-# rather than a DB enum so the multi-valued field fits one text column.
-RESEARCH_AREAS = ("accelerator", "experiment", "theory", "other")
+# Standard research areas — the options from the membership registration
+# form's "Area(s) of Expertise" question, plus a catch-all.
+# people.research_areas holds a comma-separated subset of these (normalized
+# and validated in the schemas). A plain tuple rather than a DB enum so the
+# multi-valued field fits one text column.
+RESEARCH_AREAS = (
+    "Experimental Particle Physics",
+    "Theoretical Particle Physics",
+    "Accelerator Physics",
+    "Other/Multiple",
+)
 
 
 class MemberStatus(str, enum.Enum):
