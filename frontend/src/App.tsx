@@ -1,4 +1,4 @@
-import { AppShell, Burger, Group, Loader, NavLink, Text, Title } from '@mantine/core'
+import { AppShell, Badge, Burger, Group, Loader, NavLink, Text, Title } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useSession } from './auth/SessionContext'
@@ -64,6 +64,9 @@ export default function App() {
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
             <Title order={4}>US Muon Collider Collaboration</Title>
+            <Badge variant="light" color="orange" size="sm">
+              alpha
+            </Badge>
             <Text c="dimmed" size="sm" visibleFrom="md">
               Collaboration Database
             </Text>
