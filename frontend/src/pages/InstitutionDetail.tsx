@@ -42,6 +42,11 @@ export default function InstitutionDetailPage() {
               {inst.country}
             </Text>
           )}
+          {!inst.is_us && (
+            <Badge color="gray" variant="light" title="People currently here are not eligible for voting membership">
+              non-US
+            </Badge>
+          )}
           {!inst.is_active && <Badge color="gray">inactive</Badge>}
         </Group>
       </div>

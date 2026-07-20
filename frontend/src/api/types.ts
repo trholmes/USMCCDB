@@ -25,6 +25,7 @@ export interface Institution {
   short_name: string | null
   ror_id: string | null
   country: string | null
+  is_us: boolean
   latex_address: string | null
   is_active: boolean
   people_count: number

@@ -66,7 +66,7 @@ BACKUP_HOUR=02
 
 - **users** (auth, separate from people): person_id FK nullable unique, username unique nullable, password_hash (argon2/bcrypt) nullable, orcid unique nullable, role enum(admin, office, member), is_active; CHECK username-or-orcid present
 - **people**: given/family/preferred name, email citext unique, orcid unique nullable, career_stage enum(faculty, staff, postdoc, grad, undergrad, engineer, other), status enum(pending, active, inactive, alumni, rejected)
-- **institutions**: name, short_name unique, ror_id, country, latex_address, is_active
+- **institutions**: name, short_name unique, ror_id, country, is_us (gates voting eligibility), latex_address, is_active
 - **affiliations**: person↔institution, is_primary, career_stage nullable (stage held while at that institution), start_date, end_date nullable; partial unique index one open primary per person
 - **working_groups** + **working_group_members** (unique wg+person)
 - **collab_roles**: person, role enum(chair, vice_chair, ib_rep, convener, speakers_chair, pub_chair, secretary), working_group_id (required iff convener), institution_id (required iff ib_rep), start/end dates — conveners' scoped permissions derive from this

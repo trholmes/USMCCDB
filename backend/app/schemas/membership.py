@@ -40,6 +40,8 @@ class InstitutionBase(BaseModel):
     short_name: str | None = Field(default=None, max_length=80)
     ror_id: str | None = None
     country: str | None = "USA"
+    # US-based — gates voting eligibility for currently affiliated people.
+    is_us: bool = True
     latex_address: str | None = None
     is_active: bool = True
 
@@ -53,6 +55,7 @@ class InstitutionUpdate(BaseModel):
     short_name: str | None = None
     ror_id: str | None = None
     country: str | None = None
+    is_us: bool | None = None
     latex_address: str | None = None
     is_active: bool | None = None
 

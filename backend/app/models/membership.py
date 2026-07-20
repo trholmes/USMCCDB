@@ -144,6 +144,9 @@ class Institution(TimestampedBase):
     short_name: Mapped[str | None] = mapped_column(String(80), unique=True)
     ror_id: Mapped[str | None] = mapped_column(String(40))
     country: Mapped[str | None] = mapped_column(String(80), default="USA")
+    # US-based institution — only people whose current primary affiliation is
+    # at a US institution are eligible for voting membership.
+    is_us: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     latex_address: Mapped[str | None] = mapped_column(Text)  # as printed on author lists
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

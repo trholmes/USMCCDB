@@ -1,4 +1,4 @@
-import { Button, Group, Modal, Stack, Table, TextInput, Title } from '@mantine/core'
+import { Badge, Button, Checkbox, Group, Modal, Stack, Table, TextInput, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -11,13 +11,14 @@ const ACCESSORS: Accessors<Institution> = {
   name: (i) => i.name,
   short_name: (i) => i.short_name,
   latex_address: (i) => i.latex_address,
+  is_us: (i) => i.is_us,
   people_count: (i) => i.people_count,
 }
 
 export default function InstitutionsPage() {
   const [rows, setRows] = useState<Institution[]>([])
   const [modal, setModal] = useState<Institution | 'new' | null>(null)
-  const [form, setForm] = useState({ name: '', short_name: '', latex_address: '' })
+  const [form, setForm] = useState({ name: '', short_name: '', latex_address: '', is_us: true })
   const [q, setQ] = useState('')
   const { isOffice } = useSession()
   const navigate = useNavigate()
@@ -41,11 +42,12 @@ export default function InstitutionsPage() {
   const open = (target: Institution | 'new') => {
     setForm(
       target === 'new'
-        ? { name: '', short_name: '', latex_address: '' }
+        ? { name: '', short_name: '', latex_address: '', is_us: true }
         : {
             name: target.name,
             short_name: target.short_name ?? '',
             latex_address: target.latex_address ?? '',
+            is_us: target.is_us,
           },
     )
     setModal(target)
@@ -56,6 +58,7 @@ export default function InstitutionsPage() {
       name: form.name,
       short_name: form.short_name || null,
       latex_address: form.latex_address || null,
+      is_us: form.is_us,
     }
     try {
       if (modal === 'new') await api.post('/institutions', body)
@@ -87,6 +90,7 @@ export default function InstitutionsPage() {
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
             <SortableTh label="Short name" k="short_name" sort={sort} toggle={toggle} />
             <SortableTh label="Author-list address" k="latex_address" sort={sort} toggle={toggle} />
+            <SortableTh label="US" k="is_us" sort={sort} toggle={toggle} />
             <SortableTh label="People" k="people_count" sort={sort} toggle={toggle} />
             <Table.Th />
           </Table.Tr>
@@ -101,6 +105,13 @@ export default function InstitutionsPage() {
               <Table.Td>{i.name}</Table.Td>
               <Table.Td>{i.short_name}</Table.Td>
               <Table.Td>{i.latex_address}</Table.Td>
+              <Table.Td>
+                {i.is_us ? null : (
+                  <Badge color="gray" variant="light">
+                    non-US
+                  </Badge>
+                )}
+              </Table.Td>
               <Table.Td>{i.people_count}</Table.Td>
               <Table.Td onClick={(e) => e.stopPropagation()}>
                 {isOffice && (
@@ -135,6 +146,12 @@ export default function InstitutionsPage() {
             label="Author-list address (as printed on papers)"
             value={form.latex_address}
             onChange={(e) => setForm({ ...form, latex_address: e.currentTarget.value })}
+          />
+          <Checkbox
+            label="US institution"
+            description="Only people currently at a US institution are eligible to vote; unchecking this clears the voting flag of everyone currently here."
+            checked={form.is_us}
+            onChange={(e) => setForm({ ...form, is_us: e.currentTarget.checked })}
           />
           <Button onClick={save}>Save</Button>
         </Stack>
