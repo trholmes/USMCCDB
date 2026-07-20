@@ -47,7 +47,15 @@ MAX_PHOTO_BYTES = 10 * 1024 * 1024
 router = APIRouter(prefix="/people", tags=["membership"])
 
 # Fields a member may edit on their own profile.
-SELF_EDITABLE = {"preferred_name", "email", "orcid", "career_stage", "expertise", "is_voting"}
+SELF_EDITABLE = {
+    "preferred_name",
+    "email",
+    "orcid",
+    "career_stage",
+    "research_areas",
+    "expertise",
+    "is_voting",
+}
 # Statuses a member may set on themselves — both as the target AND as the
 # current status: pending/rejected people cannot self-service at all
 # (application & moderation states stay office-controlled).
@@ -156,6 +164,7 @@ def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
         career_stage=body.career_stage,
         status=MemberStatus.pending,
         is_voting=body.is_voting,
+        research_areas=body.research_areas,
         expertise=body.expertise,
         notes=body.notes,
     )

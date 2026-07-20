@@ -32,6 +32,12 @@ class CareerStage(str, enum.Enum):
     other = "other"
 
 
+# Standard research areas; people.research_areas holds a comma-separated
+# subset of these (normalized and validated in the schemas). A plain tuple
+# rather than a DB enum so the multi-valued field fits one text column.
+RESEARCH_AREAS = ("accelerator", "experiment", "theory", "other")
+
+
 class MemberStatus(str, enum.Enum):
     pending = "pending"
     active = "active"
@@ -72,6 +78,9 @@ class Person(TimestampedBase):
     # Voting member per the USMCC charter (PhD-holding physicist at a US
     # institution, actively contributing).
     is_voting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Comma-separated subset of RESEARCH_AREAS (accelerator/experiment/…).
+    research_areas: Mapped[str | None] = mapped_column(Text)
+    # Free-form comma-separated topics the member is focused on.
     expertise: Mapped[str | None] = mapped_column(Text)
     # Filename (relative to the photos volume) of the member's photo.
     photo_file: Mapped[str | None] = mapped_column(String(120))

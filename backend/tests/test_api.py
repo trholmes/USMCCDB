@@ -326,6 +326,29 @@ def test_member_voting_eligibility(admin):
     assert r.status_code == 200, r.text
 
 
+def test_research_areas_normalized(admin):
+    member, pid = _linked_member(
+        admin, given="Ria", family="Areas", email="ria.areas@example.edu"
+    )
+    # Standard categories are normalized: case, spacing, and duplicates.
+    r = member.patch(
+        f"/api/v1/people/{pid}", json={"research_areas": "Accelerator,  THEORY, accelerator"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["research_areas"] == "accelerator, theory"
+    # Values outside the standard set are rejected.
+    r = member.patch(f"/api/v1/people/{pid}", json={"research_areas": "magnets"})
+    assert r.status_code == 422
+    # The field can be cleared, and free-form topics live in expertise.
+    r = member.patch(
+        f"/api/v1/people/{pid}", json={"research_areas": None, "expertise": "muon cooling, MDI"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["research_areas"] is None
+    assert body["expertise"] == "muon cooling, MDI"
+
+
 def test_office_status_change_clears_voting(admin):
     _, pid = _linked_member(
         admin, given="Vera", family="Vote", email="vera.vote@example.edu", career_stage="faculty"

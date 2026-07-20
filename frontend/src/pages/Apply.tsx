@@ -3,8 +3,10 @@ import {
   Card,
   Center,
   Checkbox,
+  MultiSelect,
   Select,
   Stack,
+  TagsInput,
   Text,
   Textarea,
   TextInput,
@@ -14,7 +16,7 @@ import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { CAREER_STAGES } from '../constants'
+import { CAREER_STAGES, joinList, RESEARCH_AREAS } from '../constants'
 
 export default function ApplyPage() {
   const [form, setForm] = useState({
@@ -26,7 +28,8 @@ export default function ApplyPage() {
     career_stage: 'other',
     institution_name: '',
     is_voting: false,
-    expertise: '',
+    research_areas: [] as string[],
+    expertise: [] as string[],
     notes: '',
   })
   const [busy, setBusy] = useState(false)
@@ -44,7 +47,8 @@ export default function ApplyPage() {
         preferred_name: form.preferred_name || null,
         orcid: form.orcid || null,
         institution_name: form.institution_name || null,
-        expertise: form.expertise || null,
+        research_areas: joinList(form.research_areas),
+        expertise: joinList(form.expertise),
         notes: form.notes || null,
       })
       setDone(true)
@@ -131,10 +135,21 @@ export default function ApplyPage() {
                 checked={form.is_voting}
                 onChange={(e) => set('is_voting', e.currentTarget.checked)}
               />
-              <Textarea
-                label="Areas of expertise"
+              <MultiSelect
+                label="Research area(s)"
+                placeholder="Select all that apply…"
+                data={RESEARCH_AREAS}
+                value={form.research_areas}
+                onChange={(v) => set('research_areas', v)}
+                clearable
+              />
+              <TagsInput
+                label="Topics of focus"
+                description="Type a topic and press Enter (e.g. muon cooling, tracking detectors)."
+                placeholder="Add a topic…"
                 value={form.expertise}
-                onChange={(e) => set('expertise', e.currentTarget.value)}
+                onChange={(v) => set('expertise', v)}
+                clearable
               />
               <Textarea
                 label="Anything you want to tell us?"

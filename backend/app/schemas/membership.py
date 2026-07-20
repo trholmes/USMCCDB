@@ -3,9 +3,27 @@ from datetime import date, datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models import CareerStage, CollabRoleType, MemberStatus
+from app.models.membership import RESEARCH_AREAS
 from app.schemas.common import ORMModel
 
 ORCID_RE = r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$"
+
+
+def _normalize_research_areas(v: str | None) -> str | None:
+    """people.research_areas is a comma-separated subset of RESEARCH_AREAS:
+    normalize case/spacing, drop duplicates, reject unknown values."""
+    if v is None:
+        return None
+    values = list(dict.fromkeys(t.strip().lower() for t in v.split(",") if t.strip()))
+    if not values:
+        return None
+    unknown = sorted(set(values) - set(RESEARCH_AREAS))
+    if unknown:
+        raise ValueError(
+            f"unknown research area(s): {', '.join(unknown)}; "
+            f"allowed: {', '.join(RESEARCH_AREAS)}"
+        )
+    return ", ".join(values)
 
 
 class InstitutionBase(BaseModel):
@@ -93,6 +111,7 @@ class PersonApply(BaseModel):
     institution_id: int | None = None
     institution_name: str | None = None  # free text if not in the list yet
     is_voting: bool = False
+    research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
 
@@ -100,6 +119,11 @@ class PersonApply(BaseModel):
     @classmethod
     def lowercase_email(cls, v: str) -> str:
         return v.lower()
+
+    @field_validator("research_areas")
+    @classmethod
+    def check_research_areas(cls, v: str | None) -> str | None:
+        return _normalize_research_areas(v)
 
 
 class PersonUpdate(BaseModel):
@@ -110,6 +134,7 @@ class PersonUpdate(BaseModel):
     orcid: str | None = Field(default=None, pattern=ORCID_RE)
     career_stage: CareerStage | None = None
     is_voting: bool | None = None
+    research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
 
@@ -117,6 +142,11 @@ class PersonUpdate(BaseModel):
     @classmethod
     def lowercase_email(cls, v: str | None) -> str | None:
         return v.lower() if v else v
+
+    @field_validator("research_areas")
+    @classmethod
+    def check_research_areas(cls, v: str | None) -> str | None:
+        return _normalize_research_areas(v)
 
 
 class StatusChange(BaseModel):
@@ -150,6 +180,7 @@ class PersonSummary(ORMModel):
 
 
 class PersonOut(PersonSummary):
+    research_areas: str | None
     expertise: str | None
     notes: str | None
     status_changed_at: datetime | None

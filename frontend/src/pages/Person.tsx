@@ -4,11 +4,12 @@ import {
   Card,
   Checkbox,
   Group,
+  MultiSelect,
   Select,
   Stack,
   Table,
+  TagsInput,
   Text,
-  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -20,7 +21,15 @@ import type { Institution, MembershipEvent, Person, Talk } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
-import { CAREER_STAGES, SELF_STATUSES, STUDENT_STAGES } from '../constants'
+import {
+  CAREER_STAGES,
+  joinList,
+  RESEARCH_AREAS,
+  researchAreaLabel,
+  SELF_STATUSES,
+  splitList,
+  STUDENT_STAGES,
+} from '../constants'
 
 // Local calendar date (toISOString would give the UTC date, off by one for
 // users east or west of UTC around midnight).
@@ -36,6 +45,8 @@ export default function PersonPage() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const [voting, setVoting] = useState(false)
+  const [researchAreas, setResearchAreas] = useState<string[]>([])
+  const [expertise, setExpertise] = useState<string[]>([])
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
@@ -105,8 +116,9 @@ export default function PersonPage() {
       email: person.email,
       orcid: person.orcid ?? '',
       career_stage: person.career_stage,
-      expertise: person.expertise ?? '',
     })
+    setResearchAreas(splitList(person.research_areas))
+    setExpertise(splitList(person.expertise))
     setVoting(person.is_voting)
     setEditing(true)
   }
@@ -129,7 +141,14 @@ export default function PersonPage() {
     changed('email', form.email, person.email)
     changed('orcid', form.orcid || null, person.orcid)
     changed('career_stage', form.career_stage, person.career_stage)
-    changed('expertise', form.expertise || null, person.expertise)
+    // Compare canonical forms so an untouched field (possibly stored with
+    // older free-text separators) isn't rewritten on every save.
+    changed(
+      'research_areas',
+      joinList(researchAreas),
+      joinList(splitList(person.research_areas)),
+    )
+    changed('expertise', joinList(expertise), joinList(splitList(person.expertise)))
     changed('is_voting', effectiveVoting, person.is_voting)
     if (Object.keys(payload).length === 0) {
       setEditing(false)
@@ -300,10 +319,21 @@ export default function PersonPage() {
               value={form.career_stage}
               onChange={(v) => setForm({ ...form, career_stage: v || 'other' })}
             />
-            <Textarea
-              label="Areas of expertise"
-              value={form.expertise}
-              onChange={(e) => setForm({ ...form, expertise: e.currentTarget.value })}
+            <MultiSelect
+              label="Research area(s)"
+              placeholder="Select all that apply…"
+              data={RESEARCH_AREAS}
+              value={researchAreas}
+              onChange={setResearchAreas}
+              clearable
+            />
+            <TagsInput
+              label="Topics of focus"
+              description="Type a topic and press Enter (e.g. muon cooling, tracking detectors)."
+              placeholder="Add a topic…"
+              value={expertise}
+              onChange={setExpertise}
+              clearable
             />
             <Checkbox
               label="Voting member"
@@ -335,10 +365,29 @@ export default function PersonPage() {
                 <b>Institution:</b> {currentPrimary.institution.name}
               </Text>
             )}
+            {person.research_areas && (
+              <Group gap={6}>
+                <Text size="sm">
+                  <b>Research areas:</b>
+                </Text>
+                {splitList(person.research_areas).map((area) => (
+                  <Badge key={area} variant="light" size="sm">
+                    {researchAreaLabel(area)}
+                  </Badge>
+                ))}
+              </Group>
+            )}
             {person.expertise && (
-              <Text size="sm">
-                <b>Expertise:</b> {person.expertise}
-              </Text>
+              <Group gap={6}>
+                <Text size="sm">
+                  <b>Topics:</b>
+                </Text>
+                {splitList(person.expertise).map((topic) => (
+                  <Badge key={topic} variant="light" color="gray" size="sm">
+                    {topic}
+                  </Badge>
+                ))}
+              </Group>
             )}
           </Stack>
         </Card>

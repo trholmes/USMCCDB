@@ -16,3 +16,28 @@ export const STUDENT_STAGES = ['undergrad', 'grad']
 
 // Statuses a member may set on themselves (see SELF_SETTABLE_STATUSES).
 export const SELF_STATUSES = ['active', 'inactive', 'alumni']
+
+// Standard research areas (mirrors RESEARCH_AREAS in
+// backend/app/models/membership.py); people.research_areas stores a
+// comma-separated subset of the values.
+export const RESEARCH_AREAS = [
+  { value: 'accelerator', label: 'Accelerator' },
+  { value: 'experiment', label: 'Experiment' },
+  { value: 'theory', label: 'Theory' },
+  { value: 'other', label: 'Other' },
+]
+
+export const researchAreaLabel = (value: string): string =>
+  RESEARCH_AREAS.find((r) => r.value === value)?.label ?? value
+
+// people.research_areas and people.expertise are comma-separated text
+// columns; these round-trip them to arrays for the multi-value inputs
+// (splitting on semicolons too, for imported free text).
+export const splitList = (s: string | null | undefined): string[] =>
+  (s ?? '')
+    .split(/[,;]/)
+    .map((v) => v.trim())
+    .filter(Boolean)
+
+export const joinList = (values: string[]): string | null =>
+  values.length ? values.join(', ') : null

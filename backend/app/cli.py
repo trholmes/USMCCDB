@@ -271,6 +271,7 @@ def seed_demo():
                 career_stage=stage,
                 status=MemberStatus.active,
                 is_voting=voting,
+                research_areas="accelerator" if i % 2 else "experiment",
                 expertise="Muon collider R&D",
             )
             db.add(person)
