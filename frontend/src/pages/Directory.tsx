@@ -6,6 +6,7 @@ import type { PersonSummary } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
+import { CAREER_STAGES, RESEARCH_AREAS, splitList } from '../constants'
 import { useSession } from '../auth/SessionContext'
 
 const ACCESSORS: Accessors<PersonSummary> = {
@@ -22,6 +23,10 @@ export default function DirectoryPage() {
   const [people, setPeople] = useState<PersonSummary[]>([])
   const [q, setQ] = useState('')
   const [status, setStatus] = useState<string | null>('active')
+  const [stage, setStage] = useState<string | null>(null)
+  const [institution, setInstitution] = useState<string | null>(null)
+  const [area, setArea] = useState<string | null>(null)
+  const [voting, setVoting] = useState<string | null>(null)
   const navigate = useNavigate()
   const { isOffice } = useSession()
 
@@ -30,42 +35,97 @@ export default function DirectoryPage() {
     api.get<PersonSummary[]>(`/people${query}`).then(setPeople).catch(() => setPeople([]))
   }, [status])
 
+  const institutionOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const p of people) {
+      if (p.primary_institution) {
+        seen.set(
+          String(p.primary_institution.id),
+          p.primary_institution.short_name || p.primary_institution.name,
+        )
+      }
+    }
+    return [...seen.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [people])
+
   const filtered = useMemo(() => {
     const needle = q.toLowerCase()
     return people.filter(
       (p) =>
-        !needle ||
-        `${p.given_name} ${p.family_name}`.toLowerCase().includes(needle) ||
-        p.email.toLowerCase().includes(needle),
+        (!needle ||
+          `${p.given_name} ${p.family_name}`.toLowerCase().includes(needle) ||
+          p.email.toLowerCase().includes(needle)) &&
+        (!stage || p.career_stage === stage) &&
+        (!institution || String(p.primary_institution?.id) === institution) &&
+        (!area || splitList(p.research_areas).includes(area)) &&
+        (!voting || p.is_voting === (voting === 'voting')),
     )
-  }, [people, q])
+  }, [people, q, stage, institution, area, voting])
   const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
 
   return (
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Member directory</Title>
-        <Group>
-          <TextInput
-            placeholder="Search name or email…"
-            value={q}
-            onChange={(e) => setQ(e.currentTarget.value)}
-            w={240}
-          />
-          <Select
-            data={[
-              { value: 'active', label: 'Active' },
-              { value: 'pending', label: 'Pending' },
-              { value: 'inactive', label: 'Inactive' },
-              { value: 'alumni', label: 'Alumni' },
-            ]}
-            value={status}
-            onChange={setStatus}
-            clearable
-            placeholder="All statuses"
-            w={150}
-          />
-        </Group>
+        <TextInput
+          placeholder="Search name or email…"
+          value={q}
+          onChange={(e) => setQ(e.currentTarget.value)}
+          w={240}
+        />
+      </Group>
+      <Group mb="md" gap="xs">
+        <Select
+          data={[
+            { value: 'active', label: 'Active' },
+            { value: 'pending', label: 'Pending' },
+            { value: 'inactive', label: 'Inactive' },
+            { value: 'alumni', label: 'Alumni' },
+          ]}
+          value={status}
+          onChange={setStatus}
+          clearable
+          placeholder="All statuses"
+          w={150}
+        />
+        <Select
+          data={CAREER_STAGES}
+          value={stage}
+          onChange={setStage}
+          clearable
+          placeholder="All positions"
+          w={180}
+        />
+        <Select
+          data={institutionOptions}
+          value={institution}
+          onChange={setInstitution}
+          clearable
+          searchable
+          placeholder="All institutions"
+          w={200}
+        />
+        <Select
+          data={RESEARCH_AREAS}
+          value={area}
+          onChange={setArea}
+          clearable
+          placeholder="All research areas"
+          w={220}
+        />
+        <Select
+          data={[
+            { value: 'voting', label: 'Voting' },
+            { value: 'nonvoting', label: 'Non-voting' },
+          ]}
+          value={voting}
+          onChange={setVoting}
+          clearable
+          placeholder="Voting?"
+          w={130}
+        />
       </Group>
 
       <Text size="sm" c="dimmed" mb="xs">

@@ -34,6 +34,10 @@ export default function TalksPage() {
     is_invited: 'false',
   })
   const [nominee, setNominee] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  const [eventFilter, setEventFilter] = useState<string | null>(null)
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const { me, isOffice } = useSession()
   const navigate = useNavigate()
 
@@ -57,7 +61,22 @@ export default function TalksPage() {
     }),
     [events],
   )
-  const { sorted, sort, toggle } = useSortable(talks, accessors)
+
+  const filtered = useMemo(() => {
+    const needle = q.toLowerCase()
+    return talks.filter(
+      (t) =>
+        (!needle ||
+          t.title.toLowerCase().includes(needle) ||
+          eventName(t.event_id).toLowerCase().includes(needle) ||
+          (t.speaker &&
+            `${t.speaker.given_name} ${t.speaker.family_name}`.toLowerCase().includes(needle))) &&
+        (!eventFilter || String(t.event_id) === eventFilter) &&
+        (!typeFilter || t.talk_type === typeFilter) &&
+        (!statusFilter || t.status === statusFilter),
+    )
+  }, [talks, events, q, eventFilter, typeFilter, statusFilter])
+  const { sorted, sort, toggle } = useSortable(filtered, accessors)
 
   const createTalk = async () => {
     try {
@@ -103,6 +122,43 @@ export default function TalksPage() {
         {isOffice && <Button onClick={() => setCreateOpen(true)}>Add talk</Button>}
       </Group>
 
+      <Group mb="md" gap="xs">
+        <TextInput
+          placeholder="Search title, conference or speaker…"
+          value={q}
+          onChange={(e) => setQ(e.currentTarget.value)}
+          w={260}
+        />
+        <Select
+          data={events.map((e) => ({ value: String(e.id), label: e.name }))}
+          value={eventFilter}
+          onChange={setEventFilter}
+          clearable
+          searchable
+          placeholder="All conferences"
+          w={200}
+        />
+        <Select
+          data={['plenary', 'parallel', 'poster', 'seminar', 'outreach']}
+          value={typeFilter}
+          onChange={setTypeFilter}
+          clearable
+          placeholder="All types"
+          w={140}
+        />
+        <Select
+          data={['open', 'nominations', 'assigned', 'given', 'cancelled']}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          clearable
+          placeholder="All statuses"
+          w={150}
+        />
+      </Group>
+
+      <Text size="sm" c="dimmed" mb="xs">
+        {filtered.length} talks
+      </Text>
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>

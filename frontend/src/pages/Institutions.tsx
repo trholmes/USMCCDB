@@ -1,6 +1,6 @@
 import { Button, Group, Modal, Stack, Table, TextInput, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution } from '../api/types'
@@ -17,9 +17,20 @@ export default function InstitutionsPage() {
   const [rows, setRows] = useState<Institution[]>([])
   const [modal, setModal] = useState<Institution | 'new' | null>(null)
   const [form, setForm] = useState({ name: '', short_name: '', latex_address: '' })
+  const [q, setQ] = useState('')
   const { isOffice } = useSession()
   const navigate = useNavigate()
-  const { sorted, sort, toggle } = useSortable(rows, ACCESSORS)
+
+  const filtered = useMemo(() => {
+    const needle = q.toLowerCase()
+    return rows.filter(
+      (i) =>
+        !needle ||
+        i.name.toLowerCase().includes(needle) ||
+        (i.short_name ?? '').toLowerCase().includes(needle),
+    )
+  }, [rows, q])
+  const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<Institution[]>('/institutions').then(setRows).catch(() => setRows([]))
@@ -59,7 +70,15 @@ export default function InstitutionsPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Institutions</Title>
-        {isOffice && <Button onClick={() => open('new')}>Add institution</Button>}
+        <Group>
+          <TextInput
+            placeholder="Search name…"
+            value={q}
+            onChange={(e) => setQ(e.currentTarget.value)}
+            w={220}
+          />
+          {isOffice && <Button onClick={() => open('new')}>Add institution</Button>}
+        </Group>
       </Group>
       <Table striped highlightOnHover>
         <Table.Thead>

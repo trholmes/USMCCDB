@@ -57,11 +57,11 @@ export interface PersonSummary {
   status: string
   is_voting: boolean
   photo_file: string | null
+  research_areas: string | null
   primary_institution: { id: number; name: string; short_name: string | null } | null
 }
 
 export interface Person extends PersonSummary {
-  research_areas: string | null
   expertise: string | null
   notes: string | null
   status_changed_at: string | null
