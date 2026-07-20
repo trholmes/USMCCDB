@@ -332,10 +332,14 @@ def test_research_areas_normalized(admin):
     )
     # Standard categories are normalized: case, spacing, and duplicates.
     r = member.patch(
-        f"/api/v1/people/{pid}", json={"research_areas": "Accelerator,  THEORY, accelerator"}
+        f"/api/v1/people/{pid}",
+        json={
+            "research_areas": "experimental particle physics,  ACCELERATOR PHYSICS,"
+            " Experimental Particle Physics"
+        },
     )
     assert r.status_code == 200, r.text
-    assert r.json()["research_areas"] == "accelerator, theory"
+    assert r.json()["research_areas"] == "Experimental Particle Physics, Accelerator Physics"
     # Values outside the standard set are rejected.
     r = member.patch(f"/api/v1/people/{pid}", json={"research_areas": "magnets"})
     assert r.status_code == 422

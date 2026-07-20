@@ -18,6 +18,7 @@ import typer
 from sqlalchemy import select
 
 from app.db import SessionLocal
+from app.models.membership import RESEARCH_AREAS
 from app.models import (
     Affiliation,
     AuthorPeriod,
@@ -271,7 +272,9 @@ def seed_demo():
                 career_stage=stage,
                 status=MemberStatus.active,
                 is_voting=voting,
-                research_areas="accelerator" if i % 2 else "experiment",
+                research_areas=(
+                    "Accelerator Physics" if i % 2 else "Experimental Particle Physics"
+                ),
                 expertise="Muon collider R&D",
             )
             db.add(person)
@@ -394,6 +397,26 @@ def _clean_orcid(raw) -> str | None:
     return m.group(1) if m else None
 
 
+def _split_expertise(raw: str | None) -> tuple[str | None, str | None]:
+    """Split the form's Area(s) of Expertise cell into the standard research
+    areas (the form's checkbox options, matched case-insensitively) and the
+    leftover hand-entered values, which become free-form topics."""
+    canonical = {a.lower(): a for a in RESEARCH_AREAS}
+    areas: list[str] = []
+    topics: list[str] = []
+    for token in re.split(r"[,;]", raw or ""):
+        token = token.strip()
+        if not token:
+            continue
+        area = canonical.get(token.lower())
+        if area is not None:
+            if area not in areas:
+                areas.append(area)
+        elif token not in topics:
+            topics.append(token)
+    return ", ".join(areas) or None, ", ".join(topics) or None
+
+
 def _get_or_create_institution(db, name: str) -> Institution:
     name = name.strip()
     inst = db.execute(select(Institution).where(Institution.name == name)).scalar_one_or_none()
@@ -458,7 +481,7 @@ def import_members_xlsx(
             voting = "non-voting" not in str(row[c_voting] or "").lower()
             orcid = _clean_orcid(row[c_orcid])
             stage = _career_stage(str(row[c_position] or ""))
-            expertise = str(row[c_expertise] or "").strip() or None
+            research_areas, expertise = _split_expertise(str(row[c_expertise] or ""))
             ts = row[c_ts]
             start = ts.date() if hasattr(ts, "date") else date.today()
 
@@ -477,6 +500,7 @@ def import_members_xlsx(
                     career_stage=stage,
                     status=MemberStatus.active,
                     is_voting=voting,
+                    research_areas=research_areas,
                     expertise=expertise,
                 )
                 db.add(person)
@@ -487,6 +511,7 @@ def import_members_xlsx(
                 person.orcid = orcid or person.orcid
                 person.career_stage = stage
                 person.is_voting = voting
+                person.research_areas = research_areas or person.research_areas
                 person.expertise = expertise or person.expertise
                 updated += 1
 

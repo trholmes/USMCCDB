@@ -25,7 +25,6 @@ import {
   CAREER_STAGES,
   joinList,
   RESEARCH_AREAS,
-  researchAreaLabel,
   SELF_STATUSES,
   splitList,
   STUDENT_STAGES,
@@ -372,7 +371,7 @@ export default function PersonPage() {
                 </Text>
                 {splitList(person.research_areas).map((area) => (
                   <Badge key={area} variant="light" size="sm">
-                    {researchAreaLabel(area)}
+                    {area}
                   </Badge>
                 ))}
               </Group>
