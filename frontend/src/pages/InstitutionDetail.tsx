@@ -1,10 +1,18 @@
-import { Badge, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
+import { Anchor, Badge, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Institution, PersonSummary } from '../api/types'
+import type { CollabRole, Institution, PersonSummary } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
+import { collabRoleLabel } from '../constants'
+
+// Local calendar date (see Person.tsx for why not toISOString).
+const today = () => {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 const ACCESSORS: Accessors<PersonSummary> = {
   name: (p) => `${p.family_name} ${p.given_name}`,
@@ -17,6 +25,7 @@ export default function InstitutionDetailPage() {
   const { id } = useParams()
   const [inst, setInst] = useState<Institution | null>(null)
   const [members, setMembers] = useState<PersonSummary[]>([])
+  const [roles, setRoles] = useState<CollabRole[]>([])
   const navigate = useNavigate()
   const { sorted, sort, toggle } = useSortable(members, ACCESSORS)
 
@@ -26,10 +35,19 @@ export default function InstitutionDetailPage() {
       .get<PersonSummary[]>(`/people?institution_id=${id}`)
       .then(setMembers)
       .catch(() => setMembers([]))
+    api
+      .get<CollabRole[]>(`/collab-roles?institution_id=${id}`)
+      .then(setRoles)
+      .catch(() => setRoles([]))
   }, [id])
   useEffect(load, [load])
 
   if (!inst) return <Text c="dimmed">Loading…</Text>
+
+  // Institution-scoped roles currently in effect (admin contacts, IB reps);
+  // date ranges are inclusive on both ends, so a role ending today is current.
+  const t = today()
+  const currentRoles = roles.filter((r) => r.start_date <= t && (!r.end_date || r.end_date >= t))
 
   return (
     <Stack>
@@ -50,6 +68,29 @@ export default function InstitutionDetailPage() {
           {!inst.is_active && <Badge color="gray">inactive</Badge>}
         </Group>
       </div>
+
+      {currentRoles.length > 0 && (
+        <Card withBorder maw={720}>
+          <Text size="sm" c="dimmed">
+            Contacts & representatives
+          </Text>
+          <Stack gap={4} mt={4}>
+            {currentRoles.map((r) => (
+              <Group key={r.id} gap="xs" wrap="nowrap">
+                <Text size="sm">{collabRoleLabel(r.role, r.detail)}:</Text>
+                {r.person ? (
+                  <Anchor component={Link} to={`/people/${r.person.id}`} size="sm">
+                    {r.person.preferred_name ||
+                      `${r.person.given_name} ${r.person.family_name}`}
+                  </Anchor>
+                ) : (
+                  <Text size="sm">—</Text>
+                )}
+              </Group>
+            ))}
+          </Stack>
+        </Card>
+      )}
 
       {inst.latex_address && (
         <Card withBorder maw={720}>

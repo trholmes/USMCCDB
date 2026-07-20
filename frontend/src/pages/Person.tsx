@@ -5,6 +5,7 @@ import {
   Checkbox,
   Group,
   MultiSelect,
+  NumberInput,
   Select,
   Stack,
   Table,
@@ -46,6 +47,7 @@ export default function PersonPage() {
   const [person, setPerson] = useState<Person | null>(null)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
+  const [usmccPercent, setUsmccPercent] = useState<number | string>('')
   const [voting, setVoting] = useState(false)
   const [researchAreas, setResearchAreas] = useState<string[]>([])
   const [expertise, setExpertise] = useState<string[]>([])
@@ -91,12 +93,35 @@ export default function PersonPage() {
   // isSelf via the route param so it (and everything keyed on it) is stable
   // across profile re-fetches.
   const isSelf = me?.person_id != null && me.person_id === Number(id)
-  const canEdit = isSelf || isOffice
+  const canEditFull = isSelf || isOffice
 
   useEffect(() => {
-    if (!canEdit) return // list feeds the edit cards only
+    if (!canEditFull) return // list feeds the edit cards only
     api.get<Institution[]>('/institutions').then(setInstitutions).catch(() => setInstitutions([]))
-  }, [canEdit])
+  }, [canEditFull])
+
+  // Institutions the signed-in user is currently Administrative Institutional
+  // Contact for — they may keep the institutional info of people at those
+  // institutions up to date (mirrors ADMIN_CONTACT_EDITABLE on the backend).
+  const [adminContactInstIds, setAdminContactInstIds] = useState<number[]>([])
+  useEffect(() => {
+    if (me?.person_id == null || canEditFull) {
+      setAdminContactInstIds([])
+      return
+    }
+    const t = today()
+    api
+      .get<CollabRole[]>(`/collab-roles?person_id=${me.person_id}&role=admin_contact`)
+      .then((rs) =>
+        setAdminContactInstIds(
+          rs
+            .filter((r) => r.start_date <= t && (!r.end_date || r.end_date >= t))
+            .map((r) => r.institution_id)
+            .filter((x): x is number => x != null),
+        ),
+      )
+      .catch(() => setAdminContactInstIds([]))
+  }, [me?.person_id, canEditFull])
 
   const loadRoles = useCallback(() => {
     api
@@ -126,12 +151,12 @@ export default function PersonPage() {
   // Keyed on the route id (not the person object) so profile saves and photo
   // uploads don't re-fetch it; status changes refresh it explicitly.
   const loadEvents = useCallback(() => {
-    if (!canEdit) return
+    if (!canEditFull) return
     api
       .get<MembershipEvent[]>(`/people/${id}/events`)
       .then(setEvents)
       .catch(() => setEvents([]))
-  }, [id, canEdit])
+  }, [id, canEditFull])
   useEffect(loadEvents, [loadEvents])
 
   if (!person) return <Text c="dimmed">Loading…</Text>
@@ -142,7 +167,10 @@ export default function PersonPage() {
       email: person.email,
       orcid: person.orcid ?? '',
       career_stage: person.career_stage,
+      professional_title: person.professional_title ?? '',
+      department: person.department ?? '',
     })
+    setUsmccPercent(person.usmcc_percent ?? '')
     setResearchAreas(splitList(person.research_areas))
     setExpertise(splitList(person.expertise))
     setVoting(person.is_voting)
@@ -150,6 +178,12 @@ export default function PersonPage() {
   }
 
   const currentPrimary = person.affiliations.find((a) => a.is_primary && a.end_date === null)
+
+  // An admin contact for this person's current institution may edit the
+  // institutional-info fields only; the rest of the form is disabled.
+  const isAdminContact =
+    currentPrimary != null && adminContactInstIds.includes(currentPrimary.institution.id)
+  const canEdit = canEditFull || isAdminContact
 
   // Self-service voting rule (office accounts are not bound by it — the
   // backend enforces eligibility for everyone at save time): active,
@@ -172,6 +206,13 @@ export default function PersonPage() {
     changed('email', form.email, person.email)
     changed('orcid', form.orcid || null, person.orcid)
     changed('career_stage', form.career_stage, person.career_stage)
+    changed('professional_title', form.professional_title || null, person.professional_title)
+    changed('department', form.department || null, person.department)
+    changed(
+      'usmcc_percent',
+      usmccPercent === '' ? null : Number(usmccPercent),
+      person.usmcc_percent,
+    )
     // Compare canonical forms so an untouched field (possibly stored with
     // older free-text separators) isn't rewritten on every save.
     changed(
@@ -377,19 +418,29 @@ export default function PersonPage() {
       {editing ? (
         <Card withBorder maw={520}>
           <Stack gap="sm">
+            {!canEditFull && (
+              <Text size="xs" c="dimmed">
+                As the administrative institutional contact for{' '}
+                {currentPrimary?.institution.name}, you can update the institutional info
+                fields below; the rest of the profile is member/office-editable only.
+              </Text>
+            )}
             <TextInput
               label="Preferred name"
               value={form.preferred_name}
+              disabled={!canEditFull}
               onChange={(e) => setForm({ ...form, preferred_name: e.currentTarget.value })}
             />
             <TextInput
               label="Email"
               value={form.email}
+              disabled={!canEditFull}
               onChange={(e) => setForm({ ...form, email: e.currentTarget.value })}
             />
             <TextInput
               label="ORCID iD"
               value={form.orcid}
+              disabled={!canEditFull}
               onChange={(e) => setForm({ ...form, orcid: e.currentTarget.value })}
             />
             <Select
@@ -398,12 +449,32 @@ export default function PersonPage() {
               value={form.career_stage}
               onChange={(v) => setForm({ ...form, career_stage: v || 'other' })}
             />
+            <TextInput
+              label="Professional title"
+              description="Your title in your organization (e.g. Associate Professor, Staff Scientist)."
+              value={form.professional_title}
+              onChange={(e) => setForm({ ...form, professional_title: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Department"
+              value={form.department}
+              onChange={(e) => setForm({ ...form, department: e.currentTarget.value })}
+            />
+            <NumberInput
+              label="Research time on USMCC (%)"
+              description="Fraction of your research time devoted to the USMCC."
+              min={0}
+              max={100}
+              value={usmccPercent}
+              onChange={setUsmccPercent}
+            />
             <MultiSelect
               label="Research area(s)"
               placeholder="Select all that apply…"
               data={RESEARCH_AREAS}
               value={researchAreas}
               onChange={setResearchAreas}
+              disabled={!canEditFull}
               clearable
             />
             <TagsInput
@@ -412,12 +483,13 @@ export default function PersonPage() {
               placeholder="Add a topic…"
               value={expertise}
               onChange={setExpertise}
+              disabled={!canEditFull}
               clearable
             />
             <Checkbox
               label="Voting member"
               checked={effectiveVoting}
-              disabled={!isOffice && !votingEligible}
+              disabled={!canEditFull || (!isOffice && !votingEligible)}
               onChange={(e) => setVoting(e.currentTarget.checked)}
               description={
                 isOffice || votingEligible
@@ -442,6 +514,21 @@ export default function PersonPage() {
             {currentPrimary && (
               <Text size="sm">
                 <b>Institution:</b> {currentPrimary.institution.name}
+              </Text>
+            )}
+            {person.professional_title && (
+              <Text size="sm">
+                <b>Professional title:</b> {person.professional_title}
+              </Text>
+            )}
+            {person.department && (
+              <Text size="sm">
+                <b>Department:</b> {person.department}
+              </Text>
+            )}
+            {person.usmcc_percent != null && (
+              <Text size="sm">
+                <b>Research time on USMCC:</b> {person.usmcc_percent}%
               </Text>
             )}
             {person.research_areas && (
@@ -472,7 +559,7 @@ export default function PersonPage() {
         </Card>
       )}
 
-      {canEdit && (
+      {canEditFull && (
         <Group align="flex-start" gap="md">
           <Card withBorder w={340}>
             <Stack gap="sm">
@@ -697,7 +784,7 @@ export default function PersonPage() {
         </>
       )}
 
-      {canEdit && events.length > 0 && (
+      {canEditFull && events.length > 0 && (
         <>
           <Title order={5}>Membership history</Title>
           <Table maw={720}>

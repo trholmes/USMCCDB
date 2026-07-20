@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import CollabRole, CollabRoleType, User, UserRole
+from app.models import Affiliation, CollabRole, CollabRoleType, User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -125,6 +125,30 @@ def is_convener_of(db: Session, user: User, working_group_id: int | None) -> boo
             CollabRole.working_group_id == working_group_id,
             CollabRole.start_date <= today,
             (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+        )
+    ).first()
+    return row is not None
+
+
+def is_admin_contact_for(db: Session, user: User, person_id: int) -> bool:
+    """True if the user's person holds an active Administrative Institutional
+    Contact role at the institution of person_id's current (open) primary
+    affiliation. Admin contacts keep the institutional info of the members at
+    their institution up to date (charter)."""
+    if user.person_id is None:
+        return False
+    today = datetime.now(UTC).date()
+    row = db.execute(
+        select(CollabRole.id)
+        .join(Affiliation, Affiliation.institution_id == CollabRole.institution_id)
+        .where(
+            CollabRole.person_id == user.person_id,
+            CollabRole.role == CollabRoleType.admin_contact,
+            CollabRole.start_date <= today,
+            (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+            Affiliation.person_id == person_id,
+            Affiliation.is_primary.is_(True),
+            Affiliation.end_date.is_(None),
         )
     ).first()
     return row is not None

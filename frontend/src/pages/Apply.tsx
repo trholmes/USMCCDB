@@ -4,6 +4,7 @@ import {
   Center,
   Checkbox,
   MultiSelect,
+  NumberInput,
   Select,
   Stack,
   TagsInput,
@@ -26,6 +27,9 @@ export default function ApplyPage() {
     email: '',
     orcid: '',
     career_stage: 'other',
+    professional_title: '',
+    department: '',
+    usmcc_percent: '' as number | string,
     institution_name: '',
     is_voting: false,
     research_areas: [] as string[],
@@ -46,6 +50,9 @@ export default function ApplyPage() {
         ...form,
         preferred_name: form.preferred_name || null,
         orcid: form.orcid || null,
+        professional_title: form.professional_title || null,
+        department: form.department || null,
+        usmcc_percent: form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
         institution_name: form.institution_name || null,
         research_areas: joinList(form.research_areas),
         expertise: joinList(form.expertise),
@@ -126,9 +133,28 @@ export default function ApplyPage() {
                 onChange={(v) => set('career_stage', v || 'other')}
               />
               <TextInput
+                label="Professional title (optional)"
+                description="Your title in your organization (e.g. Associate Professor, Staff Scientist)."
+                value={form.professional_title}
+                onChange={(e) => set('professional_title', e.currentTarget.value)}
+              />
+              <TextInput
                 label="Primary institution"
                 value={form.institution_name}
                 onChange={(e) => set('institution_name', e.currentTarget.value)}
+              />
+              <TextInput
+                label="Department (optional)"
+                value={form.department}
+                onChange={(e) => set('department', e.currentTarget.value)}
+              />
+              <NumberInput
+                label="Research time on USMCC (%) (optional)"
+                description="Fraction of your research time devoted to the USMCC."
+                min={0}
+                max={100}
+                value={form.usmcc_percent}
+                onChange={(v) => set('usmcc_percent', v)}
               />
               <Checkbox
                 label="Registering as a voting member (PhD-holding physicist at a US institution, actively contributing to the muon collider effort)"

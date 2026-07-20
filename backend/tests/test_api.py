@@ -759,3 +759,114 @@ def test_collab_roles_lifecycle(admin):
     assert member.delete(f"/api/v1/collab-roles/{rep_id}").status_code == 403
 
     assert admin.delete(f"/api/v1/collab-roles/{rep_id}").status_code == 204
+
+
+def test_admin_contact_role_and_scoped_edits(admin):
+    inst = admin.post("/api/v1/institutions", json={"name": "Contact University"}).json()
+    other = admin.post("/api/v1/institutions", json={"name": "Elsewhere Institute"}).json()
+
+    contact, contact_pid = _linked_member(
+        admin, given="Ada", family="Contact", email="ada.contact@example.edu",
+        career_stage="staff",
+    )
+    member, member_pid = _linked_member(
+        admin, given="Mo", family="Member", email="mo.member@example.edu"
+    )
+    _, away_pid = _linked_member(
+        admin, given="Ana", family="Away", email="ana.away@example.edu"
+    )
+    for pid, inst_id in (
+        (contact_pid, inst["id"]),
+        (member_pid, inst["id"]),
+        (away_pid, other["id"]),
+    ):
+        r = admin.post(
+            f"/api/v1/people/{pid}/affiliations",
+            json={"institution_id": inst_id, "is_primary": True, "start_date": "2025-01-01"},
+        )
+        assert r.status_code == 201, r.text
+
+    # The charter role is institution-scoped: no institution_id → rejected.
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": contact_pid, "role": "admin_contact", "start_date": "2025-01-01"},
+    )
+    assert r.status_code == 422
+    role = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": contact_pid,
+            "role": "admin_contact",
+            "institution_id": inst["id"],
+            "start_date": "2025-01-01",
+        },
+    )
+    assert role.status_code == 201, role.text
+
+    # Institution-scoped listing feeds the institution detail page.
+    rows = admin.get(
+        f"/api/v1/collab-roles?institution_id={inst['id']}&role=admin_contact"
+    ).json()
+    assert [x["person_id"] for x in rows] == [contact_pid]
+
+    # Members record the charter institutional info on their own profile…
+    r = member.patch(
+        f"/api/v1/people/{member_pid}",
+        json={
+            "professional_title": "Research Scientist",
+            "department": "Physics",
+            "usmcc_percent": 50,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["professional_title"] == "Research Scientist"
+    assert r.json()["usmcc_percent"] == 50
+    # …bounded to a sensible percent range.
+    assert member.patch(
+        f"/api/v1/people/{member_pid}", json={"usmcc_percent": 150}
+    ).status_code == 422
+
+    # The application form collects the same info.
+    applied = admin.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Tia",
+            "family_name": "Titled",
+            "email": "tia.titled@example.edu",
+            "professional_title": "Beam Physicist",
+            "department": "Accelerator Division",
+            "usmcc_percent": 25,
+        },
+    )
+    assert applied.status_code == 201, applied.text
+    fetched = admin.get(f"/api/v1/people/{applied.json()['id']}").json()
+    assert fetched["professional_title"] == "Beam Physicist"
+    assert fetched["department"] == "Accelerator Division"
+    assert fetched["usmcc_percent"] == 25
+
+    # The admin contact keeps that info up to date for people currently at
+    # their institution…
+    r = contact.patch(
+        f"/api/v1/people/{member_pid}",
+        json={"department": "Physics & Astronomy", "usmcc_percent": 40, "career_stage": "staff"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["department"] == "Physics & Astronomy"
+    assert r.json()["career_stage"] == "staff"
+    # …but cannot touch anything else…
+    assert contact.patch(
+        f"/api/v1/people/{member_pid}", json={"email": "hijack@example.edu"}
+    ).status_code == 403
+    # …and has no reach into other institutions.
+    assert contact.patch(
+        f"/api/v1/people/{away_pid}", json={"usmcc_percent": 10}
+    ).status_code == 403
+
+    # An ended term grants nothing.
+    r = admin.patch(
+        f"/api/v1/collab-roles/{role.json()['id']}", json={"end_date": "2025-12-31"}
+    )
+    assert r.status_code == 200
+    assert contact.patch(
+        f"/api/v1/people/{member_pid}", json={"usmcc_percent": 30}
+    ).status_code == 403

@@ -329,6 +329,16 @@ def seed_demo():
                     end_date=end,
                 )
             )
+        # Administrative Institutional Contact (charter role, scoped to an
+        # institution) — Fatima Hassan is staff at the second institution.
+        db.add(
+            CollabRole(
+                person_id=people[5].id,
+                role=CollabRoleType.admin_contact,
+                institution_id=insts[1].id,
+                start_date=date(2025, 1, 1),
+            )
+        )
 
         events = []
         for name, location, start, end in DEMO_EVENTS:
