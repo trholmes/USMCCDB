@@ -173,6 +173,120 @@ def test_member_cannot_do_office_things(admin):
     assert member.post("/api/v1/publications", json={"title": "Nope"}).status_code == 403
 
 
+def _linked_member(admin, *, given, family, email, career_stage="postdoc"):
+    """Create an active person + a member account linked to them, and return a
+    logged-in TestClient plus the person id."""
+    person = admin.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": given,
+            "family_name": family,
+            "email": email,
+            "career_stage": career_stage,
+        },
+    ).json()
+    admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
+    uname = email.split("@")[0]
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": uname,
+            "password": "member-pw-123",
+            "role": "member",
+            "person_id": person["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    c = TestClient(app)
+    assert c.post(
+        "/api/v1/auth/login", json={"username": uname, "password": "member-pw-123"}
+    ).status_code == 200
+    return c, person["id"]
+
+
+def test_member_self_status_change_with_effective_date(admin):
+    member, pid = _linked_member(
+        admin, given="Sam", family="Self", email="sam.self@example.edu"
+    )
+
+    # A member may step back as of a date they enter; history records it.
+    r = member.post(
+        f"/api/v1/people/{pid}/status",
+        json={"status": "inactive", "effective_date": "2026-03-15"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "inactive"
+
+    events = member.get(f"/api/v1/people/{pid}/events").json()
+    last = events[-1]
+    assert last["to_status"] == "inactive"
+    assert last["effective_date"] == "2026-03-15"
+
+    # Members cannot self-assign moderation/application states.
+    assert member.post(f"/api/v1/people/{pid}/status", json={"status": "rejected"}).status_code == 403
+    assert member.post(f"/api/v1/people/{pid}/status", json={"status": "pending"}).status_code == 403
+
+
+def test_member_self_institution_move_keeps_history(admin):
+    member, pid = _linked_member(
+        admin, given="Ida", family="Inst", email="ida.inst@example.edu"
+    )
+    a = admin.post("/api/v1/institutions", json={"name": "Alpha University"}).json()
+    b = admin.post("/api/v1/institutions", json={"name": "Beta Institute"}).json()
+
+    # Start at Alpha.
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": a["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
+
+    # Move to Beta as of a later date — history is preserved.
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": b["id"], "start_date": "2026-06-01"},
+    ).status_code == 201
+
+    person = member.get(f"/api/v1/people/{pid}").json()
+    affils = sorted(person["affiliations"], key=lambda x: x["start_date"])
+    assert [x["institution"]["name"] for x in affils] == ["Alpha University", "Beta Institute"]
+    assert affils[0]["end_date"] == "2026-06-01"  # old one closed on the move date
+    assert affils[1]["end_date"] is None          # new one is open
+
+    # Backdating before the current start is rejected; no cross-profile moves.
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": a["id"], "start_date": "2025-01-01"},
+    ).status_code == 400
+    other = admin.get("/api/v1/people").json()[0]["id"]
+    if other != pid:
+        assert member.post(
+            f"/api/v1/people/{other}/institution",
+            json={"institution_id": a["id"], "start_date": "2026-01-01"},
+        ).status_code == 403
+
+
+def test_member_voting_eligibility(admin):
+    # A grad student cannot self-assign voting membership.
+    grad, gid = _linked_member(
+        admin, given="Gale", family="Grad", email="gale.grad@example.edu", career_stage="grad"
+    )
+    assert grad.patch(f"/api/v1/people/{gid}", json={"is_voting": True}).status_code == 403
+
+    # An active postdoc can.
+    pd, pdid = _linked_member(
+        admin, given="Paz", family="Postdoc", email="paz.pd@example.edu", career_stage="postdoc"
+    )
+    assert pd.patch(f"/api/v1/people/{pdid}", json={"is_voting": True}).status_code == 200
+    assert pd.get(f"/api/v1/people/{pdid}").json()["is_voting"] is True
+
+    # Becoming a student again while voting is rejected (invariant enforced).
+    assert pd.patch(f"/api/v1/people/{pdid}", json={"career_stage": "grad"}).status_code == 403
+
+    # Stepping back to inactive clears voting automatically.
+    assert pd.post(f"/api/v1/people/{pdid}/status", json={"status": "inactive"}).status_code == 200
+    assert pd.get(f"/api/v1/people/{pdid}").json()["is_voting"] is False
+
+
 def test_photo_upload_and_serve(admin, tmp_path_factory):
     os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
     from app.config import get_settings

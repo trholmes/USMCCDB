@@ -24,6 +24,7 @@ from app.schemas.membership import (
     AuthorPeriodCreate,
     AuthorPeriodOut,
     AuthorPeriodUpdate,
+    InstitutionChange,
     InstitutionRef,
     MembershipEventOut,
     PersonApply,
@@ -46,7 +47,17 @@ MAX_PHOTO_BYTES = 10 * 1024 * 1024
 router = APIRouter(prefix="/people", tags=["membership"])
 
 # Fields a member may edit on their own profile.
-SELF_EDITABLE = {"preferred_name", "email", "orcid", "career_stage", "expertise"}
+SELF_EDITABLE = {"preferred_name", "email", "orcid", "career_stage", "expertise", "is_voting"}
+# Statuses a member may set on themselves (office/admin may set any).
+# pending/rejected stay office-controlled (application & moderation states).
+SELF_SETTABLE_STATUSES = {MemberStatus.active, MemberStatus.inactive, MemberStatus.alumni}
+# Career stages considered "students" — not eligible for voting membership.
+STUDENT_STAGES = {CareerStage.undergrad, CareerStage.grad}
+
+
+def _voting_eligible(status: MemberStatus, career_stage: CareerStage) -> bool:
+    """A member may hold voting status only while active and not a student."""
+    return status == MemberStatus.active and career_stage not in STUDENT_STAGES
 
 
 def _get_person(db: Session, person_id: int) -> Person:
@@ -192,6 +203,15 @@ def update_person(
         illegal = set(changes) - SELF_EDITABLE
         if illegal:
             raise HTTPException(403, f"Members cannot edit: {', '.join(sorted(illegal))}")
+        # A member may only be a voting member while active and not a student.
+        resulting_voting = changes.get("is_voting", person.is_voting)
+        resulting_stage = changes.get("career_stage", person.career_stage)
+        if resulting_voting and not _voting_eligible(person.status, resulting_stage):
+            raise HTTPException(
+                403,
+                "Voting membership requires an active, non-student member "
+                "(not undergrad or grad student).",
+            )
     if "email" in changes:
         existing = db.execute(
             select(Person).where(Person.email == changes["email"], Person.id != person_id)
@@ -215,30 +235,49 @@ def change_status(
     person_id: int,
     body: StatusChange,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_office),
+    actor: User = Depends(get_current_user),
 ) -> PersonSummary:
     person = _get_person(db, person_id)
+    self_service = not is_office(actor)
+    if self_service:
+        if actor.person_id != person_id:
+            raise HTTPException(403, "You can only change your own status")
+        if body.status not in SELF_SETTABLE_STATUSES:
+            allowed = ", ".join(sorted(s.value for s in SELF_SETTABLE_STATUSES))
+            raise HTTPException(403, f"Members may only set their status to: {allowed}")
     if body.status == person.status:
         raise HTTPException(400, f"Person is already {person.status.value}")
+    effective = body.effective_date or datetime.now(UTC).date()
     db.add(
         MembershipEvent(
             person_id=person.id,
             from_status=person.status.value,
             to_status=body.status.value,
+            effective_date=effective,
             actor_user_id=actor.id,
             note=body.note,
         )
     )
     person.status = body.status
-    person.status_changed_at = datetime.now(UTC)
+    person.status_changed_at = datetime(effective.year, effective.month, effective.day, tzinfo=UTC)
+    # Voting membership can't be held while not active — clear it on self-service
+    # departures so the invariant holds.
+    if self_service and body.status != MemberStatus.active:
+        person.is_voting = False
     db.commit()
     db.refresh(person)
     return PersonSummary.model_validate(person)
 
 
-@router.get("/{person_id}/events", dependencies=[Depends(require_office)])
-def list_events(person_id: int, db: Session = Depends(get_db)) -> list[MembershipEventOut]:
+@router.get("/{person_id}/events")
+def list_events(
+    person_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[MembershipEventOut]:
     _get_person(db, person_id)
+    if not (is_office(user) or user.person_id == person_id):
+        raise HTTPException(403, "You can only view your own membership history")
     events = (
         db.execute(
             select(MembershipEvent)
@@ -314,6 +353,67 @@ def delete_photo(
             path.unlink()
         person.photo_file = None
         db.commit()
+
+
+# --- Institution move (self-service or office) --------------------------------
+
+
+@router.post("/{person_id}/institution", status_code=201)
+def change_institution(
+    person_id: int,
+    body: InstitutionChange,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AffiliationOut:
+    """Move a person to a new primary institution as of a date, preserving
+    history: the current open primary affiliation is closed on that date and a
+    new open primary is opened. Available to the person themselves or office."""
+    _get_person(db, person_id)
+    if not (is_office(user) or user.person_id == person_id):
+        raise HTTPException(403, "You can only change your own institution")
+
+    institution_id = body.institution_id
+    if institution_id is None and body.institution_name:
+        name = body.institution_name.strip()
+        if name:
+            inst = Institution(name=name, is_active=False)  # office reviews new entries
+            db.add(inst)
+            db.flush()
+            institution_id = inst.id
+    if institution_id is None:
+        raise HTTPException(422, "Provide institution_id or institution_name")
+    if db.get(Institution, institution_id) is None:
+        raise HTTPException(404, "institution_id not found")
+
+    open_primary = db.execute(
+        select(Affiliation).where(
+            Affiliation.person_id == person_id,
+            Affiliation.is_primary.is_(True),
+            Affiliation.end_date.is_(None),
+        )
+    ).scalar_one_or_none()
+    if open_primary is not None:
+        if open_primary.institution_id == institution_id:
+            raise HTTPException(400, "That is already your current institution")
+        if body.start_date < open_primary.start_date:
+            raise HTTPException(
+                400,
+                "Start date must be on or after your current affiliation "
+                f"start date ({open_primary.start_date.isoformat()})",
+            )
+        open_primary.end_date = body.start_date
+
+    affil = Affiliation(
+        person_id=person_id,
+        institution_id=institution_id,
+        is_primary=True,
+        start_date=body.start_date,
+        end_date=None,
+    )
+    db.add(affil)
+    db.commit()
+    db.refresh(affil)
+    return AffiliationOut.model_validate(affil)
 
 
 # --- Affiliations (office) ----------------------------------------------------
