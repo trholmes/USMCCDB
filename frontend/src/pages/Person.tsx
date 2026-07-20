@@ -427,6 +427,7 @@ export default function PersonPage() {
             )}
             <TextInput
               label="Preferred name"
+              description="Shown in place of your first/given name in listings; your family name always stays."
               value={form.preferred_name}
               disabled={!canEditFull}
               onChange={(e) => setForm({ ...form, preferred_name: e.currentTarget.value })}

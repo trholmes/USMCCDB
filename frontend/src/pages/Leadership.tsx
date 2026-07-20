@@ -49,8 +49,7 @@ function RoleRows({ roles, past }: { roles: CollabRole[]; past?: boolean }) {
                 <Group gap="xs" wrap="nowrap">
                   <PersonAvatar person={r.person} size={26} />
                   <Anchor component={Link} to={`/people/${r.person.id}`} size="sm">
-                    {r.person.preferred_name ||
-                      `${r.person.given_name} ${r.person.family_name}`}
+                    {`${r.person.preferred_name || r.person.given_name} ${r.person.family_name}`}
                   </Anchor>
                 </Group>
               ) : (
