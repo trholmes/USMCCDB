@@ -20,21 +20,15 @@ import type { Institution, MembershipEvent, Person, Talk } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { CAREER_STAGES, SELF_STATUSES, STUDENT_STAGES } from '../constants'
 
-const CAREER_STAGES = [
-  { value: 'faculty', label: 'Faculty' },
-  { value: 'staff', label: 'Lab / research scientist' },
-  { value: 'postdoc', label: 'Postdoc' },
-  { value: 'grad', label: 'Graduate student' },
-  { value: 'undergrad', label: 'Undergraduate' },
-  { value: 'engineer', label: 'Engineer' },
-  { value: 'other', label: 'Other' },
-]
-const STUDENT_STAGES = ['undergrad', 'grad']
-// Statuses a member may set on themselves (office can set any via the header).
-const SELF_STATUSES = ['active', 'inactive', 'alumni']
-
-const today = () => new Date().toISOString().slice(0, 10)
+// Local calendar date (toISOString would give the UTC date, off by one for
+// users east or west of UTC around midnight).
+const today = () => {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 export default function PersonPage() {
   const { id } = useParams()
@@ -70,9 +64,15 @@ export default function PersonPage() {
   }, [id])
   useEffect(load, [load])
 
+  // isSelf via the route param so it (and everything keyed on it) is stable
+  // across profile re-fetches.
+  const isSelf = me?.person_id != null && me.person_id === Number(id)
+  const canEdit = isSelf || isOffice
+
   useEffect(() => {
+    if (!canEdit) return // list feeds the edit cards only
     api.get<Institution[]>('/institutions').then(setInstitutions).catch(() => setInstitutions([]))
-  }, [])
+  }, [canEdit])
 
   const uploadPhoto = async (file: File | undefined) => {
     if (!file || !person) return
@@ -85,17 +85,16 @@ export default function PersonPage() {
     }
   }
 
-  const isSelf = me?.person_id === person?.id
-  const canEdit = isSelf || isOffice
-
   // Membership status history — visible to the member themselves and office.
+  // Keyed on the route id (not the person object) so profile saves and photo
+  // uploads don't re-fetch it; status changes refresh it explicitly.
   const loadEvents = useCallback(() => {
-    if (!person || !canEdit) return
+    if (!canEdit) return
     api
-      .get<MembershipEvent[]>(`/people/${person.id}/events`)
+      .get<MembershipEvent[]>(`/people/${id}/events`)
       .then(setEvents)
       .catch(() => setEvents([]))
-  }, [person, canEdit])
+  }, [id, canEdit])
   useEffect(loadEvents, [loadEvents])
 
   if (!person) return <Text c="dimmed">Loading…</Text>
@@ -112,20 +111,32 @@ export default function PersonPage() {
     setEditing(true)
   }
 
-  // Voting is only allowed for active, non-student members.
+  // Self-service voting rule (office accounts are not bound by it — the
+  // backend enforces eligibility for everyone at save time).
   const votingEligible =
     person.status === 'active' && !STUDENT_STAGES.includes(form.career_stage)
+  // What the checkbox actually shows/means for this user.
+  const effectiveVoting = isOffice ? voting : votingEligible && voting
 
   const save = async () => {
+    // PATCH only what changed, so unrelated edits can never clobber fields
+    // (e.g. an office save must not silently strip a voting flag).
+    const payload: Record<string, unknown> = {}
+    const changed = (key: string, next: unknown, current: unknown) => {
+      if (next !== current) payload[key] = next
+    }
+    changed('preferred_name', form.preferred_name || null, person.preferred_name)
+    changed('email', form.email, person.email)
+    changed('orcid', form.orcid || null, person.orcid)
+    changed('career_stage', form.career_stage, person.career_stage)
+    changed('expertise', form.expertise || null, person.expertise)
+    changed('is_voting', effectiveVoting, person.is_voting)
+    if (Object.keys(payload).length === 0) {
+      setEditing(false)
+      return
+    }
     try {
-      await api.patch(`/people/${person.id}`, {
-        preferred_name: form.preferred_name || null,
-        email: form.email,
-        orcid: form.orcid || null,
-        career_stage: form.career_stage,
-        expertise: form.expertise || null,
-        is_voting: votingEligible ? voting : false,
-      })
+      await api.patch(`/people/${person.id}`, payload)
       notifications.show({ message: 'Profile updated' })
       setEditing(false)
       load()
@@ -134,16 +145,21 @@ export default function PersonPage() {
     }
   }
 
-  // Office quick status change from the header (no effective date).
-  const changeStatus = async (status: string | null) => {
-    if (!status) return
+  // Single path for all status changes (office header select and the
+  // self-service card); returns whether the change was accepted.
+  const postStatus = async (status: string, effectiveDate?: string) => {
     try {
-      await api.post(`/people/${person.id}/status`, { status })
+      await api.post(`/people/${person.id}/status`, {
+        status,
+        ...(effectiveDate ? { effective_date: effectiveDate } : {}),
+      })
       notifications.show({ message: `Status set to ${status}` })
       load()
       loadEvents()
+      return true
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
+      return false
     }
   }
 
@@ -174,20 +190,11 @@ export default function PersonPage() {
   const submitStatus = async () => {
     if (!newStatus) return
     setStatusBusy(true)
-    try {
-      await api.post(`/people/${person.id}/status`, {
-        status: newStatus,
-        effective_date: statusDate,
-      })
-      notifications.show({ message: `Status set to ${newStatus}` })
+    const ok = await postStatus(newStatus, statusDate)
+    setStatusBusy(false)
+    if (ok) {
       setNewStatus(null)
       setStatusDate(today())
-      load()
-      loadEvents()
-    } catch (err: any) {
-      notifications.show({ color: 'red', message: err.message })
-    } finally {
-      setStatusBusy(false)
     }
   }
 
@@ -261,7 +268,7 @@ export default function PersonPage() {
             <Select
               placeholder="Change status…"
               data={['pending', 'active', 'inactive', 'alumni', 'rejected']}
-              onChange={changeStatus}
+              onChange={(v) => v && postStatus(v)}
               w={160}
             />
           )}
@@ -300,11 +307,11 @@ export default function PersonPage() {
             />
             <Checkbox
               label="Voting member"
-              checked={votingEligible ? voting : false}
-              disabled={!votingEligible}
+              checked={effectiveVoting}
+              disabled={!isOffice && !votingEligible}
               onChange={(e) => setVoting(e.currentTarget.checked)}
               description={
-                votingEligible
+                isOffice || votingEligible
                   ? 'PhD-holding physicist at a US institution, actively contributing.'
                   : 'Voting membership requires an active, non-student member (not a grad or undergrad student).'
               }
