@@ -1,6 +1,6 @@
 import { AppShell, Burger, Group, Loader, NavLink, Text, Title } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useSession } from './auth/SessionContext'
 import AdminPage from './pages/Admin'
 import ApplyPage from './pages/Apply'
@@ -67,9 +67,22 @@ export default function App() {
             </Text>
           </Group>
           <Group gap="xs">
-            <Text size="sm" c="dimmed">
-              {me.display_name || me.user.username || me.user.orcid}
-            </Text>
+            {me.person_id ? (
+              <Text
+                component={Link}
+                to={`/people/${me.person_id}`}
+                size="sm"
+                c="indigo"
+                style={{ cursor: 'pointer' }}
+                title="View / edit your profile"
+              >
+                {me.display_name || me.user.username || me.user.orcid}
+              </Text>
+            ) : (
+              <Text size="sm" c="dimmed">
+                {me.display_name || me.user.username || me.user.orcid}
+              </Text>
+            )}
             <Text
               size="sm"
               c="indigo"
