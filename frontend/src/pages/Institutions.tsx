@@ -1,6 +1,7 @@
 import { Button, Group, Modal, Stack, Table, TextInput, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution } from '../api/types'
 import { useSession } from '../auth/SessionContext'
@@ -10,6 +11,7 @@ export default function InstitutionsPage() {
   const [modal, setModal] = useState<Institution | 'new' | null>(null)
   const [form, setForm] = useState({ name: '', short_name: '', latex_address: '' })
   const { isOffice } = useSession()
+  const navigate = useNavigate()
 
   const load = useCallback(() => {
     api.get<Institution[]>('/institutions').then(setRows).catch(() => setRows([]))
@@ -57,18 +59,26 @@ export default function InstitutionsPage() {
             <Table.Th>Name</Table.Th>
             <Table.Th>Short name</Table.Th>
             <Table.Th>Author-list address</Table.Th>
+            <Table.Th />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {rows.map((i) => (
             <Table.Tr
               key={i.id}
-              style={isOffice ? { cursor: 'pointer' } : undefined}
-              onClick={() => isOffice && open(i)}
+              style={{ cursor: 'pointer' }}
+              onClick={() => navigate(`/institutions/${i.id}`)}
             >
               <Table.Td>{i.name}</Table.Td>
               <Table.Td>{i.short_name}</Table.Td>
               <Table.Td>{i.latex_address}</Table.Td>
+              <Table.Td onClick={(e) => e.stopPropagation()}>
+                {isOffice && (
+                  <Button size="compact-xs" variant="subtle" onClick={() => open(i)}>
+                    Edit
+                  </Button>
+                )}
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

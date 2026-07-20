@@ -13,6 +13,7 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { EventItem, PersonSummary, Talk } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
@@ -33,6 +34,7 @@ export default function TalksPage() {
   })
   const [nominee, setNominee] = useState<string | null>(null)
   const { me, isOffice } = useSession()
+  const navigate = useNavigate()
 
   const load = useCallback(() => {
     api.get<Talk[]>('/talks').then(setTalks).catch(() => setTalks([]))
@@ -113,7 +115,22 @@ export default function TalksPage() {
                 )}
               </Table.Td>
               <Table.Td>
-                {t.speaker ? `${t.speaker.given_name} ${t.speaker.family_name}` : '—'}
+                {t.speaker ? (
+                  <Text
+                    size="sm"
+                    c="blue"
+                    component="span"
+                    style={{ cursor: 'pointer' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/people/${t.speaker!.id}`)
+                    }}
+                  >
+                    {t.speaker.given_name} {t.speaker.family_name}
+                  </Text>
+                ) : (
+                  '—'
+                )}
               </Table.Td>
               <Table.Td>
                 <StatusBadge status={t.status} />
@@ -150,7 +167,7 @@ export default function TalksPage() {
               )}
               {detail.nominations.map((n) => (
                 <Group key={n.id} justify="space-between" mb={4}>
-                  <Text size="sm">
+                  <Text size="sm" component={Link} to={`/people/${n.person.id}`} c="blue">
                     {n.person.given_name} {n.person.family_name}
                   </Text>
                   <Group gap="xs">

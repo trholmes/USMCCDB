@@ -34,6 +34,14 @@ class InstitutionOut(ORMModel, InstitutionBase):
     id: int
 
 
+class InstitutionRef(ORMModel):
+    """Small reference used for cross-links (directory rows, etc.)."""
+
+    id: int
+    name: str
+    short_name: str | None
+
+
 class AffiliationCreate(BaseModel):
     institution_id: int
     is_primary: bool = False
@@ -127,6 +135,8 @@ class PersonSummary(ORMModel):
     status: MemberStatus
     is_voting: bool
     photo_file: str | None = None
+    # Current primary institution, populated on directory listings.
+    primary_institution: InstitutionRef | None = None
 
 
 class PersonOut(PersonSummary):

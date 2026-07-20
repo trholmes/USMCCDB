@@ -6,6 +6,7 @@ import AdminPage from './pages/Admin'
 import ApplyPage from './pages/Apply'
 import DirectoryPage from './pages/Directory'
 import EventsPage from './pages/Events'
+import InstitutionDetailPage from './pages/InstitutionDetail'
 import InstitutionsPage from './pages/Institutions'
 import LoginPage from './pages/Login'
 import PersonPage from './pages/Person'
@@ -116,6 +117,7 @@ export default function App() {
           <Route path="/directory" element={<DirectoryPage />} />
           <Route path="/people/:id" element={<PersonPage />} />
           <Route path="/institutions" element={<InstitutionsPage />} />
+          <Route path="/institutions/:id" element={<InstitutionDetailPage />} />
           <Route path="/working-groups" element={<WorkingGroupsPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/talks" element={<TalksPage />} />

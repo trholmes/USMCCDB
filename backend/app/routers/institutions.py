@@ -18,6 +18,18 @@ def list_institutions(
     return [InstitutionOut.model_validate(i) for i in rows]
 
 
+@router.get("/{institution_id}")
+def get_institution(
+    institution_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> InstitutionOut:
+    inst = db.get(Institution, institution_id)
+    if inst is None:
+        raise HTTPException(404, "Institution not found")
+    return InstitutionOut.model_validate(inst)
+
+
 @router.post("", dependencies=[Depends(require_office)], status_code=201)
 def create_institution(body: InstitutionCreate, db: Session = Depends(get_db)) -> InstitutionOut:
     if body.short_name and db.execute(
