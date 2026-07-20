@@ -73,6 +73,14 @@ def _voting_eligible(status: MemberStatus, career_stage: CareerStage) -> bool:
     return status == MemberStatus.active and career_stage not in STUDENT_STAGES
 
 
+def _current_institution_is_us(db: Session, person_id: int) -> bool:
+    """Voting also requires a current primary affiliation at a US
+    institution (only people currently affiliated with US institutions are
+    eligible to vote)."""
+    affil = _open_primary(db, person_id)
+    return affil is not None and affil.institution.is_us
+
+
 def _get_person(db: Session, person_id: int) -> Person:
     person = db.get(Person, person_id)
     if person is None:
@@ -305,6 +313,16 @@ def update_person(
                 "Voting membership requires an active, non-student member "
                 "(not undergrad or grad student).",
             )
+        # The US-institution requirement is checked only when the flag itself
+        # is being set, so a stage edit is never blocked by affiliation state.
+        if "is_voting" in changes and resulting_voting and not _current_institution_is_us(
+            db, person_id
+        ):
+            raise HTTPException(
+                422,
+                "Voting membership requires a current primary affiliation "
+                "with a US institution.",
+            )
     if "email" in changes:
         existing = db.execute(
             select(Person).where(Person.email == changes["email"], Person.id != person_id)
@@ -497,6 +515,15 @@ def change_institution(
 
     institution_id = _resolve_institution_id(db, body.institution_id, body.institution_name)
 
+    # A voting member cannot move to a non-US institution while keeping the
+    # flag (same shape as the career-stage rule above).
+    if person.is_voting and not db.get(Institution, institution_id).is_us:
+        raise HTTPException(
+            422,
+            "Voting membership requires a US institution. "
+            "Update your voting status first.",
+        )
+
     open_primary = _open_primary(db, person_id)
     if open_primary is not None:
         if open_primary.institution_id == institution_id:
@@ -524,10 +551,20 @@ def change_institution(
 def add_affiliation(
     person_id: int, body: AffiliationCreate, db: Session = Depends(get_db)
 ) -> AffiliationOut:
-    _get_person(db, person_id)
-    if db.get(Institution, body.institution_id) is None:
+    person = _get_person(db, person_id)
+    institution = db.get(Institution, body.institution_id)
+    if institution is None:
         raise HTTPException(404, "institution_id not found")
     if body.is_primary and body.end_date is None:
+        # The new open primary is where the person currently is — a voting
+        # member cannot be placed at a non-US institution (same rule as the
+        # self-service move).
+        if person.is_voting and not institution.is_us:
+            raise HTTPException(
+                422,
+                "Voting membership requires a US institution. "
+                "Update the voting status first.",
+            )
         # Close any currently-open primary affiliation (same fencepost rules
         # as the self-service institution move).
         open_primary = _open_primary(db, person_id)

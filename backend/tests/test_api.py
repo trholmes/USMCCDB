@@ -386,10 +386,15 @@ def test_member_voting_eligibility(admin):
     # …and neither can the office (the invariant binds every actor).
     assert admin.patch(f"/api/v1/people/{gid}", json={"is_voting": True}).status_code == 422
 
-    # An active postdoc can.
+    # An active postdoc at a US institution can.
     pd, pdid = _linked_member(
         admin, given="Paz", family="Postdoc", email="paz.pd@example.edu", career_stage="postdoc"
     )
+    inst = admin.post("/api/v1/institutions", json={"name": "Voting University"}).json()
+    assert pd.post(
+        f"/api/v1/people/{pdid}/institution",
+        json={"institution_id": inst["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
     assert pd.patch(f"/api/v1/people/{pdid}", json={"is_voting": True}).status_code == 200
     assert pd.get(f"/api/v1/people/{pdid}").json()["is_voting"] is True
 
@@ -408,6 +413,74 @@ def test_member_voting_eligibility(admin):
     # must not be blocked by the eligibility check while inactive.
     r = pd.patch(f"/api/v1/people/{pdid}", json={"expertise": "detector R&D"})
     assert r.status_code == 200, r.text
+
+
+def test_voting_requires_us_institution(admin):
+    member, pid = _linked_member(
+        admin, given="Uma", family="Usonly", email="uma.usonly@example.edu", career_stage="faculty"
+    )
+    us = admin.post("/api/v1/institutions", json={"name": "Stateside University"}).json()
+    assert us["is_us"] is True  # US is the default
+    abroad = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Overseas Institute", "country": "Switzerland", "is_us": False},
+    ).json()
+
+    # Without a current primary affiliation there is no US institution to
+    # qualify through.
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 422
+
+    # At a non-US institution, neither the member nor the office can set the
+    # flag (the invariant binds every actor).
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": abroad["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 422
+    assert admin.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 422
+
+    # Moving to a US institution unlocks it.
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": us["id"], "start_date": "2025-06-01"},
+    ).status_code == 201
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 200
+
+    # A voting member cannot move to a non-US institution while keeping the
+    # flag (same rule as becoming a student); nothing about the move applies.
+    r = member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": abroad["id"], "start_date": "2026-01-01"},
+    )
+    assert r.status_code == 422
+    person = member.get(f"/api/v1/people/{pid}").json()
+    open_affil = next(x for x in person["affiliations"] if x["end_date"] is None)
+    assert open_affil["institution"]["id"] == us["id"]
+    assert person["is_voting"] is True
+
+    # The office affiliation route enforces the same rule for open primaries.
+    assert admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={"institution_id": abroad["id"], "is_primary": True, "start_date": "2026-01-01"},
+    ).status_code == 422
+    # …but recording closed history at a non-US institution is fine.
+    assert admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={
+            "institution_id": abroad["id"],
+            "is_primary": False,
+            "start_date": "2020-01-01",
+            "end_date": "2020-12-31",
+        },
+    ).status_code == 201
+
+    # Reclassifying the institution as non-US clears the voting flag of the
+    # people currently there (like a deactivation does).
+    assert admin.patch(f"/api/v1/institutions/{us['id']}", json={"is_us": False}).status_code == 200
+    assert member.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
+    # …and flipping it back does not silently restore the flag.
+    assert admin.patch(f"/api/v1/institutions/{us['id']}", json={"is_us": True}).status_code == 200
+    assert member.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
 
 
 def test_research_areas_normalized(admin):
@@ -444,6 +517,11 @@ def test_directory_filters(admin):
     other, oid = _linked_member(
         admin, given="Ned", family="Nofilter", email="ned.nofilter@example.edu"
     )
+    inst = admin.post("/api/v1/institutions", json={"name": "Filter University"}).json()
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": inst["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
     assert member.patch(
         f"/api/v1/people/{pid}",
         json={"research_areas": "Accelerator Physics, Other/Multiple", "is_voting": True},
@@ -476,6 +554,11 @@ def test_office_status_change_clears_voting(admin):
     _, pid = _linked_member(
         admin, given="Vera", family="Vote", email="vera.vote@example.edu", career_stage="faculty"
     )
+    inst = admin.post("/api/v1/institutions", json={"name": "Vote Lab"}).json()
+    assert admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2025-01-01"},
+    ).status_code == 201
     assert admin.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 200
 
     # Office deactivation must clear the voting flag too, not just self-service.

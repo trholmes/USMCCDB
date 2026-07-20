@@ -149,10 +149,15 @@ export default function PersonPage() {
     setEditing(true)
   }
 
+  const currentPrimary = person.affiliations.find((a) => a.is_primary && a.end_date === null)
+
   // Self-service voting rule (office accounts are not bound by it — the
-  // backend enforces eligibility for everyone at save time).
+  // backend enforces eligibility for everyone at save time): active,
+  // non-student, and currently at a US institution.
   const votingEligible =
-    person.status === 'active' && !STUDENT_STAGES.includes(form.career_stage)
+    person.status === 'active' &&
+    !STUDENT_STAGES.includes(form.career_stage) &&
+    (currentPrimary?.institution.is_us ?? false)
   // What the checkbox actually shows/means for this user.
   const effectiveVoting = isOffice ? voting : votingEligible && voting
 
@@ -293,8 +298,6 @@ export default function PersonPage() {
     }
   }
 
-  const currentPrimary = person.affiliations.find((a) => a.is_primary && a.end_date === null)
-
   return (
     <Stack>
       <Group justify="space-between">
@@ -419,7 +422,7 @@ export default function PersonPage() {
               description={
                 isOffice || votingEligible
                   ? 'PhD-holding physicist at a US institution, actively contributing.'
-                  : 'Voting membership requires an active, non-student member (not a grad or undergrad student).'
+                  : 'Voting membership requires an active, non-student member (not a grad or undergrad student) currently at a US institution.'
               }
             />
             <Group>

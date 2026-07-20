@@ -82,8 +82,9 @@ itself, so the database just has to exist.
 - Roles: `admin` / `office` / `member`. Members may edit only the
   `SELF_EDITABLE` fields on their own profile and set only `SELF_SETTABLE_STATUSES`;
   moderation states (`pending`/`rejected`) are office-only. Voting membership
-  requires an active, non-student member — enforced server-side everywhere the
-  involved fields change.
+  requires an active, non-student member currently at a US institution
+  (`institutions.is_us`) — enforced server-side everywhere the involved
+  fields change.
 - Status and membership changes are recorded append-only in
   `membership_events`; don't mutate history.
 - API tests live in `backend/tests/test_api.py` and exercise the real HTTP

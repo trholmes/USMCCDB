@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Affiliation, Institution, User
+from app.models import Affiliation, Institution, Person, User
 from app.schemas.membership import InstitutionCreate, InstitutionOut, InstitutionUpdate
 from app.security import get_current_user, require_office
 
@@ -71,8 +71,28 @@ def update_institution(
     inst = db.get(Institution, institution_id)
     if inst is None:
         raise HTTPException(404, "Institution not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    for field, value in changes.items():
         setattr(inst, field, value)
+    # Reclassifying an institution as non-US ends voting eligibility for the
+    # people currently there — clear their flags, like a status change does.
+    if changes.get("is_us") is False:
+        members = (
+            db.execute(
+                select(Person)
+                .join(Affiliation, Affiliation.person_id == Person.id)
+                .where(
+                    Affiliation.institution_id == institution_id,
+                    Affiliation.is_primary.is_(True),
+                    Affiliation.end_date.is_(None),
+                    Person.is_voting.is_(True),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for person in members:
+            person.is_voting = False
     db.commit()
     db.refresh(inst)
     return InstitutionOut.model_validate(inst)
