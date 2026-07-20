@@ -89,3 +89,11 @@ itself, so the database just has to exist.
 - API tests live in `backend/tests/test_api.py` and exercise the real HTTP
   API via `TestClient` (module-scoped, tables dropped/recreated per run).
 - Commit messages: single imperative summary line, optional body.
+
+## Workflow
+
+- Work on a feature branch, never directly on `main`.
+- When a change is complete and both CI checks pass locally, commit, push,
+  and **open a PR against `main` automatically** — no need to ask first.
+  Reference the issue it addresses (e.g. `Closes #15`) and summarize what
+  changed and how it was tested.
