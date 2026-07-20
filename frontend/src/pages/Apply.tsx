@@ -5,6 +5,7 @@ import {
   Checkbox,
   Select,
   Stack,
+  TagsInput,
   Text,
   Textarea,
   TextInput,
@@ -14,7 +15,7 @@ import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { CAREER_STAGES } from '../constants'
+import { CAREER_STAGES, EXPERTISE_AREAS, joinExpertise } from '../constants'
 
 export default function ApplyPage() {
   const [form, setForm] = useState({
@@ -26,7 +27,7 @@ export default function ApplyPage() {
     career_stage: 'other',
     institution_name: '',
     is_voting: false,
-    expertise: '',
+    expertise: [] as string[],
     notes: '',
   })
   const [busy, setBusy] = useState(false)
@@ -44,7 +45,7 @@ export default function ApplyPage() {
         preferred_name: form.preferred_name || null,
         orcid: form.orcid || null,
         institution_name: form.institution_name || null,
-        expertise: form.expertise || null,
+        expertise: joinExpertise(form.expertise),
         notes: form.notes || null,
       })
       setDone(true)
@@ -131,10 +132,14 @@ export default function ApplyPage() {
                 checked={form.is_voting}
                 onChange={(e) => set('is_voting', e.currentTarget.checked)}
               />
-              <Textarea
+              <TagsInput
                 label="Areas of expertise"
+                description="Pick from the list or type your own and press Enter."
+                placeholder="Select or type…"
+                data={EXPERTISE_AREAS}
                 value={form.expertise}
-                onChange={(e) => set('expertise', e.currentTarget.value)}
+                onChange={(v) => set('expertise', v)}
+                clearable
               />
               <Textarea
                 label="Anything you want to tell us?"

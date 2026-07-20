@@ -7,8 +7,8 @@ import {
   Select,
   Stack,
   Table,
+  TagsInput,
   Text,
-  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -20,7 +20,14 @@ import type { Institution, MembershipEvent, Person, Talk } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
-import { CAREER_STAGES, SELF_STATUSES, STUDENT_STAGES } from '../constants'
+import {
+  CAREER_STAGES,
+  EXPERTISE_AREAS,
+  joinExpertise,
+  SELF_STATUSES,
+  splitExpertise,
+  STUDENT_STAGES,
+} from '../constants'
 
 // Local calendar date (toISOString would give the UTC date, off by one for
 // users east or west of UTC around midnight).
@@ -36,6 +43,7 @@ export default function PersonPage() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
   const [voting, setVoting] = useState(false)
+  const [expertise, setExpertise] = useState<string[]>([])
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
@@ -105,8 +113,8 @@ export default function PersonPage() {
       email: person.email,
       orcid: person.orcid ?? '',
       career_stage: person.career_stage,
-      expertise: person.expertise ?? '',
     })
+    setExpertise(splitExpertise(person.expertise))
     setVoting(person.is_voting)
     setEditing(true)
   }
@@ -129,7 +137,13 @@ export default function PersonPage() {
     changed('email', form.email, person.email)
     changed('orcid', form.orcid || null, person.orcid)
     changed('career_stage', form.career_stage, person.career_stage)
-    changed('expertise', form.expertise || null, person.expertise)
+    // Compare canonical forms so an untouched field (possibly stored with
+    // older free-text separators) isn't rewritten on every save.
+    changed(
+      'expertise',
+      joinExpertise(expertise),
+      joinExpertise(splitExpertise(person.expertise)),
+    )
     changed('is_voting', effectiveVoting, person.is_voting)
     if (Object.keys(payload).length === 0) {
       setEditing(false)
@@ -300,10 +314,14 @@ export default function PersonPage() {
               value={form.career_stage}
               onChange={(v) => setForm({ ...form, career_stage: v || 'other' })}
             />
-            <Textarea
+            <TagsInput
               label="Areas of expertise"
-              value={form.expertise}
-              onChange={(e) => setForm({ ...form, expertise: e.currentTarget.value })}
+              description="Pick from the list or type your own and press Enter."
+              placeholder="Select or type…"
+              data={EXPERTISE_AREAS}
+              value={expertise}
+              onChange={setExpertise}
+              clearable
             />
             <Checkbox
               label="Voting member"
@@ -336,9 +354,16 @@ export default function PersonPage() {
               </Text>
             )}
             {person.expertise && (
-              <Text size="sm">
-                <b>Expertise:</b> {person.expertise}
-              </Text>
+              <Group gap={6}>
+                <Text size="sm">
+                  <b>Expertise:</b>
+                </Text>
+                {splitExpertise(person.expertise).map((area) => (
+                  <Badge key={area} variant="light" color="gray" size="sm">
+                    {area}
+                  </Badge>
+                ))}
+              </Group>
             )}
           </Stack>
         </Card>
