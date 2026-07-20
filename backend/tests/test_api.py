@@ -343,6 +343,40 @@ def test_institution_history_records_career_stage(admin):
     assert open_affil["institution"]["id"] == b["id"]
 
 
+def test_institution_people_count(admin):
+    a = admin.post("/api/v1/institutions", json={"name": "Count University"}).json()
+    b = admin.post("/api/v1/institutions", json={"name": "Empty Tech"}).json()
+
+    pids = []
+    for name in ("One", "Two", "Three"):
+        p = admin.post(
+            "/api/v1/people/apply",
+            json={
+                "given_name": name,
+                "family_name": "Counter",
+                "email": f"{name.lower()}.counter@example.edu",
+            },
+        ).json()
+        pids.append(p["id"])
+
+    # Two people currently at Count University…
+    for pid in pids[:2]:
+        assert admin.post(
+            f"/api/v1/people/{pid}/affiliations",
+            json={"institution_id": a["id"], "start_date": "2025-01-01"},
+        ).status_code == 201
+    # …and one whose affiliation already ended — past members don't count.
+    assert admin.post(
+        f"/api/v1/people/{pids[2]}/affiliations",
+        json={"institution_id": a["id"], "start_date": "2024-01-01", "end_date": "2024-12-31"},
+    ).status_code == 201
+
+    counts = {i["name"]: i["people_count"] for i in admin.get("/api/v1/institutions").json()}
+    assert counts["Count University"] == 2
+    assert counts["Empty Tech"] == 0
+    assert admin.get(f"/api/v1/institutions/{a['id']}").json()["people_count"] == 2
+
+
 def test_member_voting_eligibility(admin):
     # A grad student cannot self-assign voting membership.
     grad, gid = _linked_member(
