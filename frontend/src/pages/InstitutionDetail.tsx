@@ -4,12 +4,21 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution, PersonSummary } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
+
+const ACCESSORS: Accessors<PersonSummary> = {
+  name: (p) => `${p.family_name} ${p.given_name}`,
+  position: (p) => p.career_stage,
+  voting: (p) => p.is_voting,
+  email: (p) => p.email,
+}
 
 export default function InstitutionDetailPage() {
   const { id } = useParams()
   const [inst, setInst] = useState<Institution | null>(null)
   const [members, setMembers] = useState<PersonSummary[]>([])
   const navigate = useNavigate()
+  const { sorted, sort, toggle } = useSortable(members, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<Institution>(`/institutions/${id}`).then(setInst).catch(() => setInst(null))
@@ -52,14 +61,14 @@ export default function InstitutionDetailPage() {
       <Table striped highlightOnHover maw={900}>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Name</Table.Th>
-            <Table.Th>Position</Table.Th>
-            <Table.Th>Voting</Table.Th>
-            <Table.Th>Email</Table.Th>
+            <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
+            <SortableTh label="Position" k="position" sort={sort} toggle={toggle} />
+            <SortableTh label="Voting" k="voting" sort={sort} toggle={toggle} />
+            <SortableTh label="Email" k="email" sort={sort} toggle={toggle} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {members.map((p) => (
+          {sorted.map((p) => (
             <Table.Tr
               key={p.id}
               style={{ cursor: 'pointer' }}
