@@ -13,14 +13,15 @@ used by the LHC experiments, built as a self-hosted open-source stack:
 |---|---|
 | ![Login](docs/screenshots/login.png) | ![Directory](docs/screenshots/directory.png) |
 | ![Talks](docs/screenshots/talks.png) | ![Stats](docs/screenshots/stats.png) |
+| ![Institution](docs/screenshots/institution.png) | ![Publication with author list](docs/screenshots/publication.png) |
 
-![Publication with author list](docs/screenshots/publication.png)
+*(Screenshots show the bundled fictional demo dataset — `seed-demo`.)*
 
 ## What it does
 
 - **Membership** — people, institutions, dated affiliations, voting-member flag,
-  career stage, working groups, leadership roles, and an apply → approve
-  workflow with a full audit trail.
+  career stage, working groups, leadership roles, member photos, and an
+  apply → approve workflow with a full audit trail.
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
   seminar/outreach, invited vs. contributed), member nominations, office
   assignment, and fair-share statistics per person and institution.
@@ -36,6 +37,10 @@ used by the LHC experiments, built as a self-hosted open-source stack:
   username/password accounts; admins can create as many local accounts as
   needed. Roles: `admin`, `office`, `member` (+ working-group conveners with
   scoped rights).
+- **Interconnected, Glance-style** — every page cross-links: directory rows →
+  institution pages (with their member lists) → profiles → the person's talks
+  and back; speaker and stats entries click through to people. Every listing
+  table sorts by any column (click cycles ascending → descending → default).
 
 ## Quick start
 
@@ -133,7 +138,8 @@ Both commands skip people who already have a photo unless you pass
 | `./scripts/logs.sh [service]` | Tail logs |
 
 Backups run automatically every night at `BACKUP_HOUR` (UTC) into the
-`backups` volume, rotated as 14 daily / 8 weekly / 12 monthly dumps. Copy them
+`backups` volume, rotated as 14 daily / 8 weekly / 12 monthly dumps; member
+photos are snapshotted alongside as `photos-<date>.tar.gz`. Copy everything
 off-site with e.g. `docker compose cp backup:/backups ./offsite/`.
 
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
