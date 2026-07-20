@@ -15,7 +15,16 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Publication, WorkingGroup } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+
+const ACCESSORS: Accessors<Publication> = {
+  code: (p) => p.short_code,
+  title: (p) => p.title,
+  type: (p) => p.pub_type,
+  status: (p) => p.status,
+  ref: (p) => p.arxiv_id || p.journal,
+}
 
 export default function PublicationsPage() {
   const [pubs, setPubs] = useState<Publication[]>([])
@@ -30,6 +39,7 @@ export default function PublicationsPage() {
   })
   const navigate = useNavigate()
   const { isOffice } = useSession()
+  const { sorted, sort, toggle } = useSortable(pubs, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<Publication[]>('/publications').then(setPubs).catch(() => setPubs([]))
@@ -62,15 +72,15 @@ export default function PublicationsPage() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Code</Table.Th>
-            <Table.Th>Title</Table.Th>
-            <Table.Th>Type</Table.Th>
-            <Table.Th>Status</Table.Th>
-            <Table.Th>arXiv / journal</Table.Th>
+            <SortableTh label="Code" k="code" sort={sort} toggle={toggle} />
+            <SortableTh label="Title" k="title" sort={sort} toggle={toggle} />
+            <SortableTh label="Type" k="type" sort={sort} toggle={toggle} />
+            <SortableTh label="Status" k="status" sort={sort} toggle={toggle} />
+            <SortableTh label="arXiv / journal" k="ref" sort={sort} toggle={toggle} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {pubs.map((p) => (
+          {sorted.map((p) => (
             <Table.Tr
               key={p.id}
               style={{ cursor: 'pointer' }}

@@ -4,7 +4,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution } from '../api/types'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+
+const ACCESSORS: Accessors<Institution> = {
+  name: (i) => i.name,
+  short_name: (i) => i.short_name,
+  latex_address: (i) => i.latex_address,
+}
 
 export default function InstitutionsPage() {
   const [rows, setRows] = useState<Institution[]>([])
@@ -12,6 +19,7 @@ export default function InstitutionsPage() {
   const [form, setForm] = useState({ name: '', short_name: '', latex_address: '' })
   const { isOffice } = useSession()
   const navigate = useNavigate()
+  const { sorted, sort, toggle } = useSortable(rows, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<Institution[]>('/institutions').then(setRows).catch(() => setRows([]))
@@ -56,14 +64,14 @@ export default function InstitutionsPage() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Name</Table.Th>
-            <Table.Th>Short name</Table.Th>
-            <Table.Th>Author-list address</Table.Th>
+            <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
+            <SortableTh label="Short name" k="short_name" sort={sort} toggle={toggle} />
+            <SortableTh label="Author-list address" k="latex_address" sort={sort} toggle={toggle} />
             <Table.Th />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {rows.map((i) => (
+          {sorted.map((i) => (
             <Table.Tr
               key={i.id}
               style={{ cursor: 'pointer' }}

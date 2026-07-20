@@ -13,6 +13,15 @@ import {
 } from 'recharts'
 import { api } from '../api/client'
 import type { TalkStatRow } from '../api/types'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
+
+type TotalRow = [string, { id: number; talks: number; invited: number }]
+
+const ACCESSORS: Accessors<TotalRow> = {
+  key: (r) => r[0],
+  talks: (r) => r[1].talks,
+  invited: (r) => r[1].invited,
+}
 
 export default function StatsPage() {
   const [by, setBy] = useState('person')
@@ -30,8 +39,9 @@ export default function StatsPage() {
       const cur = m.get(r.key) ?? { id: r.key_id, talks: 0, invited: 0 }
       m.set(r.key, { id: r.key_id, talks: cur.talks + r.talks, invited: cur.invited + r.invited })
     })
-    return [...m.entries()].sort((a, b) => b[1].talks - a[1].talks)
+    return [...m.entries()].sort((a, b) => b[1].talks - a[1].talks) as TotalRow[]
   }, [rows])
+  const { sorted, sort, toggle } = useSortable(totals, ACCESSORS)
 
   const perYear = useMemo(() => {
     const m = new Map<number, { year: number; talks: number; invited: number }>()
@@ -97,13 +107,18 @@ export default function StatsPage() {
       <Table striped highlightOnHover maw={720}>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>{by === 'person' ? 'Speaker' : 'Institution'}</Table.Th>
-            <Table.Th>Talks</Table.Th>
-            <Table.Th>Invited</Table.Th>
+            <SortableTh
+              label={by === 'person' ? 'Speaker' : 'Institution'}
+              k="key"
+              sort={sort}
+              toggle={toggle}
+            />
+            <SortableTh label="Talks" k="talks" sort={sort} toggle={toggle} />
+            <SortableTh label="Invited" k="invited" sort={sort} toggle={toggle} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {totals.map(([key, v]) => (
+          {sorted.map(([key, v]) => (
             <Table.Tr
               key={key}
               style={{ cursor: 'pointer' }}

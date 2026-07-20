@@ -12,9 +12,10 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import type { EventItem, PersonSummary, Talk } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
@@ -44,6 +45,19 @@ export default function TalksPage() {
   useEffect(load, [load])
 
   const eventName = (id: number | null) => events.find((e) => e.id === id)?.name ?? ''
+
+  const accessors = useMemo<Accessors<Talk>>(
+    () => ({
+      date: (t) => t.date,
+      conference: (t) => events.find((e) => e.id === t.event_id)?.name,
+      title: (t) => t.title,
+      type: (t) => `${t.talk_type}${t.is_invited ? ' invited' : ''}`,
+      speaker: (t) => (t.speaker ? `${t.speaker.family_name} ${t.speaker.given_name}` : null),
+      status: (t) => t.status,
+    }),
+    [events],
+  )
+  const { sorted, sort, toggle } = useSortable(talks, accessors)
 
   const createTalk = async () => {
     try {
@@ -92,16 +106,16 @@ export default function TalksPage() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Date</Table.Th>
-            <Table.Th>Conference</Table.Th>
-            <Table.Th>Title</Table.Th>
-            <Table.Th>Type</Table.Th>
-            <Table.Th>Speaker</Table.Th>
-            <Table.Th>Status</Table.Th>
+            <SortableTh label="Date" k="date" sort={sort} toggle={toggle} />
+            <SortableTh label="Conference" k="conference" sort={sort} toggle={toggle} />
+            <SortableTh label="Title" k="title" sort={sort} toggle={toggle} />
+            <SortableTh label="Type" k="type" sort={sort} toggle={toggle} />
+            <SortableTh label="Speaker" k="speaker" sort={sort} toggle={toggle} />
+            <SortableTh label="Status" k="status" sort={sort} toggle={toggle} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {talks.map((t) => (
+          {sorted.map((t) => (
             <Table.Tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setDetail(t)}>
               <Table.Td>{t.date}</Table.Td>
               <Table.Td>{eventName(t.event_id)}</Table.Td>

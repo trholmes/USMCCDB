@@ -5,7 +5,18 @@ import { api } from '../api/client'
 import type { PersonSummary } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+
+const ACCESSORS: Accessors<PersonSummary> = {
+  name: (p) => `${p.family_name} ${p.given_name}`,
+  institution: (p) => p.primary_institution?.short_name || p.primary_institution?.name,
+  email: (p) => p.email,
+  position: (p) => p.career_stage,
+  voting: (p) => p.is_voting,
+  orcid: (p) => p.orcid,
+  status: (p) => p.status,
+}
 
 export default function DirectoryPage() {
   const [people, setPeople] = useState<PersonSummary[]>([])
@@ -28,6 +39,7 @@ export default function DirectoryPage() {
         p.email.toLowerCase().includes(needle),
     )
   }, [people, q])
+  const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
 
   return (
     <>
@@ -62,17 +74,17 @@ export default function DirectoryPage() {
       <Table striped highlightOnHover stickyHeader>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Name</Table.Th>
-            <Table.Th>Institution</Table.Th>
-            <Table.Th>Email</Table.Th>
-            <Table.Th>Position</Table.Th>
-            <Table.Th>Voting</Table.Th>
-            <Table.Th>ORCID</Table.Th>
-            {isOffice && <Table.Th>Status</Table.Th>}
+            <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
+            <SortableTh label="Institution" k="institution" sort={sort} toggle={toggle} />
+            <SortableTh label="Email" k="email" sort={sort} toggle={toggle} />
+            <SortableTh label="Position" k="position" sort={sort} toggle={toggle} />
+            <SortableTh label="Voting" k="voting" sort={sort} toggle={toggle} />
+            <SortableTh label="ORCID" k="orcid" sort={sort} toggle={toggle} />
+            {isOffice && <SortableTh label="Status" k="status" sort={sort} toggle={toggle} />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {filtered.map((p) => (
+          {sorted.map((p) => (
             <Table.Tr
               key={p.id}
               style={{ cursor: 'pointer' }}

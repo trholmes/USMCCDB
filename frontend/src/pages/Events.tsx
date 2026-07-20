@@ -3,7 +3,16 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { EventItem } from '../api/types'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+
+const ACCESSORS: Accessors<EventItem> = {
+  name: (e) => e.name,
+  location: (e) => e.location,
+  dates: (e) => e.start_date,
+  abstract_deadline: (e) => e.abstract_deadline,
+  talks: (e) => e.talk_count,
+}
 
 export default function EventsPage() {
   const [rows, setRows] = useState<EventItem[]>([])
@@ -17,6 +26,7 @@ export default function EventsPage() {
     abstract_deadline: '',
   })
   const { isOffice } = useSession()
+  const { sorted, sort, toggle } = useSortable(rows, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<EventItem[]>('/events').then(setRows).catch(() => setRows([]))
@@ -49,15 +59,15 @@ export default function EventsPage() {
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>Name</Table.Th>
-            <Table.Th>Location</Table.Th>
-            <Table.Th>Dates</Table.Th>
-            <Table.Th>Abstract deadline</Table.Th>
-            <Table.Th>Talks</Table.Th>
+            <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
+            <SortableTh label="Location" k="location" sort={sort} toggle={toggle} />
+            <SortableTh label="Dates" k="dates" sort={sort} toggle={toggle} />
+            <SortableTh label="Abstract deadline" k="abstract_deadline" sort={sort} toggle={toggle} />
+            <SortableTh label="Talks" k="talks" sort={sort} toggle={toggle} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {rows.map((e) => (
+          {sorted.map((e) => (
             <Table.Tr key={e.id}>
               <Table.Td>
                 {e.url ? (

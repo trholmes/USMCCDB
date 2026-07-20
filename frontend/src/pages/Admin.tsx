@@ -17,13 +17,23 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { User } from '../api/types'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+
+const ACCESSORS: Accessors<User> = {
+  id: (u) => u.id,
+  login: (u) => u.username ?? u.orcid,
+  role: (u) => u.role,
+  active: (u) => u.is_active,
+  last_login: (u) => u.last_login_at,
+}
 
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([])
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState({ username: '', password: '', role: 'member' })
   const { me } = useSession()
+  const { sorted, sort, toggle } = useSortable(users, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<User[]>('/auth/users').then(setUsers).catch(() => setUsers([]))
@@ -69,15 +79,15 @@ export default function AdminPage() {
       <Table striped>
         <Table.Thead>
           <Table.Tr>
-            <Table.Th>ID</Table.Th>
-            <Table.Th>Login</Table.Th>
-            <Table.Th>Role</Table.Th>
-            <Table.Th>Active</Table.Th>
-            <Table.Th>Last login</Table.Th>
+            <SortableTh label="ID" k="id" sort={sort} toggle={toggle} />
+            <SortableTh label="Login" k="login" sort={sort} toggle={toggle} />
+            <SortableTh label="Role" k="role" sort={sort} toggle={toggle} />
+            <SortableTh label="Active" k="active" sort={sort} toggle={toggle} />
+            <SortableTh label="Last login" k="last_login" sort={sort} toggle={toggle} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {users.map((u) => (
+          {sorted.map((u) => (
             <Table.Tr key={u.id}>
               <Table.Td>{u.id}</Table.Td>
               <Table.Td>
