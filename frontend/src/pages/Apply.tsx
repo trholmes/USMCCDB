@@ -14,16 +14,7 @@ import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-
-const STAGES = [
-  { value: 'faculty', label: 'Faculty' },
-  { value: 'staff', label: 'Lab / research scientist' },
-  { value: 'postdoc', label: 'Postdoc' },
-  { value: 'grad', label: 'Graduate student' },
-  { value: 'undergrad', label: 'Undergraduate' },
-  { value: 'engineer', label: 'Engineer' },
-  { value: 'other', label: 'Other' },
-]
+import { CAREER_STAGES } from '../constants'
 
 export default function ApplyPage() {
   const [form, setForm] = useState({
@@ -126,7 +117,7 @@ export default function ApplyPage() {
               />
               <Select
                 label="Position"
-                data={STAGES}
+                data={CAREER_STAGES}
                 value={form.career_stage}
                 onChange={(v) => set('career_stage', v || 'other')}
               />

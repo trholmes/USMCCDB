@@ -67,6 +67,17 @@ export interface Person extends PersonSummary {
   author_periods: AuthorPeriod[]
 }
 
+export interface MembershipEvent {
+  id: number
+  person_id: number
+  from_status: string | null
+  to_status: string
+  effective_date: string | null
+  actor_user_id: number | null
+  note: string | null
+  created_at: string
+}
+
 export interface WorkingGroup {
   id: number
   name: string

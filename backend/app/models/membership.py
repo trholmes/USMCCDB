@@ -211,6 +211,9 @@ class MembershipEvent(TimestampedBase):
     )
     from_status: Mapped[str | None] = mapped_column(String(20))
     to_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Date the transition takes effect (as entered by the member/office);
+    # may be back- or future-dated relative to created_at.
+    effective_date: Mapped[date | None] = mapped_column(Date)
     actor_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )

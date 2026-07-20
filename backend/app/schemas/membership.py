@@ -121,7 +121,17 @@ class PersonUpdate(BaseModel):
 
 class StatusChange(BaseModel):
     status: MemberStatus
+    # When the change takes effect; defaults to today if omitted.
+    effective_date: date | None = None
     note: str | None = None
+
+
+class InstitutionChange(BaseModel):
+    """Self-service / office move to a new primary institution as of a date."""
+
+    institution_id: int | None = None
+    institution_name: str | None = None  # free text if not in the list yet
+    start_date: date
 
 
 class PersonSummary(ORMModel):
@@ -197,6 +207,7 @@ class MembershipEventOut(ORMModel):
     person_id: int
     from_status: str | None
     to_status: str
+    effective_date: date | None
     actor_user_id: int | None
     note: str | None
     created_at: datetime

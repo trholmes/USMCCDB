@@ -2,6 +2,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Group,
   Select,
   Stack,
@@ -15,21 +16,44 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, uploadFile } from '../api/client'
-import type { Person, Talk } from '../api/types'
+import type { Institution, MembershipEvent, Person, Talk } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { CAREER_STAGES, SELF_STATUSES, STUDENT_STAGES } from '../constants'
+
+// Local calendar date (toISOString would give the UTC date, off by one for
+// users east or west of UTC around midnight).
+const today = () => {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 export default function PersonPage() {
   const { id } = useParams()
   const [person, setPerson] = useState<Person | null>(null)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
+  const [voting, setVoting] = useState(false)
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
 
   const [talks, setTalks] = useState<Talk[]>([])
+  const [institutions, setInstitutions] = useState<Institution[]>([])
+  const [events, setEvents] = useState<MembershipEvent[]>([])
+
+  // Institution move form.
+  const [instId, setInstId] = useState<string | null>(null)
+  const [instName, setInstName] = useState('')
+  const [instDate, setInstDate] = useState(today())
+  const [instBusy, setInstBusy] = useState(false)
+
+  // Status change form (self-service).
+  const [newStatus, setNewStatus] = useState<string | null>(null)
+  const [statusDate, setStatusDate] = useState(today())
+  const [statusBusy, setStatusBusy] = useState(false)
 
   const load = useCallback(() => {
     api.get<Person>(`/people/${id}`).then(setPerson).catch(() => setPerson(null))
@@ -39,6 +63,16 @@ export default function PersonPage() {
       .catch(() => setTalks([]))
   }, [id])
   useEffect(load, [load])
+
+  // isSelf via the route param so it (and everything keyed on it) is stable
+  // across profile re-fetches.
+  const isSelf = me?.person_id != null && me.person_id === Number(id)
+  const canEdit = isSelf || isOffice
+
+  useEffect(() => {
+    if (!canEdit) return // list feeds the edit cards only
+    api.get<Institution[]>('/institutions').then(setInstitutions).catch(() => setInstitutions([]))
+  }, [canEdit])
 
   const uploadPhoto = async (file: File | undefined) => {
     if (!file || !person) return
@@ -51,29 +85,58 @@ export default function PersonPage() {
     }
   }
 
-  if (!person) return <Text c="dimmed">Loading…</Text>
+  // Membership status history — visible to the member themselves and office.
+  // Keyed on the route id (not the person object) so profile saves and photo
+  // uploads don't re-fetch it; status changes refresh it explicitly.
+  const loadEvents = useCallback(() => {
+    if (!canEdit) return
+    api
+      .get<MembershipEvent[]>(`/people/${id}/events`)
+      .then(setEvents)
+      .catch(() => setEvents([]))
+  }, [id, canEdit])
+  useEffect(loadEvents, [loadEvents])
 
-  const isSelf = me?.person_id === person.id
-  const canEdit = isSelf || isOffice
+  if (!person) return <Text c="dimmed">Loading…</Text>
 
   const startEdit = () => {
     setForm({
       preferred_name: person.preferred_name ?? '',
       email: person.email,
       orcid: person.orcid ?? '',
+      career_stage: person.career_stage,
       expertise: person.expertise ?? '',
     })
+    setVoting(person.is_voting)
     setEditing(true)
   }
 
+  // Self-service voting rule (office accounts are not bound by it — the
+  // backend enforces eligibility for everyone at save time).
+  const votingEligible =
+    person.status === 'active' && !STUDENT_STAGES.includes(form.career_stage)
+  // What the checkbox actually shows/means for this user.
+  const effectiveVoting = isOffice ? voting : votingEligible && voting
+
   const save = async () => {
+    // PATCH only what changed, so unrelated edits can never clobber fields
+    // (e.g. an office save must not silently strip a voting flag).
+    const payload: Record<string, unknown> = {}
+    const changed = (key: string, next: unknown, current: unknown) => {
+      if (next !== current) payload[key] = next
+    }
+    changed('preferred_name', form.preferred_name || null, person.preferred_name)
+    changed('email', form.email, person.email)
+    changed('orcid', form.orcid || null, person.orcid)
+    changed('career_stage', form.career_stage, person.career_stage)
+    changed('expertise', form.expertise || null, person.expertise)
+    changed('is_voting', effectiveVoting, person.is_voting)
+    if (Object.keys(payload).length === 0) {
+      setEditing(false)
+      return
+    }
     try {
-      await api.patch(`/people/${person.id}`, {
-        preferred_name: form.preferred_name || null,
-        email: form.email,
-        orcid: form.orcid || null,
-        expertise: form.expertise || null,
-      })
+      await api.patch(`/people/${person.id}`, payload)
       notifications.show({ message: 'Profile updated' })
       setEditing(false)
       load()
@@ -82,16 +145,60 @@ export default function PersonPage() {
     }
   }
 
-  const changeStatus = async (status: string | null) => {
-    if (!status) return
+  // Single path for all status changes (office header select and the
+  // self-service card); returns whether the change was accepted.
+  const postStatus = async (status: string, effectiveDate?: string) => {
     try {
-      await api.post(`/people/${person.id}/status`, { status })
+      await api.post(`/people/${person.id}/status`, {
+        status,
+        ...(effectiveDate ? { effective_date: effectiveDate } : {}),
+      })
       notifications.show({ message: `Status set to ${status}` })
+      load()
+      loadEvents()
+      return true
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+      return false
+    }
+  }
+
+  const moveInstitution = async () => {
+    if (!instId && !instName.trim()) {
+      notifications.show({ color: 'red', message: 'Pick an institution or enter a name' })
+      return
+    }
+    setInstBusy(true)
+    try {
+      await api.post(`/people/${person.id}/institution`, {
+        institution_id: instId ? Number(instId) : null,
+        institution_name: instId ? null : instName.trim(),
+        start_date: instDate,
+      })
+      notifications.show({ message: 'Institution updated' })
+      setInstId(null)
+      setInstName('')
+      setInstDate(today())
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setInstBusy(false)
     }
   }
+
+  const submitStatus = async () => {
+    if (!newStatus) return
+    setStatusBusy(true)
+    const ok = await postStatus(newStatus, statusDate)
+    setStatusBusy(false)
+    if (ok) {
+      setNewStatus(null)
+      setStatusDate(today())
+    }
+  }
+
+  const currentPrimary = person.affiliations.find((a) => a.is_primary && a.end_date === null)
 
   return (
     <Stack>
@@ -161,7 +268,7 @@ export default function PersonPage() {
             <Select
               placeholder="Change status…"
               data={['pending', 'active', 'inactive', 'alumni', 'rejected']}
-              onChange={changeStatus}
+              onChange={(v) => v && postStatus(v)}
               w={160}
             />
           )}
@@ -187,10 +294,27 @@ export default function PersonPage() {
               value={form.orcid}
               onChange={(e) => setForm({ ...form, orcid: e.currentTarget.value })}
             />
+            <Select
+              label="Position / career stage"
+              data={CAREER_STAGES}
+              value={form.career_stage}
+              onChange={(v) => setForm({ ...form, career_stage: v || 'other' })}
+            />
             <Textarea
               label="Areas of expertise"
               value={form.expertise}
               onChange={(e) => setForm({ ...form, expertise: e.currentTarget.value })}
+            />
+            <Checkbox
+              label="Voting member"
+              checked={effectiveVoting}
+              disabled={!isOffice && !votingEligible}
+              onChange={(e) => setVoting(e.currentTarget.checked)}
+              description={
+                isOffice || votingEligible
+                  ? 'PhD-holding physicist at a US institution, actively contributing.'
+                  : 'Voting membership requires an active, non-student member (not a grad or undergrad student).'
+              }
             />
             <Group>
               <Button onClick={save}>Save</Button>
@@ -206,6 +330,11 @@ export default function PersonPage() {
             <Text size="sm">
               <b>Email:</b> {person.email}
             </Text>
+            {currentPrimary && (
+              <Text size="sm">
+                <b>Institution:</b> {currentPrimary.institution.name}
+              </Text>
+            )}
             {person.expertise && (
               <Text size="sm">
                 <b>Expertise:</b> {person.expertise}
@@ -213,6 +342,75 @@ export default function PersonPage() {
             )}
           </Stack>
         </Card>
+      )}
+
+      {canEdit && (
+        <Group align="flex-start" gap="md">
+          <Card withBorder w={340}>
+            <Stack gap="sm">
+              <Title order={5}>Change institution</Title>
+              <Text size="xs" c="dimmed">
+                Records a move as of the date you enter; your current affiliation is closed
+                on that date and history is kept.
+              </Text>
+              <Select
+                label="New institution"
+                placeholder="Search institutions…"
+                searchable
+                clearable
+                data={institutions.map((i) => ({
+                  value: String(i.id),
+                  label: i.short_name ? `${i.name} (${i.short_name})` : i.name,
+                }))}
+                value={instId}
+                onChange={setInstId}
+              />
+              {!instId && (
+                <TextInput
+                  label="…or a new institution not in the list"
+                  placeholder="Institution name"
+                  value={instName}
+                  onChange={(e) => setInstName(e.currentTarget.value)}
+                />
+              )}
+              <TextInput
+                label="Effective date"
+                type="date"
+                value={instDate}
+                onChange={(e) => setInstDate(e.currentTarget.value)}
+              />
+              <Button onClick={moveInstitution} loading={instBusy}>
+                Update institution
+              </Button>
+            </Stack>
+          </Card>
+
+          <Card withBorder w={340}>
+            <Stack gap="sm">
+              <Title order={5}>Change status</Title>
+              <Text size="xs" c="dimmed">
+                Update your membership status as of a date. The change is recorded in your
+                membership history.
+              </Text>
+              <Select
+                label="New status"
+                placeholder="Select status…"
+                data={SELF_STATUSES}
+                value={newStatus}
+                onChange={setNewStatus}
+              />
+              <TextInput
+                label="Effective date"
+                type="date"
+                value={statusDate}
+                onChange={(e) => setStatusDate(e.currentTarget.value)}
+              />
+              <Button onClick={submitStatus} loading={statusBusy} disabled={!newStatus}>
+                Update status
+              </Button>
+            </Stack>
+          </Card>
+        </Group>
       )}
 
       <Title order={5}>Affiliations</Title>
@@ -238,6 +436,32 @@ export default function PersonPage() {
           ))}
         </Table.Tbody>
       </Table>
+
+      {canEdit && events.length > 0 && (
+        <>
+          <Title order={5}>Membership history</Title>
+          <Table maw={720}>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Effective</Table.Th>
+                <Table.Th>From</Table.Th>
+                <Table.Th>To</Table.Th>
+                <Table.Th>Note</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {events.map((e) => (
+                <Table.Tr key={e.id}>
+                  <Table.Td>{e.effective_date ?? e.created_at.slice(0, 10)}</Table.Td>
+                  <Table.Td>{e.from_status ?? '—'}</Table.Td>
+                  <Table.Td>{e.to_status}</Table.Td>
+                  <Table.Td>{e.note ?? ''}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </>
+      )}
 
       <Title order={5}>Talks</Title>
       {talks.length === 0 ? (
