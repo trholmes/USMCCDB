@@ -93,10 +93,14 @@ export interface CollabRole {
   id: number
   person_id: number
   role: string
+  detail: string | null
   working_group_id: number | null
   institution_id: number | null
   start_date: string
   end_date: string | null
+  person: PersonSummary | null
+  working_group: { id: number; name: string; slug: string } | null
+  institution: { id: number; name: string; short_name: string | null } | null
 }
 
 export interface EventItem {

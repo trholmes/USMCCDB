@@ -531,3 +531,79 @@ def test_speakers_flow(admin):
     stats = admin.get("/api/v1/stats/talks?by=person").json()
     row = next(s for s in stats if s["key_id"] == person["id"])
     assert row["talks"] >= 1 and row["invited"] >= 1
+
+
+def test_collab_roles_lifecycle(admin):
+    member, pid = _linked_member(
+        admin, given="Lea", family="Lead", email="lea.lead@example.edu"
+    )
+
+    # Simple roles need no qualifier.
+    chair = admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": pid, "role": "chair", "start_date": "2025-01-01"},
+    )
+    assert chair.status_code == 201, chair.text
+
+    # Generic organigram roles require a detail qualifier…
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": pid, "role": "representative", "start_date": "2025-01-01"},
+    )
+    assert r.status_code == 422
+    # …and blank detail does not count.
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "coordinator",
+            "detail": "   ",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert r.status_code == 422
+
+    rep = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "representative",
+            "detail": "Accelerator",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert rep.status_code == 201, rep.text
+    assert rep.json()["detail"] == "Accelerator"
+
+    # Scoped roles keep their existing requirements.
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": pid, "role": "convener", "start_date": "2025-01-01"},
+    ).status_code == 422
+
+    # Listings resolve the person (for the leadership page).
+    roles = admin.get(f"/api/v1/collab-roles?person_id={pid}").json()
+    assert {x["role"] for x in roles} == {"chair", "representative"}
+    assert all(x["person"]["family_name"] == "Lead" for x in roles)
+
+    # Office can close a term; dates stay editable.
+    rep_id = rep.json()["id"]
+    r = admin.patch(f"/api/v1/collab-roles/{rep_id}", json={"end_date": "2026-06-30"})
+    assert r.status_code == 200 and r.json()["end_date"] == "2026-06-30"
+    # …but cannot blank a required qualifier.
+    assert admin.patch(
+        f"/api/v1/collab-roles/{rep_id}", json={"detail": None}
+    ).status_code == 422
+
+    # Members can read but not manage roles.
+    assert member.get("/api/v1/collab-roles").status_code == 200
+    assert member.post(
+        "/api/v1/collab-roles",
+        json={"person_id": pid, "role": "chair", "start_date": "2025-01-01"},
+    ).status_code == 403
+    assert member.patch(
+        f"/api/v1/collab-roles/{rep_id}", json={"end_date": "2025-12-31"}
+    ).status_code == 403
+    assert member.delete(f"/api/v1/collab-roles/{rep_id}").status_code == 403
+
+    assert admin.delete(f"/api/v1/collab-roles/{rep_id}").status_code == 204

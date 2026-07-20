@@ -17,13 +17,15 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, uploadFile } from '../api/client'
-import type { Institution, MembershipEvent, Person, Talk } from '../api/types'
+import type { CollabRole, Institution, MembershipEvent, Person, Talk, WorkingGroup } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 import {
   CAREER_STAGES,
   careerStageLabel,
+  COLLAB_ROLES,
+  collabRoleLabel,
   joinList,
   RESEARCH_AREAS,
   SELF_STATUSES,
@@ -67,6 +69,16 @@ export default function PersonPage() {
   const [statusDate, setStatusDate] = useState(today())
   const [statusBusy, setStatusBusy] = useState(false)
 
+  // Collaboration roles (leadership positions; office-managed).
+  const [roles, setRoles] = useState<CollabRole[]>([])
+  const [wgs, setWgs] = useState<WorkingGroup[]>([])
+  const [roleType, setRoleType] = useState<string | null>(null)
+  const [roleDetail, setRoleDetail] = useState('')
+  const [roleWG, setRoleWG] = useState<string | null>(null)
+  const [roleInst, setRoleInst] = useState<string | null>(null)
+  const [roleStart, setRoleStart] = useState(today())
+  const [roleBusy, setRoleBusy] = useState(false)
+
   const load = useCallback(() => {
     api.get<Person>(`/people/${id}`).then(setPerson).catch(() => setPerson(null))
     api
@@ -85,6 +97,19 @@ export default function PersonPage() {
     if (!canEdit) return // list feeds the edit cards only
     api.get<Institution[]>('/institutions').then(setInstitutions).catch(() => setInstitutions([]))
   }, [canEdit])
+
+  const loadRoles = useCallback(() => {
+    api
+      .get<CollabRole[]>(`/collab-roles?person_id=${id}`)
+      .then(setRoles)
+      .catch(() => setRoles([]))
+  }, [id])
+  useEffect(loadRoles, [loadRoles])
+
+  useEffect(() => {
+    if (!isOffice) return // list feeds the add-role form only
+    api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
+  }, [isOffice])
 
   const uploadPhoto = async (file: File | undefined) => {
     if (!file || !person) return
@@ -217,6 +242,54 @@ export default function PersonPage() {
     if (ok) {
       setNewStatus(null)
       setStatusDate(today())
+    }
+  }
+
+  const roleDef = COLLAB_ROLES.find((r) => r.value === roleType)
+
+  const addRole = async () => {
+    if (!roleType) return
+    setRoleBusy(true)
+    try {
+      await api.post('/collab-roles', {
+        person_id: person.id,
+        role: roleType,
+        detail: roleDef?.needsDetail ? roleDetail.trim() || null : null,
+        working_group_id: roleDef?.needsWG && roleWG ? Number(roleWG) : null,
+        institution_id: roleDef?.needsInstitution && roleInst ? Number(roleInst) : null,
+        start_date: roleStart,
+      })
+      notifications.show({ message: 'Role added' })
+      setRoleType(null)
+      setRoleDetail('')
+      setRoleWG(null)
+      setRoleInst(null)
+      setRoleStart(today())
+      loadRoles()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setRoleBusy(false)
+    }
+  }
+
+  const endRole = async (roleId: number) => {
+    try {
+      await api.patch(`/collab-roles/${roleId}`, { end_date: today() })
+      notifications.show({ message: 'Role ended today' })
+      loadRoles()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const deleteRole = async (roleId: number) => {
+    try {
+      await api.delete(`/collab-roles/${roleId}`)
+      notifications.show({ message: 'Role deleted' })
+      loadRoles()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
     }
   }
 
@@ -498,6 +571,128 @@ export default function PersonPage() {
           ))}
         </Table.Tbody>
       </Table>
+
+      {(roles.length > 0 || isOffice) && (
+        <>
+          <Title order={5}>Collaboration roles</Title>
+          {roles.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No leadership roles recorded.
+            </Text>
+          ) : (
+            <Table maw={860}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Role</Table.Th>
+                  <Table.Th>Scope</Table.Th>
+                  <Table.Th>From</Table.Th>
+                  <Table.Th>To</Table.Th>
+                  {isOffice && <Table.Th />}
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {roles.map((r) => (
+                  <Table.Tr key={r.id}>
+                    <Table.Td>{collabRoleLabel(r.role, r.detail)}</Table.Td>
+                    <Table.Td>
+                      {r.working_group?.name ?? r.institution?.name ?? '—'}
+                    </Table.Td>
+                    <Table.Td>{r.start_date}</Table.Td>
+                    <Table.Td>{r.end_date ?? 'present'}</Table.Td>
+                    {isOffice && (
+                      <Table.Td>
+                        <Group gap="xs" justify="flex-end" wrap="nowrap">
+                          {!r.end_date && (
+                            <Button size="compact-xs" variant="light" onClick={() => endRole(r.id)}>
+                              End today
+                            </Button>
+                          )}
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            color="red"
+                            onClick={() => deleteRole(r.id)}
+                          >
+                            Delete
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    )}
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+          {isOffice && (
+            <Card withBorder w={340}>
+              <Stack gap="sm">
+                <Title order={6}>Add role</Title>
+                <Select
+                  label="Role"
+                  placeholder="Select role…"
+                  data={COLLAB_ROLES.map((r) => ({ value: r.value, label: r.label }))}
+                  value={roleType}
+                  onChange={setRoleType}
+                  searchable
+                />
+                {roleDef?.needsDetail && (
+                  <TextInput
+                    label={roleDef.value === 'other' ? 'Title' : 'Area'}
+                    description={
+                      roleDef.value === 'other'
+                        ? 'Full title as it should appear (e.g. DEI Committee Chair).'
+                        : 'Qualifier, e.g. Accelerator, Experimental, Outreach, Target.'
+                    }
+                    value={roleDetail}
+                    onChange={(e) => setRoleDetail(e.currentTarget.value)}
+                  />
+                )}
+                {roleDef?.needsWG && (
+                  <Select
+                    label="Working group"
+                    placeholder="Select working group…"
+                    data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
+                    value={roleWG}
+                    onChange={setRoleWG}
+                    searchable
+                  />
+                )}
+                {roleDef?.needsInstitution && (
+                  <Select
+                    label="Institution"
+                    placeholder="Select institution…"
+                    data={institutions.map((i) => ({
+                      value: String(i.id),
+                      label: i.short_name ? `${i.name} (${i.short_name})` : i.name,
+                    }))}
+                    value={roleInst}
+                    onChange={setRoleInst}
+                    searchable
+                  />
+                )}
+                <TextInput
+                  label="Start date"
+                  type="date"
+                  value={roleStart}
+                  onChange={(e) => setRoleStart(e.currentTarget.value)}
+                />
+                <Button
+                  onClick={addRole}
+                  loading={roleBusy}
+                  disabled={
+                    !roleType ||
+                    (roleDef?.needsDetail && !roleDetail.trim()) ||
+                    (roleDef?.needsWG && !roleWG) ||
+                    (roleDef?.needsInstitution && !roleInst)
+                  }
+                >
+                  Add role
+                </Button>
+              </Stack>
+            </Card>
+          )}
+        </>
+      )}
 
       {canEdit && events.length > 0 && (
         <>

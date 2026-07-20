@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import CollabRole, Person, User, WorkingGroup, WorkingGroupMember
+from app.models.membership import DETAIL_REQUIRED_ROLES
 from app.schemas.membership import (
     CollabRoleCreate,
     CollabRoleOut,
+    CollabRoleUpdate,
     PersonSummary,
     WGMemberAdd,
     WorkingGroupCreate,
@@ -145,7 +147,15 @@ def list_collab_roles(
     _user: User = Depends(get_current_user),
     person_id: int | None = None,
 ) -> list[CollabRoleOut]:
-    stmt = select(CollabRole).order_by(CollabRole.start_date.desc())
+    stmt = (
+        select(CollabRole)
+        .options(
+            selectinload(CollabRole.person),
+            selectinload(CollabRole.working_group),
+            selectinload(CollabRole.institution),
+        )
+        .order_by(CollabRole.start_date.desc(), CollabRole.id.desc())
+    )
     if person_id is not None:
         stmt = stmt.where(CollabRole.person_id == person_id)
     roles = db.execute(stmt).scalars().all()
@@ -160,8 +170,30 @@ def create_collab_role(body: CollabRoleCreate, db: Session = Depends(get_db)) ->
         raise HTTPException(422, "convener role requires working_group_id")
     if body.role.value == "ib_rep" and body.institution_id is None:
         raise HTTPException(422, "ib_rep role requires institution_id")
+    if body.role in DETAIL_REQUIRED_ROLES and body.detail is None:
+        raise HTTPException(422, f"{body.role.value} role requires detail")
     role = CollabRole(**body.model_dump())
     db.add(role)
+    db.commit()
+    db.refresh(role)
+    return CollabRoleOut.model_validate(role)
+
+
+@router.patch("/collab-roles/{role_id}", dependencies=[Depends(require_office)])
+def update_collab_role(
+    role_id: int, body: CollabRoleUpdate, db: Session = Depends(get_db)
+) -> CollabRoleOut:
+    role = db.get(CollabRole, role_id)
+    if role is None:
+        raise HTTPException(404, "Role not found")
+    updates = body.model_dump(exclude_unset=True)
+    if (
+        role.role in DETAIL_REQUIRED_ROLES
+        and updates.get("detail", role.detail) is None
+    ):
+        raise HTTPException(422, f"{role.role.value} role requires detail")
+    for field, value in updates.items():
+        setattr(role, field, value)
     db.commit()
     db.refresh(role)
     return CollabRoleOut.model_validate(role)

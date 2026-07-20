@@ -230,23 +230,57 @@ class WGMemberAdd(BaseModel):
     person_id: int
 
 
+class WorkingGroupRef(ORMModel):
+    """Small reference used for cross-links (collab-role rows, etc.)."""
+
+    id: int
+    name: str
+    slug: str
+
+
 class CollabRoleCreate(BaseModel):
     person_id: int
     role: CollabRoleType
+    # Qualifier for generic roles ("Accelerator" representative, "Outreach"
+    # coordinator, focus area for leads, full title for `other`).
+    detail: str | None = Field(default=None, max_length=200)
     working_group_id: int | None = None
     institution_id: int | None = None
     start_date: date
     end_date: date | None = None
+
+    @field_validator("detail")
+    @classmethod
+    def strip_detail(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        return v or None
+
+
+class CollabRoleUpdate(BaseModel):
+    detail: str | None = Field(default=None, max_length=200)
+    start_date: date | None = None
+    end_date: date | None = None
+
+    @field_validator("detail")
+    @classmethod
+    def strip_detail(cls, v: str | None) -> str | None:
+        v = (v or "").strip()
+        return v or None
 
 
 class CollabRoleOut(ORMModel):
     id: int
     person_id: int
     role: CollabRoleType
+    detail: str | None
     working_group_id: int | None
     institution_id: int | None
     start_date: date
     end_date: date | None
+    # Populated on listings so role holders can be shown by name.
+    person: PersonSummary | None = None
+    working_group: WorkingGroupRef | None = None
+    institution: InstitutionRef | None = None
 
 
 class MembershipEventOut(ORMModel):

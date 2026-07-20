@@ -23,6 +23,8 @@ from app.models import (
     Affiliation,
     AuthorPeriod,
     CareerStage,
+    CollabRole,
+    CollabRoleType,
     Institution,
     MemberStatus,
     Person,
@@ -298,6 +300,35 @@ def seed_demo():
                 select(WorkingGroup).where(WorkingGroup.slug == slug)
             ).scalar_one_or_none():
                 db.add(WorkingGroup(name=name, slug=slug))
+        db.flush()
+
+        # Leadership roles mirroring the organigram shapes (person idx, role,
+        # detail, start, end).
+        acc_wg = db.execute(
+            select(WorkingGroup).where(WorkingGroup.slug == "accelerator")
+        ).scalar_one()
+        for p_idx, role, detail, start, end, wg_id in [
+            (0, CollabRoleType.chair, None, date(2025, 1, 1), None, None),
+            (1, CollabRoleType.vice_chair, None, date(2025, 1, 1), None, None),
+            (3, CollabRoleType.representative, "Accelerator", date(2025, 1, 1), None, None),
+            (7, CollabRoleType.representative, "Experimental", date(2025, 1, 1), None, None),
+            (2, CollabRoleType.deputy_representative, "Experimental", date(2025, 6, 1), None, None),
+            (13, CollabRoleType.coordinator, "Communications", date(2025, 1, 1), None, None),
+            (9, CollabRoleType.area_lead, "Target", date(2025, 3, 1), None, None),
+            (6, CollabRoleType.lsg_member, None, date(2024, 6, 1), None, None),
+            (5, CollabRoleType.convener, None, date(2024, 9, 1), None, acc_wg.id),
+            (12, CollabRoleType.chair, None, date(2023, 1, 1), date(2024, 12, 31), None),
+        ]:
+            db.add(
+                CollabRole(
+                    person_id=people[p_idx].id,
+                    role=role,
+                    detail=detail,
+                    working_group_id=wg_id,
+                    start_date=start,
+                    end_date=end,
+                )
+            )
 
         events = []
         for name, location, start, end in DEMO_EVENTS:
