@@ -35,7 +35,7 @@ from app.schemas.membership import (
     StatusChange,
 )
 from app.config import get_settings
-from app.security import get_current_user, is_office, require_office
+from app.security import get_current_user, is_admin_contact_for, is_office, require_office
 
 PHOTO_TYPES = {
     "image/jpeg": ".jpg",
@@ -53,9 +53,20 @@ SELF_EDITABLE = {
     "email",
     "orcid",
     "career_stage",
+    "professional_title",
+    "department",
+    "usmcc_percent",
     "research_areas",
     "expertise",
     "is_voting",
+}
+# Charter institutional info an Administrative Institutional Contact may keep
+# up to date for people currently at their institution.
+ADMIN_CONTACT_EDITABLE = {
+    "career_stage",
+    "professional_title",
+    "department",
+    "usmcc_percent",
 }
 # Statuses a member may set on themselves — both as the target AND as the
 # current status: pending/rejected people cannot self-service at all
@@ -171,6 +182,9 @@ def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
         email=email,
         orcid=body.orcid,
         career_stage=body.career_stage,
+        professional_title=body.professional_title,
+        department=body.department,
+        usmcc_percent=body.usmcc_percent,
         status=MemberStatus.pending,
         is_voting=body.is_voting,
         research_areas=body.research_areas,
@@ -296,11 +310,22 @@ def update_person(
         if changes[field] is None:
             raise HTTPException(422, f"{field} cannot be null")
     if not is_office(user):
-        if user.person_id != person_id:
+        if user.person_id == person_id:
+            illegal = set(changes) - SELF_EDITABLE
+            if illegal:
+                raise HTTPException(403, f"Members cannot edit: {', '.join(sorted(illegal))}")
+        elif is_admin_contact_for(db, user, person_id):
+            # Administrative Institutional Contacts keep the charter
+            # institutional info of the people at their institution current.
+            illegal = set(changes) - ADMIN_CONTACT_EDITABLE
+            if illegal:
+                raise HTTPException(
+                    403,
+                    "Administrative contacts may only update: "
+                    f"{', '.join(sorted(ADMIN_CONTACT_EDITABLE))}",
+                )
+        else:
             raise HTTPException(403, "You can only edit your own profile")
-        illegal = set(changes) - SELF_EDITABLE
-        if illegal:
-            raise HTTPException(403, f"Members cannot edit: {', '.join(sorted(illegal))}")
     # Voting requires an active, non-student member — for every actor, but
     # only checked when the request touches the fields involved, so unrelated
     # edits are never blocked by pre-existing state.

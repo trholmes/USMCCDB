@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -66,6 +67,10 @@ class CollabRoleType(str, enum.Enum):
     # Appointed / committee / scoped roles
     lsg_member = "lsg_member"  # Leadership Strategy Group
     ib_rep = "ib_rep"
+    # Administrative Institutional Contact (charter): keeps the institutional
+    # info of the members at their institution up to date and can verify they
+    # are authorized to engage in USMCC work. Not a scientific leadership role.
+    admin_contact = "admin_contact"
     convener = "convener"
     speakers_chair = "speakers_chair"
     pub_chair = "pub_chair"
@@ -91,6 +96,10 @@ class Person(TimestampedBase):
     __table_args__ = (
         Index("ix_people_name", "family_name", "given_name"),
         Index("ix_people_status", "status"),
+        CheckConstraint(
+            "usmcc_percent IS NULL OR (usmcc_percent BETWEEN 0 AND 100)",
+            name="usmcc_percent_range",
+        ),
     )
 
     given_name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -101,6 +110,13 @@ class Person(TimestampedBase):
     career_stage: Mapped[CareerStage] = mapped_column(
         Enum(CareerStage, name="career_stage"), default=CareerStage.other, nullable=False
     )
+    # Charter institutional info, kept up to date by the member and their
+    # institution's Administrative Institutional Contact: professional title
+    # in the organization, department, and the percent of research time
+    # devoted to the USMCC (0–100).
+    professional_title: Mapped[str | None] = mapped_column(String(200))
+    department: Mapped[str | None] = mapped_column(String(200))
+    usmcc_percent: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[MemberStatus] = mapped_column(
         Enum(MemberStatus, name="member_status"), default=MemberStatus.pending, nullable=False
     )
@@ -225,6 +241,10 @@ class CollabRole(TimestampedBase):
         CheckConstraint(
             "(role != 'ib_rep') OR (institution_id IS NOT NULL)",
             name="ib_rep_requires_institution",
+        ),
+        CheckConstraint(
+            "(role::text != 'admin_contact') OR (institution_id IS NOT NULL)",
+            name="admin_contact_requires_institution",
         ),
         CheckConstraint(
             "(role::text NOT IN ('representative', 'deputy_representative', "

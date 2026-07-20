@@ -22,6 +22,16 @@ export const STUDENT_STAGES = ['undergrad', 'grad']
 // Statuses a member may set on themselves (see SELF_SETTABLE_STATUSES).
 export const SELF_STATUSES = ['active', 'inactive', 'alumni']
 
+// Fields an Administrative Institutional Contact may keep up to date for
+// people currently at their institution (see ADMIN_CONTACT_EDITABLE in
+// backend/app/routers/people.py).
+export const ADMIN_CONTACT_EDITABLE = [
+  'career_stage',
+  'professional_title',
+  'department',
+  'usmcc_percent',
+]
+
 // Standard research areas (mirrors RESEARCH_AREAS in
 // backend/app/models/membership.py) — the options from the membership
 // registration form plus a catch-all; people.research_areas stores a
@@ -78,6 +88,7 @@ export const COLLAB_ROLES: CollabRoleDef[] = [
   { value: 'area_lead', label: 'Focus Area Lead', template: '{detail} Lead', needsDetail: true },
   { value: 'lsg_member', label: 'Leadership Strategy Group' },
   { value: 'ib_rep', label: 'Institutional Board Representative', needsInstitution: true },
+  { value: 'admin_contact', label: 'Administrative Institutional Contact', needsInstitution: true },
   { value: 'convener', label: 'Working Group Convener', needsWG: true },
   { value: 'speakers_chair', label: 'Speakers Committee Chair' },
   { value: 'pub_chair', label: 'Publications Committee Chair' },

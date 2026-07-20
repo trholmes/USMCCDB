@@ -81,7 +81,10 @@ itself, so the database just has to exist.
   author periods must not overlap (EXCLUDE constraint, needs `btree_gist`).
 - Roles: `admin` / `office` / `member`. Members may edit only the
   `SELF_EDITABLE` fields on their own profile and set only `SELF_SETTABLE_STATUSES`;
-  moderation states (`pending`/`rejected`) are office-only. Voting membership
+  moderation states (`pending`/`rejected`) are office-only. A person holding
+  an active `admin_contact` collab role (Administrative Institutional Contact,
+  institution-scoped) may also edit the `ADMIN_CONTACT_EDITABLE` fields of
+  people currently at their institution. Voting membership
   requires an active, non-student member currently at a US institution
   (`institutions.is_us`) — enforced server-side everywhere the involved
   fields change.

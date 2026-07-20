@@ -126,6 +126,11 @@ class PersonApply(BaseModel):
     email: EmailStr
     orcid: str | None = Field(default=None, pattern=ORCID_RE)
     career_stage: CareerStage = CareerStage.other
+    # Charter institutional info: professional title in the organization,
+    # department, and percent of research time devoted to the USMCC.
+    professional_title: str | None = Field(default=None, max_length=200)
+    department: str | None = Field(default=None, max_length=200)
+    usmcc_percent: int | None = Field(default=None, ge=0, le=100)
     institution_id: int | None = None
     institution_name: str | None = None  # free text if not in the list yet
     is_voting: bool = False
@@ -151,6 +156,9 @@ class PersonUpdate(BaseModel):
     email: EmailStr | None = None
     orcid: str | None = Field(default=None, pattern=ORCID_RE)
     career_stage: CareerStage | None = None
+    professional_title: str | None = Field(default=None, max_length=200)
+    department: str | None = Field(default=None, max_length=200)
+    usmcc_percent: int | None = Field(default=None, ge=0, le=100)
     is_voting: bool | None = None
     research_areas: str | None = None
     expertise: str | None = None
@@ -202,6 +210,9 @@ class PersonSummary(ORMModel):
 
 
 class PersonOut(PersonSummary):
+    professional_title: str | None = None
+    department: str | None = None
+    usmcc_percent: int | None = None
     expertise: str | None
     notes: str | None
     status_changed_at: datetime | None

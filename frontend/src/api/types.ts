@@ -64,6 +64,9 @@ export interface PersonSummary {
 }
 
 export interface Person extends PersonSummary {
+  professional_title: string | null
+  department: string | null
+  usmcc_percent: number | null
   expertise: string | null
   notes: string | null
   status_changed_at: string | null

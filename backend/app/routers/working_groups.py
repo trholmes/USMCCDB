@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import CollabRole, Person, User, WorkingGroup, WorkingGroupMember
+from app.models import CollabRole, CollabRoleType, Person, User, WorkingGroup, WorkingGroupMember
 from app.models.membership import DETAIL_REQUIRED_ROLES
 from app.schemas.membership import (
     CollabRoleCreate,
@@ -146,6 +146,8 @@ def list_collab_roles(
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
     person_id: int | None = None,
+    institution_id: int | None = None,
+    role: CollabRoleType | None = None,
 ) -> list[CollabRoleOut]:
     stmt = (
         select(CollabRole)
@@ -158,6 +160,10 @@ def list_collab_roles(
     )
     if person_id is not None:
         stmt = stmt.where(CollabRole.person_id == person_id)
+    if institution_id is not None:
+        stmt = stmt.where(CollabRole.institution_id == institution_id)
+    if role is not None:
+        stmt = stmt.where(CollabRole.role == role)
     roles = db.execute(stmt).scalars().all()
     return [CollabRoleOut.model_validate(r) for r in roles]
 
@@ -168,8 +174,8 @@ def create_collab_role(body: CollabRoleCreate, db: Session = Depends(get_db)) ->
         raise HTTPException(404, "Person not found")
     if body.role.value == "convener" and body.working_group_id is None:
         raise HTTPException(422, "convener role requires working_group_id")
-    if body.role.value == "ib_rep" and body.institution_id is None:
-        raise HTTPException(422, "ib_rep role requires institution_id")
+    if body.role.value in ("ib_rep", "admin_contact") and body.institution_id is None:
+        raise HTTPException(422, f"{body.role.value} role requires institution_id")
     if body.role in DETAIL_REQUIRED_ROLES and body.detail is None:
         raise HTTPException(422, f"{body.role.value} role requires detail")
     role = CollabRole(**body.model_dump())
