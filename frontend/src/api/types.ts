@@ -33,6 +33,7 @@ export interface Affiliation {
   id: number
   institution: Institution
   is_primary: boolean
+  career_stage: string | null
   start_date: string
   end_date: string | null
 }

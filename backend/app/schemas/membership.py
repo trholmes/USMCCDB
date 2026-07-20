@@ -72,12 +72,15 @@ class InstitutionRef(ORMModel):
 class AffiliationCreate(BaseModel):
     institution_id: int
     is_primary: bool = False
+    # Stage held while at this institution; None = unknown/unrecorded.
+    career_stage: CareerStage | None = None
     start_date: date
     end_date: date | None = None
 
 
 class AffiliationUpdate(BaseModel):
     is_primary: bool | None = None
+    career_stage: CareerStage | None = None
     start_date: date | None = None
     end_date: date | None = None
 
@@ -86,6 +89,7 @@ class AffiliationOut(ORMModel):
     id: int
     institution: InstitutionOut
     is_primary: bool
+    career_stage: CareerStage | None
     start_date: date
     end_date: date | None
 
@@ -171,6 +175,9 @@ class InstitutionChange(BaseModel):
     institution_id: int | None = None
     institution_name: str | None = None  # free text if not in the list yet
     start_date: date
+    # Optional new career stage taken up with the move; None keeps the
+    # person's current stage (which is stamped on the new affiliation).
+    career_stage: CareerStage | None = None
 
 
 class PersonSummary(ORMModel):

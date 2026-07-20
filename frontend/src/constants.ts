@@ -11,6 +11,11 @@ export const CAREER_STAGES = [
   { value: 'other', label: 'Other' },
 ]
 
+// Display label for a career stage value (falls back to the raw value for
+// anything unknown, and '' for missing history).
+export const careerStageLabel = (value: string | null | undefined): string =>
+  CAREER_STAGES.find((s) => s.value === value)?.label ?? value ?? ''
+
 // Stages not eligible for voting membership (see _voting_eligible).
 export const STUDENT_STAGES = ['undergrad', 'grad']
 
