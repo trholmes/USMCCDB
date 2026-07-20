@@ -54,13 +54,36 @@ class MemberStatus(str, enum.Enum):
 
 
 class CollabRoleType(str, enum.Enum):
+    # Elected Leadership Council (see the organigram at muoncollider.us/contact)
     chair = "chair"
     vice_chair = "vice_chair"
+    representative = "representative"  # detail: Accelerator / Experimental / Theory
+    deputy_representative = "deputy_representative"
+    coordinator = "coordinator"  # detail: Communications / Outreach / Inreach / …
+    deputy_coordinator = "deputy_coordinator"
+    # Focus-area leads under the representatives (detail: Design / Target / RF / …)
+    area_lead = "area_lead"
+    # Appointed / committee / scoped roles
+    lsg_member = "lsg_member"  # Leadership Strategy Group
     ib_rep = "ib_rep"
     convener = "convener"
     speakers_chair = "speakers_chair"
     pub_chair = "pub_chair"
     secretary = "secretary"
+    other = "other"  # anything not covered — detail carries the full title
+
+
+# Roles whose title is only meaningful with a qualifier ("Accelerator"
+# Representative, "Outreach" Coordinator, …) — collab_roles.detail is
+# required for these. Mirrored in frontend/src/constants.ts.
+DETAIL_REQUIRED_ROLES = (
+    CollabRoleType.representative,
+    CollabRoleType.deputy_representative,
+    CollabRoleType.coordinator,
+    CollabRoleType.deputy_coordinator,
+    CollabRoleType.area_lead,
+    CollabRoleType.other,
+)
 
 
 class Person(TimestampedBase):
@@ -200,6 +223,12 @@ class CollabRole(TimestampedBase):
             "(role != 'ib_rep') OR (institution_id IS NOT NULL)",
             name="ib_rep_requires_institution",
         ),
+        CheckConstraint(
+            "(role::text NOT IN ('representative', 'deputy_representative', "
+            "'coordinator', 'deputy_coordinator', 'area_lead', 'other')) "
+            "OR (detail IS NOT NULL)",
+            name="detail_required_roles",
+        ),
     )
 
     person_id: Mapped[int] = mapped_column(
@@ -208,6 +237,10 @@ class CollabRole(TimestampedBase):
     role: Mapped[CollabRoleType] = mapped_column(
         Enum(CollabRoleType, name="collab_role"), nullable=False
     )
+    # Qualifier for generic role types: the representative/coordinator area
+    # ("Accelerator", "Outreach"), the focus area for leads ("Target", "RF"),
+    # or the full title for `other`.
+    detail: Mapped[str | None] = mapped_column(String(200))
     working_group_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("working_groups.id", ondelete="CASCADE")
     )

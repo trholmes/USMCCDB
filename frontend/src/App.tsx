@@ -8,6 +8,7 @@ import DirectoryPage from './pages/Directory'
 import EventsPage from './pages/Events'
 import InstitutionDetailPage from './pages/InstitutionDetail'
 import InstitutionsPage from './pages/Institutions'
+import LeadershipPage from './pages/Leadership'
 import LoginPage from './pages/Login'
 import PersonPage from './pages/Person'
 import PublicationsPage from './pages/Publications'
@@ -20,6 +21,7 @@ const NAV = [
   { to: '/directory', label: 'Directory' },
   { to: '/institutions', label: 'Institutions' },
   { to: '/working-groups', label: 'Working groups' },
+  { to: '/leadership', label: 'Leadership' },
   { to: '/events', label: 'Conferences' },
   { to: '/talks', label: 'Talks & speakers' },
   { to: '/publications', label: 'Publications' },
@@ -132,6 +134,7 @@ export default function App() {
           <Route path="/institutions" element={<InstitutionsPage />} />
           <Route path="/institutions/:id" element={<InstitutionDetailPage />} />
           <Route path="/working-groups" element={<WorkingGroupsPage />} />
+          <Route path="/leadership" element={<LeadershipPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/talks" element={<TalksPage />} />
           <Route path="/publications" element={<PublicationsPage />} />
