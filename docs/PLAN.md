@@ -161,3 +161,50 @@ USMCC branding: header "US Muon Collider Collaboration — Collaboration Databas
 - `scripts/backup.sh` → dump appears; `scripts/restore.sh` round-trip; `scripts/reset.sh` then re-start
 - Backend unit tests (pytest) for author-list ordering/edge cases (accents, multiple affiliations, closed periods) and permission deps
 - ORCID: verified flow works with sandbox creds if provided; otherwise verify graceful hide of ORCID button when unset (full live test needs user's ORCID client registration — documented in README)
+
+---
+
+## As built (status after v1 + follow-ups)
+
+The plan above was implemented essentially as written (merged via PRs #5–#7).
+Deviations and additions since approval:
+
+### Deviations from the plan
+- **ORCID via direct httpx, not authlib** — the `/authenticate` flow is two
+  requests; a signed state token (itsdangerous) replaced the authlib session
+  machinery (`backend/app/services/orcid.py`).
+- **Single Alembic baseline + incremental revisions** — 0001 creates the whole
+  schema from model metadata; later changes ship as small idempotent
+  revisions (0002 photos, 0003 secondary-affiliation removal).
+- **Field additions driven by the real data** (registration spreadsheet):
+  `people.is_voting`, `people.expertise`, `people.photo_file`,
+  `talks.is_invited`; fair-share stats report invited counts separately.
+- **Importers are xlsx-first** — `import-members-xlsx`, `import-talks-xlsx`,
+  `import-photos-xlsx`/`import-photos-dir` match the collaboration's actual
+  Google-form exports; the generic CSV importer from the plan also exists.
+  Data lives in gitignored `data/` (public repo — no member PII committed).
+
+### Post-v1 additions
+- **Member photos** (PR #6): photos volume, member-only serving, avatar UI
+  with click-to-upload, Drive/folder importers, photos in nightly backups.
+- **Secondary institutions removed** (PR #7, first pass of issue #3):
+  migration 0003 + importer no longer reads the free-text column. Second
+  pass (proper assignment mechanism) still open.
+- **Glance-style interconnection** (PR #8, issue #4): institution detail
+  pages with member lists (`GET /institutions/{id}`), directory institution
+  column, profile ↔ institution ↔ talks cross-links everywhere.
+- **Sortable tables** (PR #10, issue #9): `useSortable` + `SortableTh`
+  applied to all eight listing tables.
+- **`seed-demo` CLI**: fictional dataset for demos and the README screenshots.
+- **CI/CD**: GitHub Actions runs pytest (PostgreSQL 16 service) + frontend
+  build on every push and publishes `ghcr.io/trholmes/usmccdb-{backend,
+  frontend,backup}` tagged by branch; `docker-compose.release.yml` deploys
+  from those images.
+
+### Verification status
+Everything in the Verification section above was executed against the live
+compose stack (including a 285-member import producing a 176-author list
+across 82 institutions, backup/restore round-trip, and 12 passing API/unit
+tests in CI). Not yet exercised for real: Caddy certificate issuance on
+db.muoncollider.us and the live ORCID flow (both need production DNS/keys;
+steps documented in the README).
