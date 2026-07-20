@@ -56,6 +56,7 @@ export interface PersonSummary {
   status: string
   is_voting: boolean
   photo_file: string | null
+  primary_institution: { id: number; name: string; short_name: string | null } | null
 }
 
 export interface Person extends PersonSummary {

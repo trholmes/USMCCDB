@@ -13,9 +13,9 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api, uploadFile } from '../api/client'
-import type { Person } from '../api/types'
+import type { Person, Talk } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
@@ -28,8 +28,14 @@ export default function PersonPage() {
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
 
+  const [talks, setTalks] = useState<Talk[]>([])
+
   const load = useCallback(() => {
     api.get<Person>(`/people/${id}`).then(setPerson).catch(() => setPerson(null))
+    api
+      .get<Talk[]>(`/talks?speaker_person_id=${id}`)
+      .then(setTalks)
+      .catch(() => setTalks([]))
   }, [id])
   useEffect(load, [load])
 
@@ -194,7 +200,9 @@ export default function PersonPage() {
         <Table.Tbody>
           {person.affiliations.map((a) => (
             <Table.Tr key={a.id}>
-              <Table.Td>{a.institution.name}</Table.Td>
+              <Table.Td>
+                <Link to={`/institutions/${a.institution.id}`}>{a.institution.name}</Link>
+              </Table.Td>
               <Table.Td>{a.is_primary ? 'yes' : ''}</Table.Td>
               <Table.Td>{a.start_date}</Table.Td>
               <Table.Td>{a.end_date ?? 'present'}</Table.Td>
@@ -202,6 +210,41 @@ export default function PersonPage() {
           ))}
         </Table.Tbody>
       </Table>
+
+      <Title order={5}>Talks</Title>
+      {talks.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          No talks recorded. Browse <Link to="/talks">talks & speakers</Link>.
+        </Text>
+      ) : (
+        <Table maw={860}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Date</Table.Th>
+              <Table.Th>Title</Table.Th>
+              <Table.Th>Type</Table.Th>
+              <Table.Th>Status</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {talks.map((t) => (
+              <Table.Tr key={t.id}>
+                <Table.Td>{t.date}</Table.Td>
+                <Table.Td>
+                  <Link to="/talks">{t.title}</Link>
+                </Table.Td>
+                <Table.Td>
+                  {t.talk_type}
+                  {t.is_invited ? ' (invited)' : ''}
+                </Table.Td>
+                <Table.Td>
+                  <StatusBadge status={t.status} />
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      )}
 
       <Title order={5}>Authorship periods</Title>
       {person.author_periods.length === 0 ? (

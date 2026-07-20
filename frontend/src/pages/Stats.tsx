@@ -1,5 +1,6 @@
 import { Card, Group, SegmentedControl, Table, Text, Title } from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Bar,
   BarChart,
@@ -16,6 +17,7 @@ import type { TalkStatRow } from '../api/types'
 export default function StatsPage() {
   const [by, setBy] = useState('person')
   const [rows, setRows] = useState<TalkStatRow[]>([])
+  const navigate = useNavigate()
 
   useEffect(() => {
     api.get<TalkStatRow[]>(`/stats/talks?by=${by}`).then(setRows).catch(() => setRows([]))
@@ -23,10 +25,10 @@ export default function StatsPage() {
 
   // Aggregate per key across years for the table; per-year totals for the chart.
   const totals = useMemo(() => {
-    const m = new Map<string, { talks: number; invited: number }>()
+    const m = new Map<string, { id: number; talks: number; invited: number }>()
     rows.forEach((r) => {
-      const cur = m.get(r.key) ?? { talks: 0, invited: 0 }
-      m.set(r.key, { talks: cur.talks + r.talks, invited: cur.invited + r.invited })
+      const cur = m.get(r.key) ?? { id: r.key_id, talks: 0, invited: 0 }
+      m.set(r.key, { id: r.key_id, talks: cur.talks + r.talks, invited: cur.invited + r.invited })
     })
     return [...m.entries()].sort((a, b) => b[1].talks - a[1].talks)
   }, [rows])
@@ -102,7 +104,13 @@ export default function StatsPage() {
         </Table.Thead>
         <Table.Tbody>
           {totals.map(([key, v]) => (
-            <Table.Tr key={key}>
+            <Table.Tr
+              key={key}
+              style={{ cursor: 'pointer' }}
+              onClick={() =>
+                navigate(by === 'person' ? `/people/${v.id}` : `/institutions/${v.id}`)
+              }
+            >
               <Table.Td>{key}</Table.Td>
               <Table.Td>{v.talks}</Table.Td>
               <Table.Td>{v.invited}</Table.Td>

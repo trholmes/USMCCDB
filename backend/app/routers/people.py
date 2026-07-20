@@ -24,6 +24,7 @@ from app.schemas.membership import (
     AuthorPeriodCreate,
     AuthorPeriodOut,
     AuthorPeriodUpdate,
+    InstitutionRef,
     MembershipEventOut,
     PersonApply,
     PersonOut,
@@ -114,7 +115,11 @@ def list_people(
     working_group_id: int | None = None,
     q: str | None = Query(default=None, description="name/email search"),
 ) -> list[PersonSummary]:
-    stmt = select(Person).order_by(Person.family_name, Person.given_name)
+    stmt = (
+        select(Person)
+        .options(selectinload(Person.affiliations).selectinload(Affiliation.institution))
+        .order_by(Person.family_name, Person.given_name)
+    )
     if status is not None:
         stmt = stmt.where(Person.status == status)
     if career_stage is not None:
@@ -141,7 +146,16 @@ def list_people(
             WorkingGroupMember.working_group_id == working_group_id
         )
     people = db.execute(stmt).scalars().unique().all()
-    return [PersonSummary.model_validate(p) for p in people]
+    out = []
+    for p in people:
+        row = PersonSummary.model_validate(p)
+        primary = next(
+            (a for a in p.affiliations if a.is_primary and a.end_date is None), None
+        )
+        if primary is not None:
+            row.primary_institution = InstitutionRef.model_validate(primary.institution)
+        out.append(row)
+    return out
 
 
 @router.get("/{person_id}")

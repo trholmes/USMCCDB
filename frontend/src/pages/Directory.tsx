@@ -63,6 +63,7 @@ export default function DirectoryPage() {
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Name</Table.Th>
+            <Table.Th>Institution</Table.Th>
             <Table.Th>Email</Table.Th>
             <Table.Th>Position</Table.Th>
             <Table.Th>Voting</Table.Th>
@@ -84,6 +85,22 @@ export default function DirectoryPage() {
                     {p.family_name}, {p.preferred_name || p.given_name}
                   </span>
                 </Group>
+              </Table.Td>
+              <Table.Td>
+                {p.primary_institution && (
+                  <Text
+                    size="sm"
+                    c="blue"
+                    component="span"
+                    style={{ cursor: 'pointer' }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/institutions/${p.primary_institution!.id}`)
+                    }}
+                  >
+                    {p.primary_institution.short_name || p.primary_institution.name}
+                  </Text>
+                )}
               </Table.Td>
               <Table.Td>{p.email}</Table.Td>
               <Table.Td>{p.career_stage}</Table.Td>
