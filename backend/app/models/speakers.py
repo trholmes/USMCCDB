@@ -21,6 +21,7 @@ class TalkType(str, enum.Enum):
     parallel = "parallel"
     poster = "poster"
     seminar = "seminar"
+    colloquium = "colloquium"
     outreach = "outreach"
 
 
@@ -62,11 +63,15 @@ class Talk(TimestampedBase):
     event_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("events.id", ondelete="SET NULL"), index=True
     )
+    # Where a talk without an event was given (seminar / colloquium host).
+    venue: Mapped[str | None] = mapped_column(String(300))
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     talk_type: Mapped[TalkType] = mapped_column(
         Enum(TalkType, name="talk_type"), default=TalkType.parallel, nullable=False
     )
-    date: Mapped[date | None] = mapped_column(Date, index=True)
+    # nullable must be explicit: the attribute name shadows datetime.date, so
+    # SQLAlchemy can't infer optionality from the `date | None` annotation.
+    date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
     working_group_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("working_groups.id", ondelete="SET NULL")
     )
@@ -78,6 +83,9 @@ class Talk(TimestampedBase):
     )
     is_invited: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     event = relationship("Event", back_populates="talks")
     working_group = relationship("WorkingGroup")

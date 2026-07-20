@@ -685,6 +685,54 @@ def test_speakers_flow(admin):
     assert row["talks"] >= 1 and row["invited"] >= 1
 
 
+def test_member_self_service_colloquia(admin):
+    """Members can record their own seminars/colloquia — talks with a venue
+    but no conference — and manage only the talks they added (issue #33)."""
+    member, pid = _linked_member(
+        admin, given="Sem", family="Speaker", email="sem.speaker@example.edu"
+    )
+
+    r = member.post(
+        "/api/v1/talks",
+        json={
+            "title": "Muon Colliders 101",
+            "venue": "MIT physics colloquium",
+            "talk_type": "colloquium",
+            "date": "2026-03-02",
+            "speaker_person_id": pid,
+            "status": "given",
+            "is_invited": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    talk = r.json()
+    assert talk["event_id"] is None
+    assert talk["venue"] == "MIT physics colloquium"
+
+    # It shows up in the shared talks list alongside conference talks.
+    listed = member.get("/api/v1/talks").json()
+    assert any(t["id"] == talk["id"] for t in listed)
+    mine = member.get(f"/api/v1/talks?speaker_person_id={pid}").json()
+    assert [t["id"] for t in mine] == [talk["id"]]
+
+    # The creator may fix their own entry; others' talks stay office-only.
+    r = member.patch(f"/api/v1/talks/{talk['id']}", json={"venue": "MIT LNS colloquium"})
+    assert r.status_code == 200 and r.json()["venue"] == "MIT LNS colloquium"
+    office_talk = admin.post("/api/v1/talks", json={"title": "Office seminar"}).json()
+    assert member.patch(
+        f"/api/v1/talks/{office_talk['id']}", json={"title": "hijacked"}
+    ).status_code == 403
+    assert member.delete(f"/api/v1/talks/{office_talk['id']}").status_code == 403
+
+    # Colloquia count toward the fair-share talk statistics.
+    stats = member.get("/api/v1/stats/talks?by=person").json()
+    row = next(s for s in stats if s["key_id"] == pid)
+    assert row["talks"] == 1 and row["invited"] == 1
+
+    assert member.delete(f"/api/v1/talks/{talk['id']}").status_code == 204
+    assert admin.delete(f"/api/v1/talks/{office_talk['id']}").status_code == 204
+
+
 def test_collab_roles_lifecycle(admin):
     member, pid = _linked_member(
         admin, given="Lea", family="Lead", email="lea.lead@example.edu"

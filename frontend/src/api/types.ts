@@ -131,6 +131,7 @@ export interface Talk {
   id: number
   title: string
   event_id: number | null
+  venue: string | null
   talk_type: string
   date: string | null
   working_group_id: number | null
@@ -138,6 +139,7 @@ export interface Talk {
   status: string
   is_invited: boolean
   notes: string | null
+  created_by_user_id: number | null
   speaker: PersonSummary | null
   nominations: Nomination[]
 }

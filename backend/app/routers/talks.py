@@ -124,32 +124,54 @@ def list_talks(
     return [TalkOut.model_validate(t) for t in talks]
 
 
-@router.post("/talks", dependencies=[Depends(require_office)], status_code=201)
-def create_talk(body: TalkCreate, db: Session = Depends(get_db)) -> TalkOut:
+def _require_talk_editor(user: User, talk: Talk) -> None:
+    """Office may manage any talk; members only ones they added themselves
+    (self-service seminars / colloquia, issue #33)."""
+    if not is_office(user) and talk.created_by_user_id != user.id:
+        raise HTTPException(403, "Members can only edit talks they added")
+
+
+@router.post("/talks", status_code=201)
+def create_talk(
+    body: TalkCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TalkOut:
     if body.event_id is not None and db.get(Event, body.event_id) is None:
         raise HTTPException(404, "event_id not found")
-    talk = Talk(**body.model_dump())
+    talk = Talk(**body.model_dump(), created_by_user_id=user.id)
     db.add(talk)
     db.commit()
     return TalkOut.model_validate(_load_talk(db, talk.id))
 
 
-@router.patch("/talks/{talk_id}", dependencies=[Depends(require_office)])
-def update_talk(talk_id: int, body: TalkUpdate, db: Session = Depends(get_db)) -> TalkOut:
+@router.patch("/talks/{talk_id}")
+def update_talk(
+    talk_id: int,
+    body: TalkUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TalkOut:
     talk = db.get(Talk, talk_id)
     if talk is None:
         raise HTTPException(404, "Talk not found")
+    _require_talk_editor(user, talk)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(talk, field, value)
     db.commit()
     return TalkOut.model_validate(_load_talk(db, talk_id))
 
 
-@router.delete("/talks/{talk_id}", dependencies=[Depends(require_office)], status_code=204)
-def delete_talk(talk_id: int, db: Session = Depends(get_db)) -> None:
+@router.delete("/talks/{talk_id}", status_code=204)
+def delete_talk(
+    talk_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
     talk = db.get(Talk, talk_id)
     if talk is None:
         raise HTTPException(404, "Talk not found")
+    _require_talk_editor(user, talk)
     db.delete(talk)
     db.commit()
 

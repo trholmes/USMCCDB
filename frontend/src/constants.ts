@@ -94,6 +94,18 @@ export const collabRoleLabel = (role: string, detail?: string | null): string =>
   return def.label
 }
 
+// Talk types (mirrors TalkType in backend/app/models/speakers.py). Seminars
+// and colloquia are talks with no associated conference — they carry a
+// free-text venue instead of an event.
+export const TALK_TYPES = [
+  'plenary',
+  'parallel',
+  'poster',
+  'seminar',
+  'colloquium',
+  'outreach',
+]
+
 // people.research_areas and people.expertise are comma-separated text
 // columns; these round-trip them to arrays for the multi-value inputs
 // (splitting on semicolons too, for imported free text).
