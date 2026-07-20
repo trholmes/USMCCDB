@@ -27,6 +27,7 @@ export default function PersonPage() {
   const [form, setForm] = useState<Record<string, string>>({})
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
+  const [photoHover, setPhotoHover] = useState(false)
 
   const [talks, setTalks] = useState<Talk[]>([])
 
@@ -96,13 +97,40 @@ export default function PersonPage() {
     <Stack>
       <Group justify="space-between">
         <Group align="flex-start">
-          <div
-            style={{ cursor: isSelf || isOffice ? 'pointer' : undefined }}
-            title={isSelf || isOffice ? 'Click to upload a photo' : undefined}
-            onClick={() => (isSelf || isOffice) && fileInput.current?.click()}
-          >
+          {isSelf || isOffice ? (
+            <div
+              style={{ position: 'relative', width: 72, height: 72, cursor: 'pointer' }}
+              title="Click to change photo"
+              onClick={() => fileInput.current?.click()}
+              onMouseEnter={() => setPhotoHover(true)}
+              onMouseLeave={() => setPhotoHover(false)}
+            >
+              <PersonAvatar person={person} size={72} />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  background: 'rgba(0, 0, 0, 0.55)',
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textAlign: 'center',
+                  lineHeight: 1.2,
+                  opacity: photoHover ? 1 : 0,
+                  transition: 'opacity 120ms ease',
+                  pointerEvents: 'none',
+                }}
+              >
+                📷 Change
+              </div>
+            </div>
+          ) : (
             <PersonAvatar person={person} size={72} />
-          </div>
+          )}
           <input
             ref={fileInput}
             type="file"
