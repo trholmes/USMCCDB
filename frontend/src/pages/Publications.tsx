@@ -5,12 +5,13 @@ import {
   Select,
   Stack,
   Table,
+  Text,
   Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Publication, WorkingGroup } from '../api/types'
@@ -37,9 +38,28 @@ export default function PublicationsPage() {
     target_journal: '',
     abstract: '',
   })
+  const [q, setQ] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [wgFilter, setWgFilter] = useState<string | null>(null)
   const navigate = useNavigate()
   const { isOffice } = useSession()
-  const { sorted, sort, toggle } = useSortable(pubs, ACCESSORS)
+
+  const filtered = useMemo(() => {
+    const needle = q.toLowerCase()
+    return pubs.filter(
+      (p) =>
+        (!needle ||
+          p.title.toLowerCase().includes(needle) ||
+          (p.short_code ?? '').toLowerCase().includes(needle) ||
+          (p.arxiv_id ?? '').toLowerCase().includes(needle) ||
+          (p.journal ?? '').toLowerCase().includes(needle)) &&
+        (!typeFilter || p.pub_type === typeFilter) &&
+        (!statusFilter || p.status === statusFilter) &&
+        (!wgFilter || String(p.working_group_id) === wgFilter),
+    )
+  }, [pubs, q, typeFilter, statusFilter, wgFilter])
+  const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<Publication[]>('/publications').then(setPubs).catch(() => setPubs([]))
@@ -69,6 +89,53 @@ export default function PublicationsPage() {
         <Title order={3}>Publications & analyses</Title>
         <Button onClick={() => setModal(true)}>Propose publication</Button>
       </Group>
+      <Group mb="md" gap="xs">
+        <TextInput
+          placeholder="Search title, code, arXiv or journal…"
+          value={q}
+          onChange={(e) => setQ(e.currentTarget.value)}
+          w={280}
+        />
+        <Select
+          data={[
+            { value: 'paper', label: 'Paper' },
+            { value: 'proceedings', label: 'Proceedings' },
+            { value: 'note', label: 'Note' },
+            { value: 'white_paper', label: 'White paper' },
+          ]}
+          value={typeFilter}
+          onChange={setTypeFilter}
+          clearable
+          placeholder="All types"
+          w={150}
+        />
+        <Select
+          data={[
+            { value: 'proposed', label: 'Proposed' },
+            { value: 'in_progress', label: 'In progress' },
+            { value: 'collab_review', label: 'Collab review' },
+            { value: 'submitted', label: 'Submitted' },
+            { value: 'published', label: 'Published' },
+          ]}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          clearable
+          placeholder="All statuses"
+          w={160}
+        />
+        <Select
+          data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
+          value={wgFilter}
+          onChange={setWgFilter}
+          clearable
+          searchable
+          placeholder="All working groups"
+          w={200}
+        />
+      </Group>
+      <Text size="sm" c="dimmed" mb="xs">
+        {filtered.length} publications
+      </Text>
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>

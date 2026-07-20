@@ -403,6 +403,41 @@ def test_research_areas_normalized(admin):
     assert body["expertise"] == "muon cooling, MDI"
 
 
+def test_directory_filters(admin):
+    member, pid = _linked_member(
+        admin, given="Fay", family="Filter", email="fay.filter@example.edu", career_stage="staff"
+    )
+    other, oid = _linked_member(
+        admin, given="Ned", family="Nofilter", email="ned.nofilter@example.edu"
+    )
+    assert member.patch(
+        f"/api/v1/people/{pid}",
+        json={"research_areas": "Accelerator Physics, Other/Multiple", "is_voting": True},
+    ).status_code == 200
+
+    # Research-area filter matches case-insensitively against the canonical
+    # names, and the summary rows expose research_areas for the frontend.
+    r = member.get("/api/v1/people?research_area=accelerator physics")
+    assert r.status_code == 200, r.text
+    ids = {p["id"] for p in r.json()}
+    assert pid in ids and oid not in ids
+    row = next(p for p in r.json() if p["id"] == pid)
+    assert row["research_areas"] == "Accelerator Physics, Other/Multiple"
+
+    # Unknown areas are rejected rather than silently matching nothing.
+    assert member.get("/api/v1/people?research_area=magnets").status_code == 422
+
+    # Voting filter, both polarities.
+    voting = {p["id"] for p in member.get("/api/v1/people?is_voting=true").json()}
+    assert pid in voting and oid not in voting
+    nonvoting = {p["id"] for p in member.get("/api/v1/people?is_voting=false").json()}
+    assert oid in nonvoting and pid not in nonvoting
+
+    # Filters combine.
+    r = member.get("/api/v1/people?research_area=Other/Multiple&career_stage=staff&is_voting=true")
+    assert [p["id"] for p in r.json()] == [pid]
+
+
 def test_office_status_change_clears_voting(admin):
     _, pid = _linked_member(
         admin, given="Vera", family="Vote", email="vera.vote@example.edu", career_stage="faculty"

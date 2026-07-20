@@ -191,12 +191,12 @@ class PersonSummary(ORMModel):
     status: MemberStatus
     is_voting: bool
     photo_file: str | None = None
+    research_areas: str | None = None
     # Current primary institution, populated on directory listings.
     primary_institution: InstitutionRef | None = None
 
 
 class PersonOut(PersonSummary):
-    research_areas: str | None
     expertise: str | None
     notes: str | None
     status_changed_at: datetime | None

@@ -17,6 +17,7 @@ from app.models import (
     Person,
     User,
 )
+from app.models.membership import RESEARCH_AREAS
 from app.schemas.membership import (
     AffiliationCreate,
     AffiliationOut,
@@ -196,6 +197,8 @@ def list_people(
     career_stage: CareerStage | None = None,
     institution_id: int | None = None,
     working_group_id: int | None = None,
+    research_area: str | None = Query(default=None, description="standard research area name"),
+    is_voting: bool | None = None,
     q: str | None = Query(default=None, description="name/email search"),
 ) -> list[PersonSummary]:
     stmt = (
@@ -207,6 +210,17 @@ def list_people(
         stmt = stmt.where(Person.status == status)
     if career_stage is not None:
         stmt = stmt.where(Person.career_stage == career_stage)
+    if research_area is not None:
+        # research_areas holds a comma-separated subset of RESEARCH_AREAS
+        # (normalized on write); match the canonical name case-insensitively.
+        canonical = {a.lower(): a for a in RESEARCH_AREAS}.get(research_area.strip().lower())
+        if canonical is None:
+            raise HTTPException(
+                422, f"Unknown research area; allowed: {', '.join(RESEARCH_AREAS)}"
+            )
+        stmt = stmt.where(Person.research_areas.ilike(f"%{canonical}%"))
+    if is_voting is not None:
+        stmt = stmt.where(Person.is_voting.is_(is_voting))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
