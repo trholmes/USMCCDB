@@ -150,7 +150,10 @@ class Person(TimestampedBase):
 
     @property
     def display_name(self) -> str:
-        return self.preferred_name or f"{self.given_name} {self.family_name}"
+        # preferred_name substitutes for the given name only ("Tova" for
+        # "Tova R.") — the family name always stays. Same rule as the
+        # directory and leadership listings in the frontend.
+        return f"{self.preferred_name or self.given_name} {self.family_name}"
 
 
 class Institution(TimestampedBase):

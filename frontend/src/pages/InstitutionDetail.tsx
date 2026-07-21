@@ -80,8 +80,7 @@ export default function InstitutionDetailPage() {
                 <Text size="sm">{collabRoleLabel(r.role, r.detail)}:</Text>
                 {r.person ? (
                   <Anchor component={Link} to={`/people/${r.person.id}`} size="sm">
-                    {r.person.preferred_name ||
-                      `${r.person.given_name} ${r.person.family_name}`}
+                    {`${r.person.preferred_name || r.person.given_name} ${r.person.family_name}`}
                   </Anchor>
                 ) : (
                   <Text size="sm">—</Text>

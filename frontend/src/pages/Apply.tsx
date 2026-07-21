@@ -111,6 +111,7 @@ export default function ApplyPage() {
               />
               <TextInput
                 label="Preferred name (optional)"
+                description="Shown in place of your first/given name in listings; your family name always stays."
                 value={form.preferred_name}
                 onChange={(e) => set('preferred_name', e.currentTarget.value)}
               />
