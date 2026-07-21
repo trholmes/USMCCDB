@@ -9,14 +9,14 @@ records who added a talk so they can edit or remove their own entries.
 IF NOT EXISTS guards throughout because fresh installs already get the full
 enum and columns from metadata.create_all.
 
-Revision ID: 0009
-Revises: 0008
+Revision ID: 0010
+Revises: 0009
 """
 
 from alembic import op
 
-revision = "0009"
-down_revision = "0008"
+revision = "0010"
+down_revision = "0009"
 branch_labels = None
 depends_on = None
 
