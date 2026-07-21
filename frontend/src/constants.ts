@@ -40,7 +40,7 @@ export const RESEARCH_AREAS = [
   'Experimental Particle Physics',
   'Theoretical Particle Physics',
   'Accelerator Physics',
-  'Other/Multiple',
+  'Other',
 ]
 
 // Collaboration leadership roles (mirrors CollabRoleType and
