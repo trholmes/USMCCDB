@@ -43,6 +43,7 @@ class EventOut(ORMModel):
 class TalkCreate(BaseModel):
     title: str = Field(min_length=2, max_length=500)
     event_id: int | None = None
+    venue: str | None = Field(default=None, max_length=300)
     talk_type: TalkType = TalkType.parallel
     date: dt.date | None = None
     working_group_id: int | None = None
@@ -55,6 +56,7 @@ class TalkCreate(BaseModel):
 class TalkUpdate(BaseModel):
     title: str | None = None
     event_id: int | None = None
+    venue: str | None = Field(default=None, max_length=300)
     talk_type: TalkType | None = None
     date: dt.date | None = None
     working_group_id: int | None = None
@@ -88,6 +90,7 @@ class TalkOut(ORMModel):
     id: int
     title: str
     event_id: int | None
+    venue: str | None
     talk_type: TalkType
     date: dt.date | None
     working_group_id: int | None
@@ -95,6 +98,7 @@ class TalkOut(ORMModel):
     status: TalkStatus
     is_invited: bool
     notes: str | None
+    created_by_user_id: int | None
     speaker: PersonSummary | None = None
     nominations: list[NominationOut] = []
 

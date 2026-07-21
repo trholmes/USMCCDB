@@ -19,6 +19,17 @@ import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import type { EventItem, PersonSummary, Talk } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { TALK_TYPES } from '../constants'
+
+const emptyForm = {
+  title: '',
+  event_id: '',
+  venue: '',
+  talk_type: 'parallel',
+  date: '',
+  is_invited: 'false',
+  speaker_person_id: '',
+}
 
 export default function TalksPage() {
   const [talks, setTalks] = useState<Talk[]>([])
@@ -26,13 +37,7 @@ export default function TalksPage() {
   const [people, setPeople] = useState<PersonSummary[]>([])
   const [detail, setDetail] = useState<Talk | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
-  const [form, setForm] = useState({
-    title: '',
-    event_id: '',
-    talk_type: 'parallel',
-    date: '',
-    is_invited: 'false',
-  })
+  const [form, setForm] = useState(emptyForm)
   const [nominee, setNominee] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [eventFilter, setEventFilter] = useState<string | null>(null)
@@ -49,11 +54,13 @@ export default function TalksPage() {
   useEffect(load, [load])
 
   const eventName = (id: number | null) => events.find((e) => e.id === id)?.name ?? ''
+  // Conference name for conference talks, free-text venue for seminars/colloquia.
+  const whereGiven = (t: Talk) => eventName(t.event_id) || t.venue || ''
 
   const accessors = useMemo<Accessors<Talk>>(
     () => ({
       date: (t) => t.date,
-      conference: (t) => events.find((e) => e.id === t.event_id)?.name,
+      conference: (t) => whereGiven(t),
       title: (t) => t.title,
       type: (t) => `${t.talk_type}${t.is_invited ? ' invited' : ''}`,
       speaker: (t) => (t.speaker ? `${t.speaker.family_name} ${t.speaker.given_name}` : null),
@@ -68,26 +75,60 @@ export default function TalksPage() {
       (t) =>
         (!needle ||
           t.title.toLowerCase().includes(needle) ||
-          eventName(t.event_id).toLowerCase().includes(needle) ||
+          whereGiven(t).toLowerCase().includes(needle) ||
           (t.speaker &&
             `${t.speaker.given_name} ${t.speaker.family_name}`.toLowerCase().includes(needle))) &&
-        (!eventFilter || String(t.event_id) === eventFilter) &&
+        (!eventFilter ||
+          (eventFilter === 'none' ? t.event_id === null : String(t.event_id) === eventFilter)) &&
         (!typeFilter || t.talk_type === typeFilter) &&
         (!statusFilter || t.status === statusFilter),
     )
   }, [talks, events, q, eventFilter, typeFilter, statusFilter])
   const { sorted, sort, toggle } = useSortable(filtered, accessors)
 
+  const openCreate = () => {
+    // Members most often record their own seminars/colloquia — default the
+    // speaker to themselves; office users start blank (open talks).
+    setForm({
+      ...emptyForm,
+      speaker_person_id: !isOffice && me?.person_id ? String(me.person_id) : '',
+    })
+    setCreateOpen(true)
+  }
+
   const createTalk = async () => {
+    const speakerId = form.speaker_person_id ? Number(form.speaker_person_id) : null
+    // A talk added with a speaker is already settled: given if the date has
+    // passed, assigned otherwise. Without a speaker it stays open for
+    // nominations.
+    const status = speakerId
+      ? form.date && form.date <= new Date().toISOString().slice(0, 10)
+        ? 'given'
+        : 'assigned'
+      : 'open'
     try {
       await api.post('/talks', {
         title: form.title,
         event_id: form.event_id ? Number(form.event_id) : null,
+        venue: form.venue || null,
         talk_type: form.talk_type,
         date: form.date || null,
         is_invited: form.is_invited === 'true',
+        speaker_person_id: speakerId,
+        status,
       })
       setCreateOpen(false)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const deleteTalk = async (talk: Talk) => {
+    if (!window.confirm(`Delete "${talk.title}"?`)) return
+    try {
+      await api.delete(`/talks/${talk.id}`)
+      setDetail(null)
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -119,18 +160,21 @@ export default function TalksPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Talks & speakers</Title>
-        {isOffice && <Button onClick={() => setCreateOpen(true)}>Add talk</Button>}
+        <Button onClick={openCreate}>Add talk</Button>
       </Group>
 
       <Group mb="md" gap="xs">
         <TextInput
-          placeholder="Search title, conference or speaker…"
+          placeholder="Search title, conference, venue or speaker…"
           value={q}
           onChange={(e) => setQ(e.currentTarget.value)}
           w={260}
         />
         <Select
-          data={events.map((e) => ({ value: String(e.id), label: e.name }))}
+          data={[
+            { value: 'none', label: 'No conference (seminars & colloquia)' },
+            ...events.map((e) => ({ value: String(e.id), label: e.name })),
+          ]}
           value={eventFilter}
           onChange={setEventFilter}
           clearable
@@ -139,7 +183,7 @@ export default function TalksPage() {
           w={200}
         />
         <Select
-          data={['plenary', 'parallel', 'poster', 'seminar', 'outreach']}
+          data={TALK_TYPES}
           value={typeFilter}
           onChange={setTypeFilter}
           clearable
@@ -163,7 +207,7 @@ export default function TalksPage() {
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Date" k="date" sort={sort} toggle={toggle} />
-            <SortableTh label="Conference" k="conference" sort={sort} toggle={toggle} />
+            <SortableTh label="Conference / venue" k="conference" sort={sort} toggle={toggle} />
             <SortableTh label="Title" k="title" sort={sort} toggle={toggle} />
             <SortableTh label="Type" k="type" sort={sort} toggle={toggle} />
             <SortableTh label="Speaker" k="speaker" sort={sort} toggle={toggle} />
@@ -174,7 +218,7 @@ export default function TalksPage() {
           {sorted.map((t) => (
             <Table.Tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setDetail(t)}>
               <Table.Td>{t.date}</Table.Td>
-              <Table.Td>{eventName(t.event_id)}</Table.Td>
+              <Table.Td>{whereGiven(t)}</Table.Td>
               <Table.Td>{t.title}</Table.Td>
               <Table.Td>
                 {t.talk_type}
@@ -218,11 +262,23 @@ export default function TalksPage() {
       >
         {detail && (
           <Stack>
-            <Group gap="xs">
-              <StatusBadge status={detail.status} />
-              <Text size="sm" c="dimmed">
-                {eventName(detail.event_id)} {detail.date ? `— ${detail.date}` : ''}
-              </Text>
+            <Group gap="xs" justify="space-between">
+              <Group gap="xs">
+                <StatusBadge status={detail.status} />
+                <Text size="sm" c="dimmed">
+                  {whereGiven(detail)} {detail.date ? `— ${detail.date}` : ''}
+                </Text>
+              </Group>
+              {(isOffice || me?.user.id === detail.created_by_user_id) && (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="red"
+                  onClick={() => deleteTalk(detail)}
+                >
+                  Delete
+                </Button>
+              )}
             </Group>
             {detail.notes && <Text size="sm">{detail.notes}</Text>}
 
@@ -309,16 +365,25 @@ export default function TalksPage() {
           />
           <Select
             label="Conference"
+            description="Leave empty for seminars and colloquia"
             data={events.map((e) => ({ value: String(e.id), label: e.name }))}
             value={form.event_id}
             onChange={(v) => setForm({ ...form, event_id: v ?? '' })}
             searchable
             clearable
           />
+          {!form.event_id && (
+            <TextInput
+              label="Venue"
+              description="Where it was given, e.g. “MIT physics colloquium”"
+              value={form.venue}
+              onChange={(e) => setForm({ ...form, venue: e.currentTarget.value })}
+            />
+          )}
           <Group grow>
             <Select
               label="Type"
-              data={['plenary', 'parallel', 'poster', 'seminar', 'outreach']}
+              data={TALK_TYPES}
               value={form.talk_type}
               onChange={(v) => setForm({ ...form, talk_type: v ?? 'parallel' })}
             />
@@ -332,6 +397,18 @@ export default function TalksPage() {
               onChange={(v) => setForm({ ...form, is_invited: v ?? 'false' })}
             />
           </Group>
+          <Select
+            label="Speaker"
+            description="Leave empty to open the talk for nominations"
+            data={people.map((p) => ({
+              value: String(p.id),
+              label: `${p.family_name}, ${p.given_name}`,
+            }))}
+            value={form.speaker_person_id}
+            onChange={(v) => setForm({ ...form, speaker_person_id: v ?? '' })}
+            searchable
+            clearable
+          />
           <TextInput
             label="Date (YYYY-MM-DD)"
             value={form.date}
