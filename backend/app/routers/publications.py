@@ -16,6 +16,7 @@ from app.models import (
     WorkingGroup,
 )
 from app.schemas.publications import (
+    PubAcknowledgment,
     PublicationCreate,
     PublicationOut,
     PublicationPublic,
@@ -29,7 +30,6 @@ from app.security import (
     get_optional_user,
     is_convener_of,
     is_office,
-    require_office,
 )
 
 router = APIRouter(prefix="/publications", tags=["publications"])
@@ -118,17 +118,24 @@ def create_publication(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PublicationOut:
-    if not (is_office(user) or is_convener_of(db, user, body.working_group_id)):
-        raise HTTPException(403, "Only conveners or the office can propose publications")
+    """Any signed-in user may register a publication; the creator becomes an editor."""
     if body.working_group_id is not None and db.get(WorkingGroup, body.working_group_id) is None:
         raise HTTPException(404, "working_group_id not found")
     pub = Publication(**body.model_dump())
     pub.short_code = _next_short_code(db, body.pub_type.value)
     db.add(pub)
     db.flush()
+    if user.person_id is not None:
+        db.add(
+            PublicationPerson(
+                publication_id=pub.id,
+                person_id=user.person_id,
+                role=PublicationPersonRole.editor,
+            )
+        )
     db.add(
         PublicationEvent(
-            publication_id=pub.id, from_status=None, to_status="proposed", actor_user_id=user.id
+            publication_id=pub.id, from_status=None, to_status="in_progress", actor_user_id=user.id
         )
     )
     db.commit()
@@ -168,11 +175,12 @@ def change_status(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not is_office(user):
-        # Conveners may only advance proposed → in_progress within their WG.
+        # Editors and WG conveners may request collaboration review; everything
+        # else (submitted, published, moving backwards) stays with the office.
         allowed = (
-            is_convener_of(db, user, pub.working_group_id)
-            and pub.status == PublicationStatus.proposed
-            and body.status == PublicationStatus.in_progress
+            (_is_editor(db, user, pub_id) or is_convener_of(db, user, pub.working_group_id))
+            and pub.status == PublicationStatus.in_progress
+            and body.status == PublicationStatus.collab_review
         )
         if not allowed:
             raise HTTPException(403, "Only the office can make this transition")
@@ -192,10 +200,28 @@ def change_status(
     return PublicationOut.model_validate(_load_pub(db, pub_id))
 
 
-@router.post("/{pub_id}/people", dependencies=[Depends(require_office)], status_code=201)
-def add_person(pub_id: int, body: PubPersonAdd, db: Session = Depends(get_db)) -> PubPersonOut:
-    if db.get(Publication, pub_id) is None:
+def _can_manage_people(db: Session, user: User, pub: Publication) -> bool:
+    return (
+        is_office(user)
+        or _is_editor(db, user, pub.id)
+        or is_convener_of(db, user, pub.working_group_id)
+    )
+
+
+@router.post("/{pub_id}/people", status_code=201)
+def add_person(
+    pub_id: int,
+    body: PubPersonAdd,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PubPersonOut:
+    pub = db.get(Publication, pub_id)
+    if pub is None:
         raise HTTPException(404, "Publication not found")
+    if not _can_manage_people(db, user, pub):
+        raise HTTPException(403, "Only editors, conveners, or the office can add people")
+    if body.role == PublicationPersonRole.reviewer and not is_office(user):
+        raise HTTPException(403, "Only the office can assign reviewers")
     if db.get(Person, body.person_id) is None:
         raise HTTPException(404, "Person not found")
     exists = db.execute(
@@ -214,10 +240,52 @@ def add_person(pub_id: int, body: PubPersonAdd, db: Session = Depends(get_db)) -
     return PubPersonOut.model_validate(pp)
 
 
-@router.delete("/{pub_id}/people/{pp_id}", dependencies=[Depends(require_office)], status_code=204)
-def remove_person(pub_id: int, pp_id: int, db: Session = Depends(get_db)) -> None:
+@router.delete("/{pub_id}/people/{pp_id}", status_code=204)
+def remove_person(
+    pub_id: int,
+    pp_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
     pp = db.get(PublicationPerson, pp_id)
     if pp is None or pp.publication_id != pub_id:
         raise HTTPException(404, "Assignment not found")
+    pub = db.get(Publication, pub_id)
+    if not _can_manage_people(db, user, pub):
+        raise HTTPException(403, "Only editors, conveners, or the office can remove people")
+    if pp.role == PublicationPersonRole.reviewer and not is_office(user):
+        raise HTTPException(403, "Only the office can remove reviewers")
     db.delete(pp)
     db.commit()
+
+
+@router.get("/{pub_id}/acknowledgment")
+def acknowledgment(
+    pub_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)
+) -> PubAcknowledgment:
+    """Suggested acknowledgment text crediting USMCC and the assigned reviewers."""
+    pub = _load_pub(db, pub_id)
+    reviewers = [
+        f"{pp.person.given_name} {pp.person.family_name}"
+        for pp in pub.people
+        if pp.role == PublicationPersonRole.reviewer
+    ]
+    text = (
+        "We thank our colleagues in the US Muon Collider Collaboration for "
+        "their support of this work and for valuable discussions."
+    )
+    if reviewers:
+        if len(reviewers) == 1:
+            names = reviewers[0]
+        else:
+            names = ", ".join(reviewers[:-1]) + " and " + reviewers[-1]
+        text += (
+            f" We are grateful to {names} for their careful review of this "
+            "manuscript on behalf of the collaboration."
+        )
+    else:
+        text += (
+            " We are grateful to the collaboration's internal reviewers for "
+            "their careful review of this manuscript."
+        )
+    return PubAcknowledgment(text=text, reviewers=reviewers)

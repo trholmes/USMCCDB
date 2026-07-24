@@ -174,7 +174,6 @@ def test_member_cannot_do_office_things(admin):
     assert member.post(f"/api/v1/people/{somebody}/status", json={"status": "inactive"}).status_code == 403
     assert member.post("/api/v1/institutions", json={"name": "Nope U"}).status_code == 403
     assert member.get("/api/v1/auth/users").status_code == 403
-    assert member.post("/api/v1/publications", json={"title": "Nope"}).status_code == 403
 
 
 def _linked_member(admin, *, given, family, email, career_stage="postdoc"):
@@ -918,3 +917,94 @@ def test_admin_contact_role_and_scoped_edits(admin):
     assert contact.patch(
         f"/api/v1/people/{member_pid}", json={"usmcc_percent": 30}
     ).status_code == 403
+
+
+def test_member_publication_flow(admin):
+    """Any member can register a publication, attach involved people, build a
+    subset author list, and request collaboration review — but only the office
+    can move it further or assign reviewers."""
+    editor, editor_pid = _linked_member(
+        admin, given="Erin", family="Editor", email="erin.editor@example.edu"
+    )
+    friend, friend_pid = _linked_member(
+        admin, given="Finn", family="Friend", email="finn.friend@example.edu"
+    )
+
+    r = editor.post(
+        "/api/v1/publications",
+        json={"title": "A Democratized Paper", "abstract": "Anyone can start one."},
+    )
+    assert r.status_code == 201, r.text
+    pub = r.json()
+    assert pub["status"] == "in_progress"
+    # The creator is automatically an editor…
+    assert [(pp["person"]["id"], pp["role"]) for pp in pub["people"]] == [(editor_pid, "editor")]
+
+    # …and may edit the record and attach involved people from the directory.
+    assert editor.patch(
+        f"/api/v1/publications/{pub['id']}", json={"target_journal": "PRD"}
+    ).status_code == 200
+    r = editor.post(
+        f"/api/v1/publications/{pub['id']}/people",
+        json={"person_id": friend_pid, "role": "contributor"},
+    )
+    assert r.status_code == 201, r.text
+    # Reviewers stay office-assigned.
+    assert editor.post(
+        f"/api/v1/publications/{pub['id']}/people",
+        json={"person_id": friend_pid, "role": "reviewer"},
+    ).status_code == 403
+
+    # An uninvolved member can neither edit nor attach people.
+    assert friend.patch(
+        f"/api/v1/publications/{pub['id']}", json={"title": "Hijacked"}
+    ).status_code == 403
+    assert friend.post(
+        f"/api/v1/publications/{pub['id']}/people",
+        json={"person_id": friend_pid, "role": "editor"},
+    ).status_code == 403
+
+    # Author list from just the involved people (no author periods needed).
+    r = editor.post(
+        f"/api/v1/publications/{pub['id']}/author-list",
+        json={"cutoff_date": "2026-07-01", "scope": "involved"},
+    )
+    assert r.status_code == 201, r.text
+    names = sorted(a["family_name"] for a in r.json()["snapshot"]["authors"])
+    assert names == ["Editor", "Friend"]
+
+    # Members cannot skip ahead in the workflow…
+    assert editor.post(
+        f"/api/v1/publications/{pub['id']}/status", json={"status": "published"}
+    ).status_code == 403
+    assert friend.post(
+        f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
+    ).status_code == 403
+    # …but an editor may request collaboration review.
+    r = editor.post(
+        f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "collab_review"
+
+    # Suggested acknowledgment: generic until the office assigns reviewers.
+    ack = editor.get(f"/api/v1/publications/{pub['id']}/acknowledgment").json()
+    assert "US Muon Collider Collaboration" in ack["text"]
+    assert ack["reviewers"] == []
+
+    reviewer_person = admin.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Rae",
+            "family_name": "Reviewer",
+            "email": "rae.reviewer@example.edu",
+            "career_stage": "faculty",
+        },
+    ).json()
+    assert admin.post(
+        f"/api/v1/publications/{pub['id']}/people",
+        json={"person_id": reviewer_person["id"], "role": "reviewer"},
+    ).status_code == 201
+    ack = editor.get(f"/api/v1/publications/{pub['id']}/acknowledgment").json()
+    assert ack["reviewers"] == ["Rae Reviewer"]
+    assert "Rae Reviewer" in ack["text"]

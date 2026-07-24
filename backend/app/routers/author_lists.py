@@ -45,7 +45,24 @@ def generate_for_publication(
     cutoff = body.cutoff_date if body else pub.author_cutoff_date
     if cutoff is None:
         raise HTTPException(422, "No cutoff date: set author_cutoff_date or pass one")
-    snapshot = build_snapshot(db, cutoff)
+    person_ids = None
+    if body is not None and body.scope == "involved":
+        from app.models import PublicationPerson, PublicationPersonRole
+
+        person_ids = sorted(
+            {
+                pp.person_id
+                for pp in db.execute(
+                    select(PublicationPerson).where(
+                        PublicationPerson.publication_id == pub.id,
+                        PublicationPerson.role != PublicationPersonRole.reviewer,
+                    )
+                ).scalars()
+            }
+        )
+        if not person_ids:
+            raise HTTPException(422, "No people attached to this publication yet")
+    snapshot = build_snapshot(db, cutoff, person_ids=person_ids)
     if not snapshot["authors"]:
         raise HTTPException(422, "No eligible authors on that date")
     alist = AuthorList(

@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -75,8 +76,17 @@ class PublicationPublic(ORMModel):
     journal: str | None
 
 
+class PubAcknowledgment(BaseModel):
+    text: str
+    reviewers: list[str]
+
+
 class AuthorListRequest(BaseModel):
     cutoff_date: date
+    # "collaboration" = every member with an active author period at the cutoff;
+    # "involved" = just the people attached to the publication (any role except
+    # reviewer), whether or not they have registered author periods.
+    scope: Literal["collaboration", "involved"] = "collaboration"
 
 
 class AuthorEntry(BaseModel):
