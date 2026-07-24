@@ -103,6 +103,7 @@ class Person(TimestampedBase):
     )
 
     given_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    middle_name: Mapped[str | None] = mapped_column(String(120))
     family_name: Mapped[str] = mapped_column(String(120), nullable=False)
     preferred_name: Mapped[str | None] = mapped_column(String(200))
     email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False)

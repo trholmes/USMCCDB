@@ -392,7 +392,9 @@ export default function PersonPage() {
           />
         <div>
           <Title order={3}>
-            {person.given_name} {person.family_name}{' '}
+            {[person.given_name, person.middle_name, person.family_name]
+              .filter(Boolean)
+              .join(' ')}{' '}
             {person.is_voting && <Badge variant="light">voting member</Badge>}
           </Title>
           <Group gap="xs" mt={4}>

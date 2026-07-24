@@ -213,6 +213,7 @@ def apply(
     if person is None:
         person = Person(
             given_name=body.given_name,
+            middle_name=body.middle_name,
             family_name=body.family_name,
             preferred_name=body.preferred_name,
             email=email,
@@ -235,6 +236,7 @@ def apply(
         # fields. The ORCID iD stays the authenticated one from sign-in, and
         # the pending membership event was already recorded at provisioning.
         person.given_name = body.given_name
+        person.middle_name = body.middle_name
         person.family_name = body.family_name
         person.preferred_name = body.preferred_name
         person.email = email

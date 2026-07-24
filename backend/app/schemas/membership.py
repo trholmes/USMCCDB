@@ -121,6 +121,7 @@ class AuthorPeriodOut(ORMModel):
 
 class PersonApply(BaseModel):
     given_name: str = Field(min_length=1, max_length=120)
+    middle_name: str | None = Field(default=None, max_length=120)
     family_name: str = Field(min_length=1, max_length=120)
     preferred_name: str | None = None
     email: EmailStr
@@ -151,6 +152,7 @@ class PersonApply(BaseModel):
 
 class PersonUpdate(BaseModel):
     given_name: str | None = None
+    middle_name: str | None = Field(default=None, max_length=120)
     family_name: str | None = None
     preferred_name: str | None = None
     email: EmailStr | None = None
@@ -218,6 +220,7 @@ class WorkingGroupRef(ORMModel):
 
 
 class PersonOut(PersonSummary):
+    middle_name: str | None = None
     professional_title: str | None = None
     department: str | None = None
     usmcc_percent: int | None = None
