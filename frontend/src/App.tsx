@@ -3,7 +3,7 @@ import { useDisclosure } from '@mantine/hooks'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useSession } from './auth/SessionContext'
 import AdminPage from './pages/Admin'
-import ApplyPage from './pages/Apply'
+import RegisterPage from './pages/Register'
 import DirectoryPage from './pages/Directory'
 import EventsPage from './pages/Events'
 import InstitutionDetailPage from './pages/InstitutionDetail'
@@ -42,12 +42,12 @@ export default function App() {
     )
   }
 
-  // Unauthenticated users only see login + apply.
+  // Unauthenticated users only see login + registration.
   if (!me) {
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/apply" element={<ApplyPage />} />
+        <Route path="/register" element={<RegisterPage />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     )
@@ -131,7 +131,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/directory" replace />} />
           <Route path="/login" element={<Navigate to="/directory" replace />} />
-          <Route path="/apply" element={<ApplyPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/directory" element={<DirectoryPage />} />
           <Route path="/people/:id" element={<PersonPage />} />
           <Route path="/institutions" element={<InstitutionsPage />} />

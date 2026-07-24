@@ -17,7 +17,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
 
-export default function ApplyPage() {
+export default function RegisterPage() {
   const [form, setForm] = useState({
     given_name: '',
     middle_name: '',
@@ -41,7 +41,7 @@ export default function ApplyPage() {
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
   // Charter voting rules the form can check itself (mirrors the backend
-  // validation on /people/apply): students are not eligible, and voting
+  // validation on /people/register): students are not eligible, and voting
   // requires a US institution — so an institution must be given at all.
   const votingError = !form.is_voting
     ? null
@@ -59,7 +59,7 @@ export default function ApplyPage() {
     }
     setBusy(true)
     try {
-      await api.post('/people/apply', {
+      await api.post('/people/register', {
         ...form,
         middle_name: form.middle_name || null,
         preferred_name: form.preferred_name || null,
@@ -194,7 +194,7 @@ export default function ApplyPage() {
               </div>
               <MultiSelect
                 label="Research area(s)"
-                placeholder="Select all that apply…"
+                placeholder="Select all relevant areas…"
                 data={RESEARCH_AREAS}
                 value={form.research_areas}
                 onChange={(v) => set('research_areas', v)}

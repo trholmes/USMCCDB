@@ -21,7 +21,7 @@ used by the LHC experiments, built as a self-hosted open-source stack:
 
 - **Membership** — people, institutions, dated affiliations, voting-member flag,
   career stage, working groups, leadership roles, member photos, and an
-  apply → approve workflow with a full audit trail.
+  register → approve workflow with a full audit trail.
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
   seminar/outreach, invited vs. contributed), member nominations, office
   assignment, and fair-share statistics per person and institution.

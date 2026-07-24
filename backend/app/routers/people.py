@@ -31,7 +31,7 @@ from app.schemas.membership import (
     LabelCount,
     MembershipEventOut,
     MemberStats,
-    PersonApply,
+    PersonRegistration,
     PersonOut,
     PersonSummary,
     PersonUpdate,
@@ -41,7 +41,7 @@ from app.schemas.membership import (
 )
 from app.config import get_settings
 from app.security import (
-    get_applicant_user,
+    get_registrant_user,
     get_current_user,
     is_admin_contact_for,
     is_office,
@@ -177,12 +177,12 @@ def _close_primary(db: Session, affil: Affiliation, move_date: date) -> None:
         affil.end_date = move_date - timedelta(days=1)
 
 
-@router.post("/apply", status_code=201)
-def apply(
-    body: PersonApply,
+@router.post("/register", status_code=201)
+def register(
+    body: PersonRegistration,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
-    applicant: User | None = Depends(get_applicant_user),
+    registrant: User | None = Depends(get_registrant_user),
 ) -> PersonSummary:
     """Public membership registration; creates a pending person record and
     notifies everyone who can approve it. A signed-in ORCID user still
@@ -191,8 +191,8 @@ def apply(
     email = body.email.lower()
 
     person: Person | None = None
-    if applicant is not None and applicant.person_id is not None:
-        candidate = db.get(Person, applicant.person_id)
+    if registrant is not None and registrant.person_id is not None:
+        candidate = db.get(Person, registrant.person_id)
         if candidate is not None and candidate.email.endswith("@orcid.placeholder"):
             person = candidate
 
@@ -210,10 +210,10 @@ def apply(
                 409, "A record with this ORCID iD already exists — contact the office"
             )
 
-    # Charter voting rules are checked at registration so an applicant cannot
+    # Charter voting rules are checked at registration so a registrant cannot
     # self-grant voting membership (issue #51): the question stays on the
     # form, but a "yes" that the other answers forbid is rejected so the
-    # applicant can fix the form.
+    # registrant can fix the form.
     if body.is_voting:
         if body.career_stage in STUDENT_STAGES:
             raise HTTPException(

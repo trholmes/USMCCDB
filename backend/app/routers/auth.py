@@ -245,7 +245,7 @@ async def orcid_callback(
     user.last_login_at = datetime.now(UTC)
     db.commit()
 
-    dest = "/apply?welcome=orcid" if needs_registration else "/"
+    dest = "/register?welcome=orcid" if needs_registration else "/"
     response = RedirectResponse(dest)
     set_session_cookie(response, request, create_access_token(user))
     return response

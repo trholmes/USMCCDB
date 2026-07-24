@@ -478,7 +478,7 @@ export default function PersonPage() {
             />
             <MultiSelect
               label="Research area(s)"
-              placeholder="Select all that apply…"
+              placeholder="Select all relevant areas…"
               data={RESEARCH_AREAS}
               value={researchAreas}
               onChange={setResearchAreas}
