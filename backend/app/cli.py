@@ -26,6 +26,7 @@ from app.models import (
     CollabRole,
     CollabRoleType,
     Institution,
+    MembershipEvent,
     MemberStatus,
     Person,
     User,
@@ -80,6 +81,31 @@ def seed_wgs():
     typer.echo("Done.")
 
 
+def _ensure_activation_event(db, person: Person, effective: date) -> None:
+    """Record the transition to active for an imported member, if no such
+    event exists yet. Imports create people directly as active, bypassing the
+    status-change endpoint that normally writes the audit trail — without this
+    the "new members per year" statistics never see imported members."""
+    if person.status != MemberStatus.active:
+        return
+    has_event = db.execute(
+        select(MembershipEvent.id).where(
+            MembershipEvent.person_id == person.id,
+            MembershipEvent.to_status == MemberStatus.active.value,
+        )
+    ).first()
+    if has_event is None:
+        db.add(
+            MembershipEvent(
+                person_id=person.id,
+                from_status=None,
+                to_status=MemberStatus.active.value,
+                effective_date=effective,
+                note="Imported member record",
+            )
+        )
+
+
 @cli.command()
 def import_members(
     csv_path: Path = typer.Argument(..., exists=True, readable=True),
@@ -129,6 +155,7 @@ def import_members(
                 person.orcid = orcid or person.orcid
                 person.career_stage = stage
                 updated += 1
+            _ensure_activation_event(db, person, start)
 
             short = (row.get("institution_short_name") or "").strip()
             if short:
@@ -282,13 +309,23 @@ def seed_demo():
             )
             db.add(person)
             db.flush()
+            # Spread joins over a few years so the growth chart has shape.
+            joined = date(2023 + i % 3, 1 + i % 12, 1)
             db.add(
                 Affiliation(
                     person_id=person.id,
                     institution_id=insts[inst_idx].id,
                     is_primary=True,
                     career_stage=stage,
-                    start_date=date(2024, 1 + i % 12, 1),
+                    start_date=joined,
+                )
+            )
+            db.add(
+                MembershipEvent(
+                    person_id=person.id,
+                    from_status=None,
+                    to_status=MemberStatus.active.value,
+                    effective_date=joined,
                 )
             )
             if voting:
@@ -557,6 +594,7 @@ def import_members_xlsx(
                 person.research_areas = research_areas or person.research_areas
                 person.expertise = expertise or person.expertise
                 updated += 1
+            _ensure_activation_event(db, person, start)
 
             primary_name = str(row[c_primary] or "").strip()
             if primary_name:
