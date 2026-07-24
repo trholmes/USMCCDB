@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import or_, select
+from sqlalchemy import Date, cast, extract, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -27,12 +27,15 @@ from app.schemas.membership import (
     AuthorPeriodUpdate,
     InstitutionChange,
     InstitutionRef,
+    LabelCount,
     MembershipEventOut,
+    MemberStats,
     PersonApply,
     PersonOut,
     PersonSummary,
     PersonUpdate,
     StatusChange,
+    YearCount,
 )
 from app.config import get_settings
 from app.security import get_current_user, is_admin_contact_for, is_office, require_office
@@ -701,3 +704,97 @@ def delete_author_period(person_id: int, period_id: int, db: Session = Depends(g
         raise HTTPException(404, "Author period not found")
     db.delete(period)
     db.commit()
+
+
+# --- Membership statistics ------------------------------------------------------
+
+# Separate router: stats live under /stats/* (like /stats/talks), outside the
+# /people prefix.
+stats_router = APIRouter(tags=["membership"])
+
+
+@stats_router.get("/stats/members")
+def member_stats(
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+) -> MemberStats:
+    """Aggregate membership statistics: headline counts, breakdowns of the
+    active membership, and collaboration growth over time."""
+    active = Person.status == MemberStatus.active
+
+    status_counts: dict[MemberStatus, int] = dict(
+        db.execute(select(Person.status, func.count()).group_by(Person.status)).all()
+    )
+    stage_counts: dict[CareerStage, int] = dict(
+        db.execute(
+            select(Person.career_stage, func.count()).where(active).group_by(Person.career_stage)
+        ).all()
+    )
+
+    # research_areas holds a comma-separated subset of RESEARCH_AREAS
+    # (normalized on write), so a substring match per canonical name is exact.
+    by_research_area = []
+    for area in RESEARCH_AREAS:
+        n = db.scalar(
+            select(func.count())
+            .select_from(Person)
+            .where(active, Person.research_areas.ilike(f"%{area}%"))
+        )
+        if n:
+            by_research_area.append(LabelCount(label=area, count=n))
+
+    current_primary = (Affiliation.is_primary.is_(True), Affiliation.end_date.is_(None))
+    us_active = db.scalar(
+        select(func.count())
+        .select_from(Affiliation)
+        .join(Person, Person.id == Affiliation.person_id)
+        .join(Institution, Institution.id == Affiliation.institution_id)
+        .where(active, *current_primary, Institution.is_us.is_(True))
+    )
+    institutions_with_active = db.scalar(
+        select(func.count(func.distinct(Affiliation.institution_id)))
+        .select_from(Affiliation)
+        .join(Person, Person.id == Affiliation.person_id)
+        .where(active, *current_primary)
+    )
+    voting = db.scalar(
+        select(func.count()).select_from(Person).where(active, Person.is_voting.is_(True))
+    )
+
+    # Growth: each person's first transition to active, bucketed by year
+    # (effective_date as entered, falling back to the recorded timestamp).
+    first_active = (
+        select(
+            MembershipEvent.person_id,
+            func.min(
+                func.coalesce(
+                    MembershipEvent.effective_date, cast(MembershipEvent.created_at, Date)
+                )
+            ).label("joined"),
+        )
+        .where(MembershipEvent.to_status == MemberStatus.active.value)
+        .group_by(MembershipEvent.person_id)
+        .subquery()
+    )
+    year = extract("year", first_active.c.joined).label("year")
+    year_rows = db.execute(select(year, func.count()).group_by(year).order_by(year)).all()
+
+    return MemberStats(
+        total_people=sum(status_counts.values()),
+        active=status_counts.get(MemberStatus.active, 0),
+        voting=voting or 0,
+        us_active=us_active or 0,
+        institutions_with_active=institutions_with_active or 0,
+        by_status=[
+            LabelCount(label=s.value, count=status_counts[s])
+            for s in MemberStatus
+            if s in status_counts
+        ],
+        by_career_stage=[
+            LabelCount(label=s.value, count=stage_counts[s])
+            for s in CareerStage
+            if s in stage_counts
+        ],
+        by_research_area=by_research_area,
+        new_members_by_year=[YearCount(year=int(y), count=n) for y, n in year_rows],
+    )

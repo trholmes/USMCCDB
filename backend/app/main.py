@@ -49,6 +49,7 @@ app = FastAPI(
 prefix = "/api/v1"
 app.include_router(auth.router, prefix=prefix)
 app.include_router(people.router, prefix=prefix)
+app.include_router(people.stats_router, prefix=prefix)
 app.include_router(institutions.router, prefix=prefix)
 app.include_router(working_groups.router, prefix=prefix)
 app.include_router(talks.router, prefix=prefix)
