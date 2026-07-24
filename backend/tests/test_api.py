@@ -76,6 +76,7 @@ def test_register_and_approve_flow(admin):
             "email": "priya@example.edu",
             "career_stage": "postdoc",
             "institution_name": "Test University",
+            "institution_is_us": True,
             "is_voting": True,
         },
     )
@@ -546,6 +547,7 @@ def test_activation_revalidates_voting(admin):
             "email": "renata.recheck@example.edu",
             "career_stage": "postdoc",
             "institution_name": "Recheck Institute",
+            "institution_is_us": True,
             "is_voting": True,
         },
     )
@@ -562,6 +564,101 @@ def test_activation_revalidates_voting(admin):
     person = admin.get(f"/api/v1/people/{pid}").json()
     assert person["status"] == "active"
     assert person["is_voting"] is False
+
+
+def test_free_text_institution_requires_us_declaration(admin):
+    base = {
+        "given_name": "Nina",
+        "family_name": "Newinst",
+        "email": "nina.newinst@example.edu",
+        "career_stage": "postdoc",
+    }
+    # Naming a new institution without declaring it US / non-US is rejected —
+    # is_us gates voting eligibility, so the backend never guesses (issue #56).
+    r = admin.post(
+        "/api/v1/people/register",
+        json={**base, "institution_name": "Somewhere Institute"},
+    )
+    assert r.status_code == 422
+
+    # A declared non-US institution closes the free-text voting bypass.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            **base,
+            "institution_name": "University of Elsewhere",
+            "institution_is_us": False,
+            "is_voting": True,
+        },
+    )
+    assert r.status_code == 422
+
+    # A non-voting registration goes through, and the new (inactive)
+    # institution records the declaration.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            **base,
+            "institution_name": "University of Elsewhere",
+            "institution_is_us": False,
+        },
+    )
+    assert r.status_code == 201, r.text
+    inst = next(
+        i
+        for i in admin.get("/api/v1/institutions").json()
+        if i["name"] == "University of Elsewhere"
+    )
+    assert inst["is_us"] is False
+    assert inst["is_active"] is False
+    assert inst["country"] is None
+
+
+def test_institution_move_free_text_requires_us_declaration(admin):
+    member, pid = _linked_member(
+        admin, given="Mo", family="Mover", email="mo.mover@example.edu"
+    )
+    us = admin.post("/api/v1/institutions", json={"name": "Stateside U"}).json()
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": us["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 200
+
+    # A free-text move must declare the new institution US / non-US.
+    r = member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_name": "University of Tokyo", "start_date": "2026-01-01"},
+    )
+    assert r.status_code == 422
+
+    # A voting member cannot move to a declared non-US institution while
+    # keeping the flag (the issue #56 bypass).
+    r = member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={
+            "institution_name": "University of Tokyo",
+            "institution_is_us": False,
+            "start_date": "2026-01-01",
+        },
+    )
+    assert r.status_code == 422
+    assert member.get(f"/api/v1/people/{pid}").json()["is_voting"] is True
+
+    # After giving up the flag the move goes through, and the non-US record
+    # blocks re-granting voting membership.
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": False}).status_code == 200
+    r = member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={
+            "institution_name": "University of Tokyo",
+            "institution_is_us": False,
+            "start_date": "2026-01-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["institution"]["is_us"] is False
+    assert member.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 422
 
 
 def test_research_areas_normalized(admin):
@@ -1591,6 +1688,7 @@ def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
             "email": "josiah.carberry@example.edu",
             "career_stage": "faculty",
             "institution_name": "Brown University",
+            "institution_is_us": True,
         },
     )
     assert r.status_code == 201, r.text

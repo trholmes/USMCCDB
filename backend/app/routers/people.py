@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import Date, case, cast, func, or_, select
+from sqlalchemy import Date, case, cast, func, null, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -128,15 +128,29 @@ def _validate_entered_date(entered: date, label: str) -> None:
 
 
 def _resolve_institution_id(
-    db: Session, institution_id: int | None, institution_name: str | None
+    db: Session,
+    institution_id: int | None,
+    institution_name: str | None,
+    institution_is_us: bool | None,
 ) -> int:
     """Return a valid institution id, creating an inactive entry from free
-    text (office reviews new entries) when no id was given."""
+    text (office reviews new entries) when no id was given. The proposer must
+    declare the new institution US or non-US — `is_us` gates voting
+    eligibility, so it is never defaulted (issue #56)."""
     if institution_id is None:
         name = (institution_name or "").strip()
         if not name:
             raise HTTPException(422, "Provide institution_id or institution_name")
-        inst = Institution(name=name, is_active=False)  # office reviews
+        if institution_is_us is None:  # schema validators enforce this already
+            raise HTTPException(422, "Specify whether the new institution is US-based")
+        inst = Institution(
+            name=name,
+            is_us=institution_is_us,
+            # Explicit SQL NULL: a plain None would be overridden by the
+            # column's "USA" default, mislabeling a declared non-US entry.
+            country="USA" if institution_is_us else null(),
+            is_active=False,  # office reviews
+        )
         db.add(inst)
         db.flush()
         return inst.id
@@ -231,9 +245,12 @@ def register(
                 raise HTTPException(404, "institution_id not found")
             institution_is_us = inst.is_us
         else:
-            # A free-text institution is taken at its word until the office
-            # reviews it; activation re-validates (see change_status).
-            institution_is_us = bool((body.institution_name or "").strip())
+            # A free-text institution carries the registrant's own US /
+            # non-US declaration (required alongside institution_name);
+            # activation re-validates (see change_status).
+            institution_is_us = bool((body.institution_name or "").strip()) and bool(
+                body.institution_is_us
+            )
         if not institution_is_us:
             raise HTTPException(
                 422,
@@ -283,7 +300,9 @@ def register(
     if (
         body.institution_id is not None or (body.institution_name or "").strip()
     ) and _open_primary(db, person.id) is None:
-        institution_id = _resolve_institution_id(db, body.institution_id, body.institution_name)
+        institution_id = _resolve_institution_id(
+            db, body.institution_id, body.institution_name, body.institution_is_us
+        )
         db.add(
             Affiliation(
                 person_id=person.id,
@@ -656,7 +675,9 @@ def change_institution(
             )
         person.career_stage = body.career_stage
 
-    institution_id = _resolve_institution_id(db, body.institution_id, body.institution_name)
+    institution_id = _resolve_institution_id(
+        db, body.institution_id, body.institution_name, body.institution_is_us
+    )
 
     # A voting member cannot move to a non-US institution while keeping the
     # flag (same shape as the career-stage rule above).

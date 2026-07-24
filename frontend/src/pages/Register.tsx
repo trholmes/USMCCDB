@@ -28,6 +28,9 @@ export default function RegisterPage() {
     career_stage: 'other',
     usmcc_percent: '' as number | string,
     institution_name: '',
+    // 'us' | 'non-us' | null — required when a free-text institution is
+    // given; new institutions carry this declaration for office review.
+    institution_is_us: null as string | null,
     is_voting: false,
     research_areas: [] as string[],
   })
@@ -49,12 +52,22 @@ export default function RegisterPage() {
       ? 'Graduate and undergraduate students are not eligible for voting membership — update your position or register as a non-voting member.'
       : !form.institution_name.trim()
         ? 'Voting membership requires a US institution — enter your primary institution above or register as a non-voting member.'
-        : null
+        : form.institution_is_us === 'non-us'
+          ? 'Voting membership requires a US institution — register as a non-voting member.'
+          : null
+
+  // A new institution must be declared US or non-US (its US status gates
+  // voting eligibility, so the backend refuses to guess).
+  const instUsError =
+    form.institution_name.trim() && !form.institution_is_us
+      ? 'Please indicate whether this is a US institution.'
+      : null
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (votingError) {
-      notifications.show({ color: 'red', message: votingError })
+    const error = instUsError || votingError
+    if (error) {
+      notifications.show({ color: 'red', message: error })
       return
     }
     setBusy(true)
@@ -67,6 +80,7 @@ export default function RegisterPage() {
         usmcc_percent:
           percentUncertain || form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
         institution_name: form.institution_name || null,
+        institution_is_us: form.institution_name.trim() ? form.institution_is_us === 'us' : null,
         research_areas: joinList(form.research_areas),
       })
       setDone(true)
@@ -154,6 +168,19 @@ export default function RegisterPage() {
                 value={form.institution_name}
                 onChange={(e) => set('institution_name', e.currentTarget.value)}
               />
+              {form.institution_name.trim() && (
+                <Select
+                  label="Is this a US institution?"
+                  description="US status gates voting eligibility; new institutions are reviewed by the USMCC office."
+                  placeholder="Select…"
+                  data={[
+                    { value: 'us', label: 'US institution' },
+                    { value: 'non-us', label: 'Non-US institution' },
+                  ]}
+                  value={form.institution_is_us}
+                  onChange={(v) => set('institution_is_us', v)}
+                />
+              )}
               <div>
                 <NumberInput
                   label="Research time on USMCC (%)"
