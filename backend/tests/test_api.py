@@ -71,6 +71,7 @@ def test_apply_and_approve_flow(admin):
         "/api/v1/people/apply",
         json={
             "given_name": "Priya",
+            "middle_name": "R.",
             "family_name": "Kumar",
             "email": "priya@example.edu",
             "career_stage": "postdoc",
@@ -94,6 +95,7 @@ def test_apply_and_approve_flow(admin):
     # The initial affiliation records the stage given at registration.
     person = admin.get(f"/api/v1/people/{pid}").json()
     assert person["affiliations"][0]["career_stage"] == "postdoc"
+    assert person["middle_name"] == "R."
 
 
 def test_author_list_generation(admin):

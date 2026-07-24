@@ -7,9 +7,7 @@ import {
   NumberInput,
   Select,
   Stack,
-  TagsInput,
   Text,
-  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -22,19 +20,16 @@ import { CAREER_STAGES, joinList, RESEARCH_AREAS } from '../constants'
 export default function ApplyPage() {
   const [form, setForm] = useState({
     given_name: '',
+    middle_name: '',
     family_name: '',
     preferred_name: '',
     email: '',
     orcid: '',
     career_stage: 'other',
-    professional_title: '',
-    department: '',
     usmcc_percent: '' as number | string,
     institution_name: '',
     is_voting: false,
     research_areas: [] as string[],
-    expertise: [] as string[],
-    notes: '',
   })
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
@@ -48,15 +43,12 @@ export default function ApplyPage() {
     try {
       await api.post('/people/apply', {
         ...form,
+        middle_name: form.middle_name || null,
         preferred_name: form.preferred_name || null,
         orcid: form.orcid || null,
-        professional_title: form.professional_title || null,
-        department: form.department || null,
         usmcc_percent: form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
         institution_name: form.institution_name || null,
         research_areas: joinList(form.research_areas),
-        expertise: joinList(form.expertise),
-        notes: form.notes || null,
       })
       setDone(true)
     } catch (err: any) {
@@ -104,6 +96,11 @@ export default function ApplyPage() {
                 onChange={(e) => set('given_name', e.currentTarget.value)}
               />
               <TextInput
+                label="Middle name (optional)"
+                value={form.middle_name}
+                onChange={(e) => set('middle_name', e.currentTarget.value)}
+              />
+              <TextInput
                 label="Last / family name"
                 required
                 value={form.family_name}
@@ -134,20 +131,9 @@ export default function ApplyPage() {
                 onChange={(v) => set('career_stage', v || 'other')}
               />
               <TextInput
-                label="Professional title (optional)"
-                description="Your title in your organization (e.g. Associate Professor, Staff Scientist)."
-                value={form.professional_title}
-                onChange={(e) => set('professional_title', e.currentTarget.value)}
-              />
-              <TextInput
                 label="Primary institution"
                 value={form.institution_name}
                 onChange={(e) => set('institution_name', e.currentTarget.value)}
-              />
-              <TextInput
-                label="Department (optional)"
-                value={form.department}
-                onChange={(e) => set('department', e.currentTarget.value)}
               />
               <NumberInput
                 label="Research time on USMCC (%) (optional)"
@@ -157,11 +143,17 @@ export default function ApplyPage() {
                 value={form.usmcc_percent}
                 onChange={(v) => set('usmcc_percent', v)}
               />
-              <Checkbox
-                label="Registering as a voting member (PhD-holding physicist at a US institution, actively contributing to the muon collider effort)"
-                checked={form.is_voting}
-                onChange={(e) => set('is_voting', e.currentTarget.checked)}
-              />
+              <div>
+                <Text size="sm" fw={700}>
+                  Register as a voting member
+                </Text>
+                <Checkbox
+                  mt={4}
+                  label="PhD-holding physicist at a US institution, actively contributing to the muon collider effort"
+                  checked={form.is_voting}
+                  onChange={(e) => set('is_voting', e.currentTarget.checked)}
+                />
+              </div>
               <MultiSelect
                 label="Research area(s)"
                 placeholder="Select all that apply…"
@@ -169,19 +161,6 @@ export default function ApplyPage() {
                 value={form.research_areas}
                 onChange={(v) => set('research_areas', v)}
                 clearable
-              />
-              <TagsInput
-                label="Topics of focus"
-                description="Type a topic and press Enter (e.g. muon cooling, tracking detectors)."
-                placeholder="Add a topic…"
-                value={form.expertise}
-                onChange={(v) => set('expertise', v)}
-                clearable
-              />
-              <Textarea
-                label="Anything you want to tell us?"
-                value={form.notes}
-                onChange={(e) => set('notes', e.currentTarget.value)}
               />
               <Button type="submit" loading={busy}>
                 Submit registration
