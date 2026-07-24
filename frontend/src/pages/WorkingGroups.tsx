@@ -60,6 +60,21 @@ export default function WorkingGroupsPage() {
     }
   }
 
+  const leave = async (wgId: number) => {
+    if (!me?.person_id) return
+    try {
+      await api.delete(`/working-groups/${wgId}/members/${me.person_id}`)
+      notifications.show({ message: 'Left the group.' })
+      loadMembers(wgId)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const isMember = (wgId: number) =>
+    me?.person_id != null && (members[wgId] ?? []).some((p) => p.id === me.person_id)
+
   const open = (target: WorkingGroup | 'new') => {
     setForm(
       target === 'new'
@@ -121,9 +136,15 @@ export default function WorkingGroupsPage() {
                 </Text>
               )}
               <Group gap="xs" mb="sm">
-                <Button size="xs" variant="light" onClick={() => join(wg.id)}>
-                  Join this group
-                </Button>
+                {isMember(wg.id) ? (
+                  <Button size="xs" variant="light" color="red" onClick={() => leave(wg.id)}>
+                    Leave this group
+                  </Button>
+                ) : (
+                  <Button size="xs" variant="light" onClick={() => join(wg.id)}>
+                    Join this group
+                  </Button>
+                )}
                 {isOffice && (
                   <Button size="xs" variant="subtle" onClick={() => open(wg)}>
                     Edit
