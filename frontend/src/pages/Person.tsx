@@ -184,15 +184,14 @@ export default function PersonPage() {
     currentPrimary != null && adminContactInstIds.includes(currentPrimary.institution.id)
   const canEdit = canEditFull || isAdminContact
 
-  // Self-service voting rule (office accounts are not bound by it — the
-  // backend enforces eligibility for everyone at save time): active,
-  // non-student, and currently at a US institution.
+  // Voting eligibility per the charter (mirrors the backend rule, which
+  // enforces it for every actor at save time): active, non-student, and
+  // currently at a US institution. The checkbox stays editable either way —
+  // an ineligible request is rejected by the backend with an explanation.
   const votingEligible =
     person.status === 'active' &&
     !STUDENT_STAGES.includes(form.career_stage) &&
     (currentPrimary?.institution.is_us ?? false)
-  // What the checkbox actually shows/means for this user.
-  const effectiveVoting = isOffice ? voting : votingEligible && voting
 
   const save = async () => {
     // PATCH only what changed, so unrelated edits can never clobber fields
@@ -219,7 +218,7 @@ export default function PersonPage() {
       joinList(researchAreas),
       joinList(splitList(person.research_areas)),
     )
-    changed('is_voting', effectiveVoting, person.is_voting)
+    changed('is_voting', voting, person.is_voting)
     if (Object.keys(payload).length === 0) {
       setEditing(false)
       return
@@ -479,7 +478,7 @@ export default function PersonPage() {
             />
             <MultiSelect
               label="Research area(s)"
-              placeholder="Select all that apply…"
+              placeholder="Select all relevant areas…"
               data={RESEARCH_AREAS}
               value={researchAreas}
               onChange={setResearchAreas}
@@ -488,13 +487,14 @@ export default function PersonPage() {
             />
             <Checkbox
               label="Voting member"
-              checked={effectiveVoting}
-              disabled={!canEditFull || (!isOffice && !votingEligible)}
+              checked={voting}
+              disabled={!canEditFull}
               onChange={(e) => setVoting(e.currentTarget.checked)}
-              description={
-                isOffice || votingEligible
-                  ? 'PhD-holding physicist at a US institution, actively contributing.'
-                  : 'Voting membership requires an active, non-student member (not a grad or undergrad student) currently at a US institution.'
+              description="Per the USMCC charter: a PhD-holding physicist at a US institution, actively contributing to the muon collider effort."
+              error={
+                voting && !votingEligible
+                  ? 'Voting membership requires an active, non-student member (not a grad or undergrad student) currently at a US institution.'
+                  : undefined
               }
             />
             <Group>

@@ -119,7 +119,7 @@ class AuthorPeriodOut(ORMModel):
     signing_name: str | None
 
 
-class PersonApply(BaseModel):
+class PersonRegistration(BaseModel):
     given_name: str = Field(min_length=1, max_length=120)
     middle_name: str | None = Field(default=None, max_length=120)
     family_name: str = Field(min_length=1, max_length=120)

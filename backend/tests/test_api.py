@@ -65,10 +65,10 @@ def test_me_requires_auth(client):
     assert fresh.get("/api/v1/auth/me").status_code == 401
 
 
-def test_apply_and_approve_flow(admin):
+def test_register_and_approve_flow(admin):
     # Public registration.
     resp = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Priya",
             "middle_name": "R.",
@@ -107,11 +107,11 @@ def test_author_list_generation(admin):
 
     # Two people, alphabetically tricky (accent should not matter).
     p1 = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={"given_name": "Zoe", "family_name": "Ábel", "email": "zoe@example.edu"},
     ).json()
     p2 = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={"given_name": "Al", "family_name": "Baker", "email": "al@example.edu"},
     ).json()
 
@@ -189,7 +189,7 @@ def _linked_member(admin, *, given, family, email, career_stage="postdoc"):
     """Create an active person + a member account linked to them, and return a
     logged-in TestClient plus the person id."""
     person = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": given,
             "family_name": family,
@@ -358,7 +358,7 @@ def test_institution_people_count(admin):
     pids = []
     for name in ("One", "Two", "Three"):
         p = admin.post(
-            "/api/v1/people/apply",
+            "/api/v1/people/register",
             json={
                 "given_name": name,
                 "family_name": "Counter",
@@ -491,6 +491,79 @@ def test_voting_requires_us_institution(admin):
     assert member.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
 
 
+def test_registration_voting_eligibility_enforced(admin):
+    us = admin.post("/api/v1/institutions", json={"name": "Register US University"}).json()
+    abroad = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Register Overseas Institute", "country": "France", "is_us": False},
+    ).json()
+    base = {
+        "given_name": "Vic",
+        "family_name": "Registrant",
+        "email": "vic.registrant@example.edu",
+        "is_voting": True,
+    }
+
+    # A student cannot register as a voting member…
+    r = admin.post(
+        "/api/v1/people/register",
+        json={**base, "career_stage": "grad", "institution_id": us["id"]},
+    )
+    assert r.status_code == 422
+    # …nor can anyone without an institution to qualify through…
+    assert admin.post(
+        "/api/v1/people/register", json={**base, "career_stage": "postdoc"}
+    ).status_code == 422
+    # …nor through a non-US institution.
+    assert admin.post(
+        "/api/v1/people/register",
+        json={**base, "career_stage": "postdoc", "institution_id": abroad["id"]},
+    ).status_code == 422
+    # The rejected attempts created no person record.
+    assert all(
+        p["email"] != "vic.registrant@example.edu" for p in admin.get("/api/v1/people").json()
+    )
+
+    # An eligible registration goes through, and approval keeps the flag.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={**base, "career_stage": "postdoc", "institution_id": us["id"]},
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["is_voting"] is True
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is True
+
+
+def test_activation_revalidates_voting(admin):
+    # A registration naming a new free-text institution is taken at its word…
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Renata",
+            "family_name": "Recheck",
+            "email": "renata.recheck@example.edu",
+            "career_stage": "postdoc",
+            "institution_name": "Recheck Institute",
+            "is_voting": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+
+    # …but the office review finds it bogus and removes the affiliation
+    # before approving, so with no US institution left to qualify through the
+    # approval transition drops the requested voting flag instead of granting
+    # it unchecked.
+    affil_id = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]["id"]
+    assert admin.delete(f"/api/v1/people/{pid}/affiliations/{affil_id}").status_code == 204
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert person["status"] == "active"
+    assert person["is_voting"] is False
+
+
 def test_research_areas_normalized(admin):
     member, pid = _linked_member(
         admin, given="Ria", family="Areas", email="ria.areas@example.edu"
@@ -578,7 +651,7 @@ def test_member_cannot_self_reinstate(admin):
     # A pending registration's login gets no API access at all (issue #50):
     # the password sign-in is refused with a clear reason…
     person = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={"given_name": "Pat", "family_name": "Pending", "email": "pat.pending@example.edu"},
     ).json()
     r = admin.post(
@@ -901,7 +974,7 @@ def test_admin_contact_role_and_scoped_edits(admin):
 
     # The registration form collects the same info.
     applied = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Tia",
             "family_name": "Titled",
@@ -1030,7 +1103,7 @@ def test_member_publication_flow(admin, monkeypatch):
     assert ack["reviewers"] == []
 
     reviewer_person = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Rae",
             "family_name": "Reviewer",
@@ -1114,7 +1187,7 @@ def test_working_group_crud(admin):
         f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid}
     ).status_code == 409
     other = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Otto",
             "family_name": "Other",
@@ -1471,7 +1544,7 @@ def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
 
     stranger, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
     assert r.status_code == 307, r.text
-    assert r.headers["location"] == "/apply?welcome=orcid"
+    assert r.headers["location"] == "/register?welcome=orcid"
 
     # Signed in, but the pending stub grants no member-level access (issue
     # #50: a free ORCID iD must not open the member directory or statistics).
@@ -1491,7 +1564,7 @@ def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
     # Completing the registration form updates that same record — no
     # duplicate person, ORCID iD kept from the authenticated sign-in.
     r = stranger.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Josiah",
             "family_name": "Carberry",
@@ -1537,9 +1610,9 @@ def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
     monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
 
     stranger, r = _orcid_signin(monkeypatch, "0000-0003-1111-2222", "Rae Jected")
-    assert r.headers["location"] == "/apply?welcome=orcid"
+    assert r.headers["location"] == "/register?welcome=orcid"
     r = stranger.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={"given_name": "Rae", "family_name": "Jected", "email": "rae.jected@example.edu"},
     )
     assert r.status_code == 201, r.text
@@ -1559,7 +1632,7 @@ def test_orcid_links_existing_approved_member(admin, monkeypatch):
     monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
 
     person = admin.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Ora",
             "family_name": "Linked",
@@ -1606,9 +1679,9 @@ def test_admin_contact_approves_pending_registration(admin, monkeypatch):
 
     # A stranger registers at the contact's institution.
     sent.clear()  # drop mail generated by the setup above
-    applicant = TestClient(app)
-    r = applicant.post(
-        "/api/v1/people/apply",
+    registrant = TestClient(app)
+    r = registrant.post(
+        "/api/v1/people/register",
         json={
             "given_name": "New",
             "family_name": "Comer",
@@ -1636,7 +1709,7 @@ def test_admin_contact_approves_pending_registration(admin, monkeypatch):
     # …or over pending registrations at other institutions.
     outsider = TestClient(app)
     r = outsider.post(
-        "/api/v1/people/apply",
+        "/api/v1/people/register",
         json={
             "given_name": "Els",
             "family_name": "Ewhere",

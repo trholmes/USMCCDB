@@ -61,7 +61,7 @@ def _editor_emails(db, pub: Publication, exclude_person_id: int | None = None) -
 def registration_submitted(db, person: Person) -> Message | None:
     """Ask everyone who can approve a new registration to review it: office
     and admin accounts, the Administrative Institutional Contacts of the
-    applicant's institution, and the collaboration contact address."""
+    registrant's institution, and the collaboration contact address."""
     recipients: set[str] = set()
     settings = get_settings()
     if settings.contact_email:
@@ -100,7 +100,7 @@ def registration_submitted(db, person: Person) -> Message | None:
             ).scalars()
         )
 
-    recipients.discard(person.email)  # applicants don't review themselves
+    recipients.discard(person.email)  # registrants don't review themselves
     to = [addr for addr in recipients if addr]
     if not to:
         return None

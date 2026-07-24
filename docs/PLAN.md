@@ -83,7 +83,7 @@ BACKUP_HOUR=02
 ### API (/api/v1, JWT in httpOnly cookie; roles A=admin O=office C=convener-scoped M=member P=public)
 
 - Auth: GET /auth/orcid/login + /callback (P), POST /auth/login (local), /auth/logout, GET /auth/me, POST/PATCH /auth/users (A — create local accounts, reset, role, deactivate)
-- Membership: POST /people/apply (P); GET /people (M, filters); PATCH /people/{id} (Self limited / O); POST /people/{id}/status (O, writes membership_events); affiliations + author-periods sub-resources (O); CRUD /institutions, /working-groups (O/A, M read); WG members (C/O, self-join); /collab-roles (O)
+- Membership: POST /people/register (P); GET /people (M, filters); PATCH /people/{id} (Self limited / O); POST /people/{id}/status (O, writes membership_events); affiliations + author-periods sub-resources (O); CRUD /institutions, /working-groups (O/A, M read); WG members (C/O, self-join); /collab-roles (O)
 - Speakers: CRUD /events, /talks (O, M read); POST /talks/{id}/nominations (M, self or others); PATCH /nominations/{id} (O; self-withdraw); GET /stats/talks (fair-share per person/institution/year)
 - Publications: POST /publications (M — creator becomes editor); GET list (M; P sees published-only minimal); PATCH (editor/C/O); POST status transitions (O; editor/C may request collab review); people sub-resource (editor/C/O; reviewers O-only); GET /publications/{id}/acknowledgment (M — suggested USMCC + reviewer credit text)
 - Author lists: POST /publications/{id}/author-list (O/editor; scope=collaboration|involved), GET /author-lists/{id}, GET /author-lists/{id}/export?format=txt|tex|xml, POST /author-lists/preview (O, arbitrary cutoff dry-run)
@@ -93,7 +93,7 @@ Permissions: FastAPI dependencies `require_role()`, `require_self_or(office)`, `
 ### ORCID OAuth (authlib)
 
 - Register with authorize/token URLs on `https://{ORCID_HOST}`, scope `/authenticate`; token response includes `orcid` + `name` directly (no extra API call)
-- Callback: (1) users.orcid match → login; (2) people.orcid match → auto-create linked user, login; (3) unknown → create pending person + user, frontend routes to "complete application" form; office approves later
+- Callback: (1) users.orcid match → login; (2) people.orcid match → auto-create linked user, login; (3) unknown → create pending person + user, frontend routes to "complete registration" form; office approves later
 - JWT claims sub/role/person_id, 12h, httpOnly+SameSite=Lax, Secure per COOKIE_SECURE=auto
 
 ### Author-list generation
@@ -124,7 +124,7 @@ backend/  Dockerfile  requirements.txt  alembic/
 frontend/ Dockerfile (node build → nginx:alpine + nginx.conf proxying /api/)
   src/ api/ (fetch wrapper + typed client)
        auth/ (session context, role route guards)
-       pages/ Login, Apply, Directory, Profile, Institutions, WorkingGroups,
+       pages/ Login, Register, Directory, Profile, Institutions, WorkingGroups,
               Events, Talks (+nominations), Publications, PublicationDetail,
               AuthorLists, Stats (fair-share Recharts), Admin (users, roles, imports)
        components/ PersonTable, StatusBadge, NominationPanel, forms/

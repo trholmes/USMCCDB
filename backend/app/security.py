@@ -123,7 +123,7 @@ def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User |
     return user
 
 
-def get_applicant_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+def get_registrant_user(request: Request, db: Session = Depends(get_db)) -> User | None:
     """Signed-in user WITHOUT the moderation-state gate. Only for the public
     registration endpoint: a pending ORCID sign-in must be able to complete
     its own placeholder person record — and nothing else."""
