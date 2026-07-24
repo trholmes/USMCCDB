@@ -95,9 +95,9 @@ export default function LeadershipPage() {
       <Title order={3} mb="xs">
         Leadership
       </Title>
-      <Text size="sm" c="dimmed" mb="md">
+      {/* <Text size="sm" c="dimmed" mb="md">
         Collaboration roles
-      </Text>
+      </Text> */}
 
       {current.length === 0 ? (
         <Text size="sm" c="dimmed">
