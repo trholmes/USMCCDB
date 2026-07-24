@@ -155,6 +155,23 @@ export interface TalkStatRow {
   invited: number
 }
 
+export interface LabelCount {
+  label: string
+  count: number
+}
+
+export interface MemberStats {
+  total_people: number
+  active: number
+  voting: number
+  us_active: number
+  institutions_with_active: number
+  by_status: LabelCount[]
+  by_career_stage: LabelCount[]
+  by_research_area: LabelCount[]
+  new_members_by_year: { year: number; count: number }[]
+}
+
 export interface PubPerson {
   id: number
   person: PersonSummary

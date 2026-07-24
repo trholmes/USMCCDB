@@ -1038,3 +1038,46 @@ def test_member_publication_flow(admin, monkeypatch):
         ("erin.editor@example.edu", "Publication status update: A Democratized Paper")
     ]
     assert "collab review to submitted" in sent[0].get_content()
+
+
+def test_member_stats(admin):
+    # An active member with a research area and a US affiliation, so every
+    # breakdown has at least one known row (the test stays self-sufficient).
+    member, pid = _linked_member(
+        admin, given="Ana", family="Areas", email="ana.areas@example.edu"
+    )
+    r = member.patch(f"/api/v1/people/{pid}", json={"research_areas": "Accelerator Physics"})
+    assert r.status_code == 200, r.text
+    inst = admin.post("/api/v1/institutions", json={"name": "Stats University"}).json()
+    assert admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2026-01-01"},
+    ).status_code == 201
+
+    r = admin.get("/api/v1/stats/members")
+    assert r.status_code == 200, r.text
+    stats = r.json()
+
+    # The status breakdown covers every person record.
+    by_status = {row["label"]: row["count"] for row in stats["by_status"]}
+    assert sum(by_status.values()) == stats["total_people"] > 0
+    assert stats["active"] == by_status.get("active", 0) > 0
+
+    # career_stage is NOT NULL, so the stage breakdown covers all actives.
+    assert sum(row["count"] for row in stats["by_career_stage"]) == stats["active"]
+
+    # Everyone active in this run went through a recorded pending→active
+    # transition, so the growth series accounts for at least all of them.
+    assert sum(row["count"] for row in stats["new_members_by_year"]) >= stats["active"]
+
+    # Voting members and US-based members are subsets of the active members.
+    assert 0 <= stats["voting"] <= stats["active"]
+    assert 1 <= stats["us_active"] <= stats["active"]
+    assert stats["institutions_with_active"] >= 1
+
+    areas = {row["label"]: row["count"] for row in stats["by_research_area"]}
+    assert areas.get("Accelerator Physics", 0) >= 1
+
+    # Requires authentication.
+    fresh = TestClient(app)
+    assert fresh.get("/api/v1/stats/members").status_code == 401
