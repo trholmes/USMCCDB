@@ -15,14 +15,21 @@ matching rows, and the enum rename only runs when the old label exists. The
 both-labels-present case (never produced by create_all or this migration) is
 handled by moving rows before the stale label is left behind unused.
 
-Revision ID: 0013
-Revises: 0012
+Originally merged as a second revision '0013', colliding with
+0013_person_middle_name from a PR merged in parallel — Alembic refuses to
+run with a duplicate revision id. Renumbered to 0014; since a database
+upgraded during the collision window may have recorded 0013 after running
+only one of the two scripts, upgrade() also re-asserts the (guarded)
+middle_name column so either ordering heals.
+
+Revision ID: 0014
+Revises: 0013
 """
 
 from alembic import op
 
-revision = "0013"
-down_revision = "0012"
+revision = "0014"
+down_revision = "0013"
 branch_labels = None
 depends_on = None
 
@@ -47,6 +54,9 @@ def _rename_enum_value(old: str, new: str) -> None:
 
 
 def upgrade() -> None:
+    # A database stamped 0013 during the collision window may have run the
+    # rename script instead of the middle_name one — re-assert the column.
+    op.execute("ALTER TABLE people ADD COLUMN IF NOT EXISTS middle_name VARCHAR(120)")
     # 'Other/Multiple' only ever appears as a whole token (validated on write),
     # and no other area contains it as a substring, so replace() is exact.
     op.execute(
