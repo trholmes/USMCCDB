@@ -1178,3 +1178,35 @@ def test_member_stats(admin):
     # Requires authentication.
     fresh = TestClient(app)
     assert fresh.get("/api/v1/stats/members").status_code == 401
+
+
+def test_imported_members_counted_in_growth_stats(admin, tmp_path):
+    # The CSV/XLSX importers create people directly as active, bypassing the
+    # status-change endpoint; they must still record the transition-to-active
+    # event that the "new members per year" chart is built from (issue #41).
+    from app.cli import import_members
+
+    csv_file = tmp_path / "members.csv"
+    csv_file.write_text(
+        "given_name,family_name,email,orcid,institution_short_name,"
+        "career_stage,start_date,is_author\n"
+        "Imre,Importson,imre.importson@example.edu,,ImpU,faculty,2019-05-01,false\n"
+    )
+    import_members(csv_path=csv_file, dry_run=False)
+
+    people = admin.get("/api/v1/people", params={"q": "imre.importson"}).json()
+    assert len(people) == 1
+    pid = people[0]["id"]
+    events = admin.get(f"/api/v1/people/{pid}/events").json()
+    assert [(e["to_status"], e["effective_date"]) for e in events] == [
+        ("active", "2019-05-01")
+    ]
+
+    # The growth series buckets the import under its start_date year.
+    stats = admin.get("/api/v1/stats/members").json()
+    years = {row["year"]: row["count"] for row in stats["new_members_by_year"]}
+    assert years.get(2019, 0) >= 1
+
+    # Re-importing (upsert) must not duplicate the activation event.
+    import_members(csv_path=csv_file, dry_run=False)
+    assert len(admin.get(f"/api/v1/people/{pid}/events").json()) == 1
