@@ -19,7 +19,6 @@ const COLORS: Record<string, string> = {
   declined: 'gray',
   withdrawn: 'gray',
   // publications
-  proposed: 'yellow',
   in_progress: 'blue',
   collab_review: 'grape',
   submitted: 'orange',

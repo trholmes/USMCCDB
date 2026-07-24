@@ -75,8 +75,8 @@ BACKUP_HOUR=02
 - **events** (conferences): name, url, location, dates, abstract_deadline
 - **talks**: event FK nullable, title, talk_type enum(plenary, parallel, poster, seminar, outreach), date, working_group FK, speaker_person FK nullable, status enum(open, nominations, assigned, given, cancelled)
 - **nominations**: talk+person unique, nominated_by, status enum(nominated, shortlisted, assigned, declined, withdrawn)
-- **publications**: title, short_code unique (USMCC-PUB-YYYY-NNN), pub_type enum(paper, proceedings, note, white_paper), status enum(proposed, in_progress, collab_review, submitted, published), working_group FK, arxiv_id, doi, journal, target_journal, abstract, author_cutoff_date
-- **publication_people**: pub+person+role enum(editor, contact, analysis_contact) unique
+- **publications**: title, short_code unique (USMCC-PUB-YYYY-NNN), pub_type enum(paper, proceedings, note, white_paper), status enum(in_progress, collab_review, submitted, published), working_group FK, arxiv_id, doi, journal, target_journal, abstract, author_cutoff_date
+- **publication_people**: pub+person+role enum(editor, contact, analysis_contact, contributor, reviewer) unique
 - **publication_events**: status audit like membership_events
 - **author_lists**: publication FK nullable, cutoff_date, generated_by, **snapshot jsonb** (frozen ordered author array) — exports render from snapshot only
 
@@ -85,8 +85,8 @@ BACKUP_HOUR=02
 - Auth: GET /auth/orcid/login + /callback (P), POST /auth/login (local), /auth/logout, GET /auth/me, POST/PATCH /auth/users (A — create local accounts, reset, role, deactivate)
 - Membership: POST /people/apply (P); GET /people (M, filters); PATCH /people/{id} (Self limited / O); POST /people/{id}/status (O, writes membership_events); affiliations + author-periods sub-resources (O); CRUD /institutions, /working-groups (O/A, M read); WG members (C/O, self-join); /collab-roles (O)
 - Speakers: CRUD /events, /talks (O, M read); POST /talks/{id}/nominations (M, self or others); PATCH /nominations/{id} (O; self-withdraw); GET /stats/talks (fair-share per person/institution/year)
-- Publications: POST /publications (C/O); GET list (M; P sees published-only minimal); PATCH (editor/C/O); POST status transitions (O; C limited); people sub-resource
-- Author lists: POST /publications/{id}/author-list (O/editor), GET /author-lists/{id}, GET /author-lists/{id}/export?format=txt|tex|xml, POST /author-lists/preview (O, arbitrary cutoff dry-run)
+- Publications: POST /publications (M — creator becomes editor); GET list (M; P sees published-only minimal); PATCH (editor/C/O); POST status transitions (O; editor/C may request collab review); people sub-resource (editor/C/O; reviewers O-only); GET /publications/{id}/acknowledgment (M — suggested USMCC + reviewer credit text)
+- Author lists: POST /publications/{id}/author-list (O/editor; scope=collaboration|involved), GET /author-lists/{id}, GET /author-lists/{id}/export?format=txt|tex|xml, POST /author-lists/preview (O, arbitrary cutoff dry-run)
 
 Permissions: FastAPI dependencies `require_role()`, `require_self_or(office)`, `require_convener_of(wg)` querying collab_roles. No ACL tables.
 

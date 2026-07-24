@@ -17,7 +17,6 @@ import { api } from '../api/client'
 import type { Publication, WorkingGroup } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
-import { useSession } from '../auth/SessionContext'
 
 const ACCESSORS: Accessors<Publication> = {
   code: (p) => p.short_code,
@@ -43,7 +42,6 @@ export default function PublicationsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [wgFilter, setWgFilter] = useState<string | null>(null)
   const navigate = useNavigate()
-  const { isOffice } = useSession()
 
   const filtered = useMemo(() => {
     const needle = q.toLowerCase()
@@ -87,7 +85,7 @@ export default function PublicationsPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Publications & analyses</Title>
-        <Button onClick={() => setModal(true)}>Propose publication</Button>
+        <Button onClick={() => setModal(true)}>Add publication</Button>
       </Group>
       <Group mb="md" gap="xs">
         <TextInput
@@ -111,7 +109,6 @@ export default function PublicationsPage() {
         />
         <Select
           data={[
-            { value: 'proposed', label: 'Proposed' },
             { value: 'in_progress', label: 'In progress' },
             { value: 'collab_review', label: 'Collab review' },
             { value: 'submitted', label: 'Submitted' },
@@ -165,7 +162,7 @@ export default function PublicationsPage() {
         </Table.Tbody>
       </Table>
 
-      <Modal opened={modal} onClose={() => setModal(false)} title="Propose a publication">
+      <Modal opened={modal} onClose={() => setModal(false)} title="Add a publication">
         <Stack gap="sm">
           <TextInput
             label="Title"
@@ -203,9 +200,7 @@ export default function PublicationsPage() {
             value={form.abstract}
             onChange={(e) => setForm({ ...form, abstract: e.currentTarget.value })}
           />
-          <Button onClick={save} disabled={!isOffice && false}>
-            Submit
-          </Button>
+          <Button onClick={save}>Save</Button>
         </Stack>
       </Modal>
     </>

@@ -26,9 +26,14 @@ def _sort_key(family: str, given: str) -> tuple[str, str]:
     return (fold(family), fold(given))
 
 
-def build_snapshot(db: Session, cutoff: date) -> dict:
+def build_snapshot(db: Session, cutoff: date, person_ids: list[int] | None = None) -> dict:
     """Return {"cutoff_date", "authors": [...], "institutions": {id: {...}}}
-    with authors ordered and institutions numbered by first appearance."""
+    with authors ordered and institutions numbered by first appearance.
+
+    By default the list covers everyone with an active authorship period at
+    the cutoff. With ``person_ids`` it is restricted to exactly those people
+    instead — included whether or not they have a registered author period
+    (their signing name is still used when one is active)."""
 
     active_period = (
         select(AuthorPeriod)
@@ -39,11 +44,16 @@ def build_snapshot(db: Session, cutoff: date) -> dict:
         .subquery()
     )
 
-    rows = db.execute(
-        select(Person, active_period.c.signing_name)
-        .join(active_period, active_period.c.person_id == Person.id)
-        .order_by(Person.family_name, Person.given_name)
-    ).all()
+    stmt = select(Person, active_period.c.signing_name).order_by(
+        Person.family_name, Person.given_name
+    )
+    if person_ids is None:
+        stmt = stmt.join(active_period, active_period.c.person_id == Person.id)
+    else:
+        stmt = stmt.outerjoin(active_period, active_period.c.person_id == Person.id).where(
+            Person.id.in_(person_ids)
+        )
+    rows = db.execute(stmt).all()
 
     affil_rows = db.execute(
         select(Affiliation.person_id, Institution)

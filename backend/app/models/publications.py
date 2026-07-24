@@ -23,7 +23,6 @@ class PublicationType(str, enum.Enum):
 
 
 class PublicationStatus(str, enum.Enum):
-    proposed = "proposed"
     in_progress = "in_progress"
     collab_review = "collab_review"
     submitted = "submitted"
@@ -34,6 +33,8 @@ class PublicationPersonRole(str, enum.Enum):
     editor = "editor"
     contact = "contact"
     analysis_contact = "analysis_contact"
+    contributor = "contributor"
+    reviewer = "reviewer"
 
 
 class Publication(TimestampedBase):
@@ -46,7 +47,7 @@ class Publication(TimestampedBase):
     )
     status: Mapped[PublicationStatus] = mapped_column(
         Enum(PublicationStatus, name="pub_status"),
-        default=PublicationStatus.proposed,
+        default=PublicationStatus.in_progress,
         nullable=False,
         index=True,
     )

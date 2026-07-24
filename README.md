@@ -25,12 +25,16 @@ used by the LHC experiments, built as a self-hosted open-source stack:
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
   seminar/outreach, invited vs. contributed), member nominations, office
   assignment, and fair-share statistics per person and institution.
-- **Publications** — paper/proceedings/note/white-paper registry with a status
-  workflow (proposed → in progress → collaboration review → submitted →
-  published), editors/contacts, arXiv/DOI metadata, and auto-assigned
-  `USMCC-XXXX-YYYY-NNN` codes.
+- **Publications** — paper/proceedings/note/white-paper registry any member
+  can add to (the creator becomes an editor), with a status workflow
+  (in progress → collaboration review → submitted → published). Editors
+  attach the people involved from the directory, request collaboration
+  review when ready (with suggested acknowledgment text crediting USMCC and
+  the assigned reviewers), plus editors/contacts, arXiv/DOI metadata, and
+  auto-assigned `USMCC-XXXX-YYYY-NNN` codes.
 - **Author lists** — one click builds the alphabetical (accent-aware) author
-  list for any cutoff date from members' authorship periods and affiliations,
+  list for any cutoff date, either collaboration-wide from members' authorship
+  periods and affiliations or from just the people involved in a publication,
   frozen as a snapshot and exportable as **plain text**, **LaTeX (`authblk`)**,
   and **INSPIRE/arXiv `authors.xml`**.
 - **Sign-in** — ORCID OAuth for members (free public ORCID API) plus local
