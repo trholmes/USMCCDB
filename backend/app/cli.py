@@ -11,7 +11,7 @@ CSV columns (header required):
 
 import csv
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import typer
@@ -106,6 +106,59 @@ def _ensure_activation_event(db, person: Person, effective: date) -> None:
         )
 
 
+def _set_primary_affiliation(
+    db, ref: str, person: Person, inst: Institution, stage: CareerStage, start: date
+) -> None:
+    """Ensure the person's open primary affiliation is at ``inst``, applying
+    the same move semantics as the API (``_close_primary`` in
+    app/routers/people.py): an open primary at another institution is closed
+    the day *before* ``start`` (date ranges are inclusive on both ends), and a
+    same-day move deletes the superseded zero-length row instead."""
+    open_primary = db.execute(
+        select(Affiliation).where(
+            Affiliation.person_id == person.id,
+            Affiliation.is_primary.is_(True),
+            Affiliation.end_date.is_(None),
+        )
+    ).scalar_one_or_none()
+    if open_primary is not None:
+        if open_primary.institution_id == inst.id:
+            return
+        if start < open_primary.start_date:
+            typer.echo(
+                f"{ref}: SKIP institution move (start {start.isoformat()} predates "
+                f"current affiliation start {open_primary.start_date.isoformat()})"
+            )
+            return
+        if start == open_primary.start_date:
+            db.delete(open_primary)
+            # Flush now: the unit of work runs INSERTs before DELETEs, so the
+            # replacement row would otherwise trip uq_one_open_primary_affiliation
+            # while this one still exists.
+            db.flush()
+        else:
+            open_primary.end_date = start - timedelta(days=1)
+    elif db.execute(
+        select(Affiliation.id).where(
+            Affiliation.person_id == person.id,
+            Affiliation.institution_id == inst.id,
+            Affiliation.end_date.is_(None),
+        )
+    ).first():
+        # No open primary, but an open (non-primary) row already ties the
+        # person to this institution — don't stack a second open row.
+        return
+    db.add(
+        Affiliation(
+            person_id=person.id,
+            institution_id=inst.id,
+            is_primary=True,
+            career_stage=stage,
+            start_date=start,
+        )
+    )
+
+
 @cli.command()
 def import_members(
     csv_path: Path = typer.Argument(..., exists=True, readable=True),
@@ -167,23 +220,7 @@ def import_members(
                     db.add(inst)
                     db.flush()
                     typer.echo(f"line {i}: created institution '{short}' (fill in details later)")
-                has_affil = db.execute(
-                    select(Affiliation).where(
-                        Affiliation.person_id == person.id,
-                        Affiliation.institution_id == inst.id,
-                        Affiliation.end_date.is_(None),
-                    )
-                ).scalar_one_or_none()
-                if has_affil is None:
-                    db.add(
-                        Affiliation(
-                            person_id=person.id,
-                            institution_id=inst.id,
-                            is_primary=True,
-                            career_stage=stage,
-                            start_date=start,
-                        )
-                    )
+                _set_primary_affiliation(db, f"line {i}", person, inst, stage, start)
 
             if is_author:
                 has_period = db.execute(
@@ -630,23 +667,7 @@ def import_members_xlsx(
             primary_name = str(row[c_primary] or "").strip()
             if primary_name:
                 inst = _get_or_create_institution(db, primary_name)
-                open_affil = db.execute(
-                    select(Affiliation).where(
-                        Affiliation.person_id == person.id,
-                        Affiliation.institution_id == inst.id,
-                        Affiliation.end_date.is_(None),
-                    )
-                ).scalar_one_or_none()
-                if open_affil is None:
-                    db.add(
-                        Affiliation(
-                            person_id=person.id,
-                            institution_id=inst.id,
-                            is_primary=True,
-                            career_stage=stage,
-                            start_date=start,
-                        )
-                    )
+                _set_primary_affiliation(db, f"row {i}", person, inst, stage, start)
 
             if authors_from_voting and voting:
                 has_period = db.execute(
