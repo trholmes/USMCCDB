@@ -42,7 +42,7 @@ RESEARCH_AREAS = (
     "Experimental Particle Physics",
     "Theoretical Particle Physics",
     "Accelerator Physics",
-    "Other/Multiple",
+    "Other",
 )
 
 
@@ -72,7 +72,7 @@ class CollabRoleType(str, enum.Enum):
     # are authorized to engage in USMCC work. Not a scientific leadership role.
     admin_contact = "admin_contact"
     convener = "convener"
-    speakers_chair = "speakers_chair"
+    speakers_comm = "speakers_comm"
     pub_chair = "pub_chair"
     secretary = "secretary"
     other = "other"  # anything not covered — detail carries the full title

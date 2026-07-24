@@ -69,7 +69,7 @@ BACKUP_HOUR=02
 - **institutions**: name, short_name unique, ror_id, country, is_us (gates voting eligibility), latex_address, is_active
 - **affiliations**: person↔institution, is_primary, career_stage nullable (stage held while at that institution), start_date, end_date nullable; partial unique index one open primary per person
 - **working_groups** + **working_group_members** (unique wg+person)
-- **collab_roles**: person, role enum(chair, vice_chair, ib_rep, convener, speakers_chair, pub_chair, secretary), working_group_id (required iff convener), institution_id (required iff ib_rep), start/end dates — conveners' scoped permissions derive from this
+- **collab_roles**: person, role enum(chair, vice_chair, ib_rep, convener, speakers_comm, pub_chair, secretary), working_group_id (required iff convener), institution_id (required iff ib_rep), start/end dates — conveners' scoped permissions derive from this
 - **membership_events**: append-only status-change audit (from/to, actor, note)
 - **author_periods**: person, start/end dates, signing_name override; no-overlap EXCLUDE constraint — authorship eligibility distinct from membership
 - **events** (conferences): name, url, location, dates, abstract_deadline

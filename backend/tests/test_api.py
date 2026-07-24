@@ -532,7 +532,7 @@ def test_directory_filters(admin):
     ).status_code == 201
     assert member.patch(
         f"/api/v1/people/{pid}",
-        json={"research_areas": "Accelerator Physics, Other/Multiple", "is_voting": True},
+        json={"research_areas": "Accelerator Physics, Other", "is_voting": True},
     ).status_code == 200
 
     # Research-area filter matches case-insensitively against the canonical
@@ -542,7 +542,7 @@ def test_directory_filters(admin):
     ids = {p["id"] for p in r.json()}
     assert pid in ids and oid not in ids
     row = next(p for p in r.json() if p["id"] == pid)
-    assert row["research_areas"] == "Accelerator Physics, Other/Multiple"
+    assert row["research_areas"] == "Accelerator Physics, Other"
 
     # Unknown areas are rejected rather than silently matching nothing.
     assert member.get("/api/v1/people?research_area=magnets").status_code == 422
@@ -554,7 +554,7 @@ def test_directory_filters(admin):
     assert oid in nonvoting and pid not in nonvoting
 
     # Filters combine.
-    r = member.get("/api/v1/people?research_area=Other/Multiple&career_stage=staff&is_voting=true")
+    r = member.get("/api/v1/people?research_area=Other&career_stage=staff&is_voting=true")
     assert [p["id"] for p in r.json()] == [pid]
 
 
