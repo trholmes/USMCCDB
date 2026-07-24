@@ -72,7 +72,12 @@ export default function LeadershipPage() {
   const { isOffice } = useSession()
 
   useEffect(() => {
-    api.get<CollabRole[]>('/collab-roles').then(setRoles).catch(() => setRoles([]))
+    // Administrative Institutional Contacts are an admin function, not
+    // collaboration leadership, so they don't belong on this page.
+    api
+      .get<CollabRole[]>('/collab-roles')
+      .then((rs) => setRoles(rs.filter((r) => r.role !== 'admin_contact')))
+      .catch(() => setRoles([]))
   }, [])
 
   // Date ranges are inclusive on both ends, so a role ending today is current.
