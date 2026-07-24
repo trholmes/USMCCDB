@@ -100,7 +100,7 @@ export default function LoginPage() {
           </form>
 
           <Text size="sm" c="dimmed">
-            Not a member yet? <Anchor href="/apply">Apply to join.</Anchor>
+            Not a member yet? <Anchor href="/apply">Register to join.</Anchor>
             {config?.contact_email && (
               <>
                 {' '}

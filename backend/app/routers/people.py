@@ -75,7 +75,7 @@ ADMIN_CONTACT_EDITABLE = {
 }
 # Statuses a member may set on themselves — both as the target AND as the
 # current status: pending/rejected people cannot self-service at all
-# (application & moderation states stay office-controlled).
+# (moderation states stay office-controlled).
 SELF_SETTABLE_STATUSES = {MemberStatus.active, MemberStatus.inactive, MemberStatus.alumni}
 # Career stages considered "students" — not eligible for voting membership.
 STUDENT_STAGES = {CareerStage.undergrad, CareerStage.grad}
@@ -171,7 +171,7 @@ def _close_primary(db: Session, affil: Affiliation, move_date: date) -> None:
 
 @router.post("/apply", status_code=201)
 def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
-    """Public membership application; creates a pending person record."""
+    """Public membership registration; creates a pending person record."""
     email = body.email.lower()
     if db.execute(select(Person).where(Person.email == email)).scalar_one_or_none():
         raise HTTPException(409, "A record with this email already exists — contact the office")
@@ -767,6 +767,16 @@ def member_stats(
         select(func.count()).select_from(Person).where(active, Person.is_voting.is_(True))
     )
 
+    # Effort on the USMCC: usmcc_percent is optional, so aggregate only over
+    # the active members who reported it (count/avg/sum all skip NULLs).
+    usmcc_reporting, usmcc_avg, usmcc_sum = db.execute(
+        select(
+            func.count(Person.usmcc_percent),
+            func.avg(Person.usmcc_percent),
+            func.sum(Person.usmcc_percent),
+        ).where(active)
+    ).one()
+
     # Growth: each person's first transition to active, bucketed by year
     # (effective_date as entered, falling back to the recorded timestamp).
     first_active = (
@@ -803,4 +813,7 @@ def member_stats(
         ],
         by_research_area=by_research_area,
         new_members_by_year=[YearCount(year=int(y), count=n) for y, n in year_rows],
+        usmcc_reporting=usmcc_reporting or 0,
+        avg_usmcc_percent=float(usmcc_avg) if usmcc_avg is not None else None,
+        usmcc_fte=(usmcc_sum or 0) / 100,
     )

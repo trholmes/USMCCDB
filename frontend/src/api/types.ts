@@ -171,6 +171,9 @@ export interface MemberStats {
   by_career_stage: LabelCount[]
   by_research_area: LabelCount[]
   new_members_by_year: { year: number; count: number }[]
+  usmcc_reporting: number
+  avg_usmcc_percent: number | null
+  usmcc_fte: number
 }
 
 export interface PubPerson {

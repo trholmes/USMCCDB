@@ -83,7 +83,7 @@ backup sidecar.
    `./scripts/start.sh`.
 
 Members whose ORCID iD is already in the database are linked automatically on
-first sign-in; unknown ORCIDs get a pending application for the office to
+first sign-in; unknown ORCIDs get a pending membership for the office to
 approve. Set `ORCID_HOST=sandbox.orcid.org` to test against the ORCID sandbox.
 
 ### Email notifications (optional)

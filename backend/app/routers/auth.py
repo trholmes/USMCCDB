@@ -199,7 +199,7 @@ async def orcid_callback(
 
     if user is None:
         # 3. Unknown ORCID: create a pending person + login, send to the
-        # application form. Office approves (or rejects) later.
+        # registration form. Office approves (or rejects) later.
         given, family = "", ""
         if name:
             parts = name.rsplit(" ", 1)
@@ -225,10 +225,10 @@ async def orcid_callback(
     db.commit()
 
     person = db.get(Person, user.person_id) if user.person_id else None
-    needs_application = bool(
+    needs_registration = bool(
         person is not None and person.email.endswith("@orcid.placeholder")
     )
-    dest = "/apply?welcome=orcid" if needs_application else "/"
+    dest = "/apply?welcome=orcid" if needs_registration else "/"
     response = RedirectResponse(dest)
     set_session_cookie(response, request, create_access_token(user))
     return response

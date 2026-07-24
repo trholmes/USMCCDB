@@ -63,7 +63,7 @@ def test_me_requires_auth(client):
 
 
 def test_apply_and_approve_flow(admin):
-    # Public application.
+    # Public registration.
     resp = admin.post(
         "/api/v1/people/apply",
         json={
@@ -88,7 +88,7 @@ def test_apply_and_approve_flow(admin):
     events = admin.get(f"/api/v1/people/{pid}/events").json()
     assert [e["to_status"] for e in events] == ["pending", "active"]
 
-    # The initial affiliation records the stage the applicant applied at.
+    # The initial affiliation records the stage given at registration.
     person = admin.get(f"/api/v1/people/{pid}").json()
     assert person["affiliations"][0]["career_stage"] == "postdoc"
 
@@ -229,7 +229,7 @@ def test_member_self_status_change_with_effective_date(admin):
     assert last["to_status"] == "inactive"
     assert last["effective_date"] == "2026-03-15"
 
-    # Members cannot self-assign moderation/application states.
+    # Members cannot self-assign moderation states.
     assert member.post(f"/api/v1/people/{pid}/status", json={"status": "rejected"}).status_code == 403
     assert member.post(f"/api/v1/people/{pid}/status", json={"status": "pending"}).status_code == 403
 
@@ -570,7 +570,7 @@ def test_office_status_change_clears_voting(admin):
 
 
 def test_member_cannot_self_reinstate(admin):
-    # A pending applicant with a linked account cannot self-approve…
+    # A pending member with a linked account cannot self-approve…
     person = admin.post(
         "/api/v1/people/apply",
         json={"given_name": "Pat", "family_name": "Pending", "email": "pat.pending@example.edu"},
@@ -877,7 +877,7 @@ def test_admin_contact_role_and_scoped_edits(admin):
         f"/api/v1/people/{member_pid}", json={"usmcc_percent": 150}
     ).status_code == 422
 
-    # The application form collects the same info.
+    # The registration form collects the same info.
     applied = admin.post(
         "/api/v1/people/apply",
         json={
@@ -1143,7 +1143,10 @@ def test_member_stats(admin):
     member, pid = _linked_member(
         admin, given="Ana", family="Areas", email="ana.areas@example.edu"
     )
-    r = member.patch(f"/api/v1/people/{pid}", json={"research_areas": "Accelerator Physics"})
+    r = member.patch(
+        f"/api/v1/people/{pid}",
+        json={"research_areas": "Accelerator Physics", "usmcc_percent": 50},
+    )
     assert r.status_code == 200, r.text
     inst = admin.post("/api/v1/institutions", json={"name": "Stats University"}).json()
     assert admin.post(
@@ -1167,10 +1170,20 @@ def test_member_stats(admin):
     # transition, so the growth series accounts for at least all of them.
     assert sum(row["count"] for row in stats["new_members_by_year"]) >= stats["active"]
 
-    # Voting members and US-based members are subsets of the active members.
+    # Voting members and US-based members are subsets of the active members
+    # (non-voting is presented as active - voting, so the bound covers both).
     assert 0 <= stats["voting"] <= stats["active"]
     assert 1 <= stats["us_active"] <= stats["active"]
     assert stats["institutions_with_active"] >= 1
+
+    # Effort aggregates cover the active members who reported usmcc_percent —
+    # at least the 50% reported above.
+    assert 1 <= stats["usmcc_reporting"] <= stats["active"]
+    assert 0 < stats["avg_usmcc_percent"] <= 100
+    assert stats["usmcc_fte"] >= 0.5
+    # avg × reporting and summed FTE describe the same underlying values.
+    expected_fte = stats["avg_usmcc_percent"] * stats["usmcc_reporting"] / 100
+    assert abs(stats["usmcc_fte"] - expected_fte) < 1e-6
 
     areas = {row["label"]: row["count"] for row in stats["by_research_area"]}
     assert areas.get("Accelerator Physics", 0) >= 1
