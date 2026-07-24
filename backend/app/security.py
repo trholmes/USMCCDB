@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Affiliation, CollabRole, CollabRoleType, User, UserRole
+from app.models import Affiliation, CollabRole, CollabRoleType, MemberStatus, Person, User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -67,18 +67,28 @@ def _decode_token(token: str) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
-    payload = _decode_token(token)
-    user = db.get(User, int(payload["sub"]))
-    if user is None or not user.is_active:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled or missing")
-    return user
+def membership_block_reason(db: Session, user: User) -> str | None:
+    """Why a signed-in account gets no API access, or None if it does.
+
+    A member-role account whose linked person is in a moderation state
+    (pending/rejected) has not been approved — self-registration (ORCID or
+    the form) must not grant member-level access to the database. Office and
+    admin accounts are exempt: their access comes from the role, which only
+    an admin can assign, and someone has to be able to approve."""
+    if user.role != UserRole.member or user.person_id is None:
+        return None
+    person = db.get(Person, user.person_id)
+    if person is None:
+        return None
+    if person.status == MemberStatus.pending:
+        return "Your membership registration is awaiting approval"
+    if person.status == MemberStatus.rejected:
+        return "Your membership registration was not approved"
+    return None
 
 
-def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+def _session_user(request: Request, db: Session) -> User | None:
+    """Cookie → active User, or None. No membership-status gate."""
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
@@ -90,6 +100,34 @@ def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User |
     if user is None or not user.is_active:
         return None
     return user
+
+
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
+    payload = _decode_token(token)
+    user = db.get(User, int(payload["sub"]))
+    if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled or missing")
+    reason = membership_block_reason(db, user)
+    if reason:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, reason)
+    return user
+
+
+def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    user = _session_user(request, db)
+    if user is None or membership_block_reason(db, user):
+        return None
+    return user
+
+
+def get_applicant_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """Signed-in user WITHOUT the moderation-state gate. Only for the public
+    registration endpoint: a pending ORCID sign-in must be able to complete
+    its own placeholder person record — and nothing else."""
+    return _session_user(request, db)
 
 
 def require_role(*roles: UserRole):

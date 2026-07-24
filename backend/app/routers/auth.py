@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import MemberStatus, Person, User, UserRole
+from app.models import MembershipEvent, MemberStatus, Person, User, UserRole
 from app.schemas.auth import LoginRequest, MeOut, UserCreate, UserOut, UserUpdate
 from app.security import (
     clear_session_cookie,
@@ -16,6 +16,7 @@ from app.security import (
     get_current_user,
     hash_password,
     is_office,
+    membership_block_reason,
     require_admin,
     set_session_cookie,
     verify_password,
@@ -51,6 +52,9 @@ def login(
         raise HTTPException(401, "Invalid username or password")
     if not user.is_active:
         raise HTTPException(403, "Account is disabled")
+    reason = membership_block_reason(db, user)
+    if reason:
+        raise HTTPException(403, reason)
     user.last_login_at = datetime.now(UTC)
     db.commit()
     set_session_cookie(response, request, create_access_token(user))
@@ -199,7 +203,8 @@ async def orcid_callback(
 
     if user is None:
         # 3. Unknown ORCID: create a pending person + login, send to the
-        # registration form. Office approves (or rejects) later.
+        # registration form. Someone with approval rights activates (or
+        # rejects) later; until then the login gets no member-level access.
         given, family = "", ""
         if name:
             parts = name.rsplit(" ", 1)
@@ -213,6 +218,7 @@ async def orcid_callback(
         )
         db.add(person)
         db.flush()
+        db.add(MembershipEvent(person_id=person.id, from_status=None, to_status="pending"))
         user = User(orcid=orcid_id, person_id=person.id, role=UserRole.member)
         db.add(user)
         db.commit()
@@ -221,13 +227,24 @@ async def orcid_callback(
     if not user.is_active:
         return RedirectResponse("/login?error=account_disabled")
 
-    user.last_login_at = datetime.now(UTC)
-    db.commit()
-
     person = db.get(Person, user.person_id) if user.person_id else None
     needs_registration = bool(
         person is not None and person.email.endswith("@orcid.placeholder")
     )
+
+    # Unapproved memberships get no session — except an incomplete ORCID
+    # registration, which keeps one solely so the registration form can
+    # complete its own placeholder record (everything else is gated by
+    # membership_block_reason in get_current_user).
+    if person is not None and user.role == UserRole.member and not needs_registration:
+        if person.status == MemberStatus.pending:
+            return RedirectResponse("/login?error=membership_pending")
+        if person.status == MemberStatus.rejected:
+            return RedirectResponse("/login?error=membership_rejected")
+
+    user.last_login_at = datetime.now(UTC)
+    db.commit()
+
     dest = "/apply?welcome=orcid" if needs_registration else "/"
     response = RedirectResponse(dest)
     set_session_cookie(response, request, create_access_token(user))

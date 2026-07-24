@@ -21,6 +21,15 @@ interface AuthConfig {
   contact_email: string
 }
 
+// Error codes the backend redirects back with (see /auth/orcid/callback).
+const SIGNIN_ERRORS: Record<string, string> = {
+  orcid_denied: 'ORCID sign-in was cancelled or denied.',
+  orcid_state: 'ORCID sign-in expired — please try again.',
+  account_disabled: 'This account is disabled.',
+  membership_pending: 'Your membership registration is awaiting approval.',
+  membership_rejected: 'Your membership registration was not approved — contact the office.',
+}
+
 export default function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -34,7 +43,10 @@ export default function LoginPage() {
     api.get<AuthConfig>('/auth/config').then(setConfig).catch(() => setConfig(null))
     const error = params.get('error')
     if (error) {
-      notifications.show({ color: 'red', message: `Sign-in problem: ${error}` })
+      notifications.show({
+        color: 'red',
+        message: SIGNIN_ERRORS[error] ?? `Sign-in problem: ${error}`,
+      })
     }
   }, [])
 
