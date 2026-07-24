@@ -81,7 +81,12 @@ itself, so the database just has to exist.
   author periods must not overlap (EXCLUDE constraint, needs `btree_gist`).
 - Roles: `admin` / `office` / `member`. Members may edit only the
   `SELF_EDITABLE` fields on their own profile and set only `SELF_SETTABLE_STATUSES`;
-  moderation states (`pending`/`rejected`) are office-only. A person holding
+  moderation states (`pending`/`rejected`) are decided by the office — or, for
+  pending registrations, by an active `admin_contact` of the person's
+  institution. A member-role login whose person is `pending`/`rejected` gets
+  **no API access** (`membership_block_reason` in `app/security.py`) — ORCID
+  self-registration must not grant member-level access before approval; a
+  registration submission emails everyone who can approve it. A person holding
   an active `admin_contact` collab role (Administrative Institutional Contact,
   institution-scoped) may also edit the `ADMIN_CONTACT_EDITABLE` fields of
   people currently at their institution. Voting membership

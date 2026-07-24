@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import Date, case, cast, func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -40,7 +40,15 @@ from app.schemas.membership import (
     MonthCount,
 )
 from app.config import get_settings
-from app.security import get_current_user, is_admin_contact_for, is_office, require_office
+from app.security import (
+    get_applicant_user,
+    get_current_user,
+    is_admin_contact_for,
+    is_office,
+    require_office,
+)
+from app.services import notifications
+from app.services.email import send_email
 
 PHOTO_TYPES = {
     "image/jpeg": ".jpg",
@@ -170,36 +178,78 @@ def _close_primary(db: Session, affil: Affiliation, move_date: date) -> None:
 
 
 @router.post("/apply", status_code=201)
-def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
-    """Public membership registration; creates a pending person record."""
+def apply(
+    body: PersonApply,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    applicant: User | None = Depends(get_applicant_user),
+) -> PersonSummary:
+    """Public membership registration; creates a pending person record and
+    notifies everyone who can approve it. A signed-in ORCID user still
+    carrying the placeholder record from their first sign-in completes that
+    record instead of creating a duplicate."""
     email = body.email.lower()
-    if db.execute(select(Person).where(Person.email == email)).scalar_one_or_none():
+
+    person: Person | None = None
+    if applicant is not None and applicant.person_id is not None:
+        candidate = db.get(Person, applicant.person_id)
+        if candidate is not None and candidate.email.endswith("@orcid.placeholder"):
+            person = candidate
+
+    email_clash = select(Person).where(Person.email == email)
+    if person is not None:
+        email_clash = email_clash.where(Person.id != person.id)
+    if db.execute(email_clash).scalar_one_or_none():
         raise HTTPException(409, "A record with this email already exists — contact the office")
-    if body.orcid and db.execute(
-        select(Person).where(Person.orcid == body.orcid)
-    ).scalar_one_or_none():
-        raise HTTPException(409, "A record with this ORCID iD already exists — contact the office")
+    if body.orcid:
+        orcid_clash = select(Person).where(Person.orcid == body.orcid)
+        if person is not None:
+            orcid_clash = orcid_clash.where(Person.id != person.id)
+        if db.execute(orcid_clash).scalar_one_or_none():
+            raise HTTPException(
+                409, "A record with this ORCID iD already exists — contact the office"
+            )
 
-    person = Person(
-        given_name=body.given_name,
-        family_name=body.family_name,
-        preferred_name=body.preferred_name,
-        email=email,
-        orcid=body.orcid,
-        career_stage=body.career_stage,
-        professional_title=body.professional_title,
-        department=body.department,
-        usmcc_percent=body.usmcc_percent,
-        status=MemberStatus.pending,
-        is_voting=body.is_voting,
-        research_areas=body.research_areas,
-        expertise=body.expertise,
-        notes=body.notes,
-    )
-    db.add(person)
-    db.flush()
+    if person is None:
+        person = Person(
+            given_name=body.given_name,
+            family_name=body.family_name,
+            preferred_name=body.preferred_name,
+            email=email,
+            orcid=body.orcid,
+            career_stage=body.career_stage,
+            professional_title=body.professional_title,
+            department=body.department,
+            usmcc_percent=body.usmcc_percent,
+            status=MemberStatus.pending,
+            is_voting=body.is_voting,
+            research_areas=body.research_areas,
+            expertise=body.expertise,
+            notes=body.notes,
+        )
+        db.add(person)
+        db.flush()
+        db.add(MembershipEvent(person_id=person.id, from_status=None, to_status="pending"))
+    else:
+        # Completing an ORCID-provisioned placeholder: fill in the form
+        # fields. The ORCID iD stays the authenticated one from sign-in, and
+        # the pending membership event was already recorded at provisioning.
+        person.given_name = body.given_name
+        person.family_name = body.family_name
+        person.preferred_name = body.preferred_name
+        person.email = email
+        person.career_stage = body.career_stage
+        person.professional_title = body.professional_title
+        person.department = body.department
+        person.usmcc_percent = body.usmcc_percent
+        person.is_voting = body.is_voting
+        person.research_areas = body.research_areas
+        person.expertise = body.expertise
+        person.notes = body.notes
 
-    if body.institution_id is not None or (body.institution_name or "").strip():
+    if (
+        body.institution_id is not None or (body.institution_name or "").strip()
+    ) and _open_primary(db, person.id) is None:
         institution_id = _resolve_institution_id(db, body.institution_id, body.institution_name)
         db.add(
             Affiliation(
@@ -210,7 +260,11 @@ def apply(body: PersonApply, db: Session = Depends(get_db)) -> PersonSummary:
                 start_date=datetime.now(UTC).date(),
             )
         )
-    db.add(MembershipEvent(person_id=person.id, from_status=None, to_status="pending"))
+
+    db.flush()  # sessions don't autoflush — the notification queries need the rows
+    msg = notifications.registration_submitted(db, person)
+    if msg:
+        background.add_task(send_email, *msg)
     db.commit()
     db.refresh(person)
     return PersonSummary.model_validate(person)
@@ -391,16 +445,25 @@ def change_status(
     person = _get_person(db, person_id)
     if not is_office(actor):
         if actor.person_id != person_id:
-            raise HTTPException(403, "You can only change your own status")
-        # Both directions are restricted: members can neither set a
-        # moderation state nor leave one (no self-approval/reinstatement).
-        if body.status not in SELF_SETTABLE_STATUSES:
-            allowed = ", ".join(sorted(s.value for s in SELF_SETTABLE_STATUSES))
-            raise HTTPException(403, f"Members may only set their status to: {allowed}")
-        if person.status not in SELF_SETTABLE_STATUSES:
-            raise HTTPException(
-                403, f"Your status is {person.status.value}; only the office can change it"
+            # An Administrative Institutional Contact may decide pending
+            # registrations of people at their institution (approve/reject).
+            contact_decides = (
+                person.status == MemberStatus.pending
+                and body.status in (MemberStatus.active, MemberStatus.rejected)
+                and is_admin_contact_for(db, actor, person_id)
             )
+            if not contact_decides:
+                raise HTTPException(403, "You can only change your own status")
+        else:
+            # Both directions are restricted: members can neither set a
+            # moderation state nor leave one (no self-approval/reinstatement).
+            if body.status not in SELF_SETTABLE_STATUSES:
+                allowed = ", ".join(sorted(s.value for s in SELF_SETTABLE_STATUSES))
+                raise HTTPException(403, f"Members may only set their status to: {allowed}")
+            if person.status not in SELF_SETTABLE_STATUSES:
+                raise HTTPException(
+                    403, f"Your status is {person.status.value}; only the office can change it"
+                )
     if body.status == person.status:
         raise HTTPException(400, f"Person is already {person.status.value}")
     effective = body.effective_date or datetime.now(UTC).date()

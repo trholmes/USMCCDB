@@ -1,4 +1,4 @@
-"""Publication-workflow notification emails.
+"""Workflow notification emails (membership and publications).
 
 Each function *composes* a message — recipients, subject, body — as a
 plain tuple, running any queries it needs on the caller's live session.
@@ -7,15 +7,21 @@ composition must happen in-request because the DB session is closed by
 the time background tasks run.
 """
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.models import (
+    Affiliation,
+    CollabRole,
+    CollabRoleType,
     Person,
     Publication,
     PublicationPerson,
     PublicationPersonRole,
     User,
+    UserRole,
 )
 
 Message = tuple[list[str], str, str]
@@ -50,6 +56,75 @@ def _editor_emails(db, pub: Publication, exclude_person_id: int | None = None) -
     if exclude_person_id is not None:
         stmt = stmt.where(Person.id != exclude_person_id)
     return [e for e in db.execute(stmt).scalars() if e]
+
+
+def registration_submitted(db, person: Person) -> Message | None:
+    """Ask everyone who can approve a new registration to review it: office
+    and admin accounts, the Administrative Institutional Contacts of the
+    applicant's institution, and the collaboration contact address."""
+    recipients: set[str] = set()
+    settings = get_settings()
+    if settings.contact_email:
+        recipients.add(settings.contact_email)
+    recipients.update(
+        db.execute(
+            select(Person.email)
+            .join(User, User.person_id == Person.id)
+            .where(
+                User.role.in_((UserRole.admin, UserRole.office)),
+                User.is_active.is_(True),
+            )
+        ).scalars()
+    )
+
+    affil = db.execute(
+        select(Affiliation).where(
+            Affiliation.person_id == person.id,
+            Affiliation.is_primary.is_(True),
+            Affiliation.end_date.is_(None),
+        )
+    ).scalar_one_or_none()
+    institution = affil.institution if affil is not None else None
+    if institution is not None:
+        today = datetime.now(UTC).date()
+        recipients.update(
+            db.execute(
+                select(Person.email)
+                .join(CollabRole, CollabRole.person_id == Person.id)
+                .where(
+                    CollabRole.role == CollabRoleType.admin_contact,
+                    CollabRole.institution_id == institution.id,
+                    CollabRole.start_date <= today,
+                    (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+                )
+            ).scalars()
+        )
+
+    recipients.discard(person.email)  # applicants don't review themselves
+    to = [addr for addr in recipients if addr]
+    if not to:
+        return None
+
+    lines = [
+        f"{person.display_name} has registered to join the "
+        "US Muon Collider Collaboration.",
+        "",
+        f"Email: {person.email}",
+    ]
+    if person.orcid:
+        lines.append(f"ORCID iD: {person.orcid}")
+    if institution is not None:
+        lines.append(f"Institution: {institution.name}")
+    lines.append(f"Position: {person.career_stage.value}")
+    if settings.site_url:
+        lines += ["", f"{settings.site_url.rstrip('/')}/people/{person.id}"]
+    lines += [
+        "",
+        "The registration stays pending — with no access to the database — "
+        "until the office or the institution's administrative contact "
+        "approves it.",
+    ]
+    return (to, f"New membership registration: {person.display_name}", "\n".join(lines))
 
 
 def review_requested(db, pub: Publication, actor: User) -> Message | None:

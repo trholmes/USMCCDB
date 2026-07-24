@@ -23,6 +23,9 @@ if TEST_DB:
     # unpatched send fails fast against the invalid host and is logged.
     os.environ["SMTP_HOST"] = "smtp.test.invalid"
     os.environ["CONTACT_EMAIL"] = "office@example.edu"
+    # Enable the ORCID endpoints; tests monkeypatch the code exchange.
+    os.environ["ORCID_CLIENT_ID"] = "test-client"
+    os.environ["ORCID_CLIENT_SECRET"] = "test-secret"
 
     from fastapi.testclient import TestClient
 
@@ -570,7 +573,8 @@ def test_office_status_change_clears_voting(admin):
 
 
 def test_member_cannot_self_reinstate(admin):
-    # A pending member with a linked account cannot self-approve…
+    # A pending registration's login gets no API access at all (issue #50):
+    # the password sign-in is refused with a clear reason…
     person = admin.post(
         "/api/v1/people/apply",
         json={"given_name": "Pat", "family_name": "Pending", "email": "pat.pending@example.edu"},
@@ -586,15 +590,31 @@ def test_member_cannot_self_reinstate(admin):
     )
     assert r.status_code == 201, r.text
     member = TestClient(app)
+    r = member.post(
+        "/api/v1/auth/login", json={"username": "patpending", "password": "member-pw-123"}
+    )
+    assert r.status_code == 403
+    assert "awaiting approval" in r.json()["detail"]
+
+    # …so a pending member cannot self-approve either.
+    assert member.post(
+        f"/api/v1/people/{person['id']}/status", json={"status": "active"}
+    ).status_code == 401  # never signed in
+
+    # Once approved, sign-in works and the directory opens up.
+    admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
     assert member.post(
         "/api/v1/auth/login", json={"username": "patpending", "password": "member-pw-123"}
     ).status_code == 200
-    assert member.post(
-        f"/api/v1/people/{person['id']}/status", json={"status": "active"}
-    ).status_code == 403
+    assert member.get("/api/v1/people").status_code == 200
 
-    # …nor can a rejected member reinstate themselves.
+    # Rejection cuts off an existing session immediately (the status is read
+    # per request, not baked into the token)…
     admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "rejected"})
+    r = member.get("/api/v1/people")
+    assert r.status_code == 403
+    assert "not approved" in r.json()["detail"]
+    # …and a rejected member cannot reinstate themselves.
     assert member.post(
         f"/api/v1/people/{person['id']}/status", json={"status": "active"}
     ).status_code == 403
@@ -1312,3 +1332,210 @@ def test_import_members_xlsx_percent_time(admin, tmp_path):
     )
     assert admin.get(f"/api/v1/people/{pia['id']}").json()["usmcc_percent"] == 17
     assert admin.get(f"/api/v1/people/{ulla['id']}").json()["usmcc_percent"] == 75
+
+
+# --- ORCID sign-in & registration approval (issue #50) -------------------------
+
+
+def _orcid_signin(monkeypatch, orcid_id, name):
+    """Drive the OAuth callback with a faked code exchange; returns a fresh
+    client (carrying whatever cookie the callback set) and the redirect."""
+    from app.routers import auth as auth_router
+
+    async def fake_exchange(code, redirect_uri):
+        return {"orcid": orcid_id, "name": name}
+
+    monkeypatch.setattr(auth_router.orcid_svc, "exchange_code", fake_exchange)
+    state = auth_router._state_serializer().dumps({"next": "/"})
+    c = TestClient(app)
+    r = c.get(
+        f"/api/v1/auth/orcid/callback?code=fake&state={state}", follow_redirects=False
+    )
+    return c, r
+
+
+def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+
+    stranger, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
+    assert r.status_code == 307, r.text
+    assert r.headers["location"] == "/apply?welcome=orcid"
+
+    # Signed in, but the pending stub grants no member-level access (issue
+    # #50: a free ORCID iD must not open the member directory or statistics).
+    assert stranger.get("/api/v1/auth/me").status_code == 403
+    assert stranger.get("/api/v1/people").status_code == 403
+    assert stranger.get("/api/v1/stats/members").status_code == 403
+    assert stranger.get("/api/v1/working-groups").status_code == 403
+
+    # The sign-in left a pending person stub with an audit event.
+    pend = admin.get(
+        "/api/v1/people", params={"status": "pending", "q": "0000-0002-1825-0097"}
+    ).json()
+    assert len(pend) == 1
+    pid = pend[0]["id"]
+    assert pend[0]["orcid"] == "0000-0002-1825-0097"
+
+    # Completing the registration form updates that same record — no
+    # duplicate person, ORCID iD kept from the authenticated sign-in.
+    r = stranger.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Josiah",
+            "family_name": "Carberry",
+            "email": "josiah.carberry@example.edu",
+            "career_stage": "faculty",
+            "institution_name": "Brown University",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["id"] == pid
+    assert r.json()["orcid"] == "0000-0002-1825-0097"
+    assert r.json()["status"] == "pending"
+    events = admin.get(f"/api/v1/people/{pid}/events").json()
+    assert [e["to_status"] for e in events] == ["pending"]
+
+    # The submission asked the approvers to review it.
+    assert len(sent) == 1
+    assert "office@example.edu" in sent[0]["To"]
+    assert sent[0]["Subject"] == "New membership registration: Josiah Carberry"
+
+    # Still no access while pending; a fresh ORCID sign-in parks at the login
+    # page without a session.
+    assert stranger.get("/api/v1/people").status_code == 403
+    parked, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
+    assert r.headers["location"] == "/login?error=membership_pending"
+    assert "set-cookie" not in r.headers
+
+    # Approval opens the door: the existing session works immediately and a
+    # new ORCID sign-in lands on the home page.
+    assert admin.post(
+        f"/api/v1/people/{pid}/status", json={"status": "active"}
+    ).status_code == 200
+    assert stranger.get("/api/v1/people").status_code == 200
+    assert stranger.get("/api/v1/auth/me").json()["person_id"] == pid
+    approved, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
+    assert r.headers["location"] == "/"
+    assert approved.get("/api/v1/people").status_code == 200
+
+
+def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+
+    stranger, r = _orcid_signin(monkeypatch, "0000-0003-1111-2222", "Rae Jected")
+    assert r.headers["location"] == "/apply?welcome=orcid"
+    r = stranger.post(
+        "/api/v1/people/apply",
+        json={"given_name": "Rae", "family_name": "Jected", "email": "rae.jected@example.edu"},
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    admin.post(f"/api/v1/people/{pid}/status", json={"status": "rejected"})
+
+    # The rejection cuts off the existing session and future sign-ins alike.
+    assert stranger.get("/api/v1/people").status_code == 403
+    _, r = _orcid_signin(monkeypatch, "0000-0003-1111-2222", "Rae Jected")
+    assert r.headers["location"] == "/login?error=membership_rejected"
+    assert "set-cookie" not in r.headers
+
+
+def test_orcid_links_existing_approved_member(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+
+    person = admin.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Ora",
+            "family_name": "Linked",
+            "email": "ora.linked@example.edu",
+            "orcid": "0000-0001-2345-6789",
+        },
+    ).json()
+    admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
+
+    # First ORCID sign-in auto-links a login to the approved person record.
+    member, r = _orcid_signin(monkeypatch, "0000-0001-2345-6789", "Ora Linked")
+    assert r.headers["location"] == "/"
+    me = member.get("/api/v1/auth/me")
+    assert me.status_code == 200, me.text
+    assert me.json()["person_id"] == person["id"]
+    assert member.get("/api/v1/people").status_code == 200
+
+
+def test_admin_contact_approves_pending_registration(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+
+    inst = admin.post("/api/v1/institutions", json={"name": "Approve University"}).json()
+    other_inst = admin.post("/api/v1/institutions", json={"name": "Far Away Tech"}).json()
+    contact, contact_pid = _linked_member(
+        admin, given="Cal", family="Contact", email="cal.contact@example.edu",
+        career_stage="staff",
+    )
+    assert admin.post(
+        f"/api/v1/people/{contact_pid}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2025-01-01"},
+    ).status_code == 201
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": contact_pid,
+            "role": "admin_contact",
+            "institution_id": inst["id"],
+            "start_date": "2025-01-01",
+        },
+    ).status_code == 201
+
+    # A stranger registers at the contact's institution.
+    sent.clear()  # drop mail generated by the setup above
+    applicant = TestClient(app)
+    r = applicant.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "New",
+            "family_name": "Comer",
+            "email": "new.comer@example.edu",
+            "career_stage": "grad",
+            "institution_id": inst["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+
+    # The approval request went to the office and the institution's contact.
+    assert len(sent) == 1
+    assert "office@example.edu" in sent[0]["To"]
+    assert "cal.contact@example.edu" in sent[0]["To"]
+
+    # The admin contact may approve the pending registration…
+    assert contact.post(
+        f"/api/v1/people/{pid}/status", json={"status": "active"}
+    ).status_code == 200
+    # …but gets no say over regular status changes afterwards…
+    assert contact.post(
+        f"/api/v1/people/{pid}/status", json={"status": "inactive"}
+    ).status_code == 403
+    # …or over pending registrations at other institutions.
+    outsider = TestClient(app)
+    r = outsider.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Els",
+            "family_name": "Ewhere",
+            "email": "els.ewhere@example.edu",
+            "institution_id": other_inst["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert contact.post(
+        f"/api/v1/people/{r.json()['id']}/status", json={"status": "rejected"}
+    ).status_code == 403
