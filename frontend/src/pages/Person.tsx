@@ -61,6 +61,9 @@ export default function PersonPage() {
   const [instOpen, setInstOpen] = useState(false)
   const [instId, setInstId] = useState<string | null>(null)
   const [instName, setInstName] = useState('')
+  // 'us' | 'non-us' | null — required with a free-text institution name; new
+  // institutions carry this declaration for office review.
+  const [instIsUs, setInstIsUs] = useState<string | null>(null)
   const [instDate, setInstDate] = useState(today())
   const [instStage, setInstStage] = useState<string | null>(null) // null = keep current
   const [instBusy, setInstBusy] = useState(false)
@@ -255,6 +258,7 @@ export default function PersonPage() {
     setInstOpen(false)
     setInstId(null)
     setInstName('')
+    setInstIsUs(null)
     setInstDate(today())
     setInstStage(null)
   }
@@ -264,11 +268,19 @@ export default function PersonPage() {
       notifications.show({ color: 'red', message: 'Pick an institution or enter a name' })
       return
     }
+    if (!instId && !instIsUs) {
+      notifications.show({
+        color: 'red',
+        message: 'Please indicate whether the new institution is US-based',
+      })
+      return
+    }
     setInstBusy(true)
     try {
       await api.post(`/people/${person.id}/institution`, {
         institution_id: instId ? Number(instId) : null,
         institution_name: instId ? null : instName.trim(),
+        institution_is_us: instId ? null : instIsUs === 'us',
         start_date: instDate,
         career_stage: instStage,
       })
@@ -598,6 +610,19 @@ export default function PersonPage() {
                     placeholder="Institution name"
                     value={instName}
                     onChange={(e) => setInstName(e.currentTarget.value)}
+                  />
+                )}
+                {!instId && instName.trim() && (
+                  <Select
+                    label="Is this a US institution?"
+                    description="US status gates voting eligibility; new institutions are reviewed by the USMCC office."
+                    placeholder="Select…"
+                    data={[
+                      { value: 'us', label: 'US institution' },
+                      { value: 'non-us', label: 'Non-US institution' },
+                    ]}
+                    value={instIsUs}
+                    onChange={setInstIsUs}
                   />
                 )}
                 <Select

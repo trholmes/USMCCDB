@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models import CareerStage, CollabRoleType, MemberStatus
 from app.models.membership import RESEARCH_AREAS
@@ -33,6 +33,18 @@ def _normalize_research_areas(v: str | None) -> str | None:
             f"allowed: {', '.join(RESEARCH_AREAS)}"
         )
     return ", ".join(values) or None
+
+
+def _check_new_institution_is_us(
+    institution_id: int | None, institution_name: str | None, institution_is_us: bool | None
+) -> None:
+    """A new institution proposed by free text must be declared US or non-US
+    by the proposer — `is_us` gates voting eligibility, so it is never
+    defaulted (issue #56)."""
+    if institution_id is None and (institution_name or "").strip() and institution_is_us is None:
+        raise ValueError(
+            "institution_is_us is required when naming an institution not in the list"
+        )
 
 
 class InstitutionBase(BaseModel):
@@ -134,6 +146,9 @@ class PersonRegistration(BaseModel):
     usmcc_percent: int | None = Field(default=None, ge=0, le=100)
     institution_id: int | None = None
     institution_name: str | None = None  # free text if not in the list yet
+    # Whether the free-text institution is US-based; required with
+    # institution_name (see _check_new_institution_is_us).
+    institution_is_us: bool | None = None
     is_voting: bool = False
     research_areas: str | None = None
     expertise: str | None = None
@@ -148,6 +163,13 @@ class PersonRegistration(BaseModel):
     @classmethod
     def check_research_areas(cls, v: str | None) -> str | None:
         return _normalize_research_areas(v)
+
+    @model_validator(mode="after")
+    def require_new_institution_is_us(self) -> "PersonRegistration":
+        _check_new_institution_is_us(
+            self.institution_id, self.institution_name, self.institution_is_us
+        )
+        return self
 
 
 class PersonUpdate(BaseModel):
@@ -189,10 +211,20 @@ class InstitutionChange(BaseModel):
 
     institution_id: int | None = None
     institution_name: str | None = None  # free text if not in the list yet
+    # Whether the free-text institution is US-based; required with
+    # institution_name (see _check_new_institution_is_us).
+    institution_is_us: bool | None = None
     start_date: date
     # Optional new career stage taken up with the move; None keeps the
     # person's current stage (which is stamped on the new affiliation).
     career_stage: CareerStage | None = None
+
+    @model_validator(mode="after")
+    def require_new_institution_is_us(self) -> "InstitutionChange":
+        _check_new_institution_is_us(
+            self.institution_id, self.institution_name, self.institution_is_us
+        )
+        return self
 
 
 class PersonSummary(ORMModel):
