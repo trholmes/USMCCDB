@@ -308,3 +308,29 @@ class MembershipEventOut(ORMModel):
     actor_user_id: int | None
     note: str | None
     created_at: datetime
+
+
+class LabelCount(BaseModel):
+    """One row of a categorical breakdown in the membership statistics."""
+
+    label: str
+    count: int
+
+
+class YearCount(BaseModel):
+    year: int
+    count: int
+
+
+class MemberStats(BaseModel):
+    total_people: int  # every person record, regardless of status
+    active: int
+    voting: int  # active voting members
+    us_active: int  # active members currently at a US institution
+    institutions_with_active: int  # institutions hosting >=1 active member
+    by_status: list[LabelCount]
+    by_career_stage: list[LabelCount]  # active members only
+    # Active members per research area; the field is multi-valued, so these
+    # counts can add up to more than the active total.
+    by_research_area: list[LabelCount]
+    new_members_by_year: list[YearCount]  # first activation per person
