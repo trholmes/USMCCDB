@@ -336,3 +336,8 @@ class MemberStats(BaseModel):
     # counts can add up to more than the active total.
     by_research_area: list[LabelCount]
     new_members_by_year: list[YearCount]  # first activation per person
+    # Effort on the USMCC, from the self-reported usmcc_percent of active
+    # members. The field is optional, so aggregates cover only those reporting.
+    usmcc_reporting: int  # active members with a reported percentage
+    avg_usmcc_percent: float | None  # mean percentage over those reporting
+    usmcc_fte: float  # summed reported effort, in full-time equivalents

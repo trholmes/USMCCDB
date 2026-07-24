@@ -47,7 +47,7 @@ export default function StatsPage() {
 
 // --- Membership ---------------------------------------------------------------
 
-function StatTile({ label, value, sub }: { label: string; value: number; sub?: string }) {
+function StatTile({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
   return (
     <Card withBorder py="sm">
       <Text size="sm" c="dimmed">
@@ -82,13 +82,18 @@ function MembershipStats() {
 
   return (
     <>
-      <SimpleGrid cols={{ base: 2, sm: 3, lg: 5 }} mb="md">
+      <SimpleGrid cols={{ base: 2, sm: 3, lg: 4 }} mb="md">
         <StatTile
           label="Active members"
           value={stats.active}
           sub={`of ${stats.total_people} people on record`}
         />
         <StatTile label="Voting members" value={stats.voting} sub={pctActive(stats.voting)} />
+        <StatTile
+          label="Non-voting members"
+          value={stats.active - stats.voting}
+          sub={pctActive(stats.active - stats.voting)}
+        />
         <StatTile
           label="At US institutions"
           value={stats.us_active}
@@ -99,7 +104,16 @@ function MembershipStats() {
           value={stats.institutions_with_active}
           sub="with active members"
         />
-        <StatTile label="Pending applications" value={pending} sub="awaiting office review" />
+        <StatTile
+          label="Effort on USMCC"
+          value={stats.avg_usmcc_percent != null ? `${Math.round(stats.avg_usmcc_percent)}%` : '—'}
+          sub={
+            stats.avg_usmcc_percent != null
+              ? `avg of ${stats.usmcc_reporting} reporting · ${stats.usmcc_fte.toFixed(1)} FTE total`
+              : 'no active member has reported effort'
+          }
+        />
+        <StatTile label="Pending memberships" value={pending} sub="awaiting office review" />
       </SimpleGrid>
 
       <SimpleGrid cols={{ base: 1, lg: 2 }} mb="md">
@@ -204,7 +218,7 @@ function MembershipStats() {
             By membership status
           </Text>
           <Text size="xs" c="dimmed" mb="xs">
-            Everyone on record, including former members and applicants.
+            Everyone on record, including former and pending members.
           </Text>
           <Table striped>
             <Table.Tbody>

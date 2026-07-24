@@ -70,10 +70,10 @@ export default function ApplyPage() {
     return (
       <Center mih="60vh">
         <Card withBorder w={480} p="xl">
-          <Title order={3}>Application received</Title>
+          <Title order={3}>Registration received</Title>
           <Text mt="sm">
-            Thanks! The USMCC office will review your application. You'll be able to sign in
-            once it's approved.
+            Thanks! Your membership is now pending review by the USMCC office. You'll be able
+            to sign in once it's approved.
           </Text>
           <Button mt="md" onClick={() => navigate('/login')}>
             Back to sign in
@@ -88,10 +88,10 @@ export default function ApplyPage() {
       <Card withBorder w={560} p="xl">
         <Stack>
           <div>
-            <Title order={3}>Apply to join USMCC</Title>
+            <Title order={3}>Join USMCC</Title>
             {params.get('welcome') === 'orcid' && (
               <Text c="green" size="sm">
-                Your ORCID sign-in worked — please complete your membership application.
+                Your ORCID sign-in worked — please complete your membership registration.
               </Text>
             )}
           </div>
@@ -184,7 +184,7 @@ export default function ApplyPage() {
                 onChange={(e) => set('notes', e.currentTarget.value)}
               />
               <Button type="submit" loading={busy}>
-                Submit application
+                Submit registration
               </Button>
             </Stack>
           </form>
