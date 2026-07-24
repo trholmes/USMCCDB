@@ -1223,3 +1223,84 @@ def test_imported_members_counted_in_growth_stats(admin, tmp_path):
     # Re-importing (upsert) must not duplicate the activation event.
     import_members(csv_path=csv_file, dry_run=False)
     assert len(admin.get(f"/api/v1/people/{pid}/events").json()) == 1
+
+
+def test_import_members_xlsx_percent_time(admin, tmp_path):
+    # The registration form asks for percent of research time as a range
+    # ('10-24%'); the importer stores the midpoint in usmcc_percent, and
+    # non-answers ('Too unsure to estimate here') stay unset.
+    from datetime import datetime
+
+    import openpyxl
+
+    from app.cli import import_members_xlsx
+
+    header = [
+        "Timestamp",
+        "According to this definition, are you registering to be a voting "
+        "or non-voting member of USMCC?",
+        "First Name",
+        "Middle Name",
+        "Last Name",
+        "Primary Affiliation",
+        "Any additional affiliations",
+        "Email",
+        "ORCID ID (if available)",
+        "Position",
+        "Area(s) of Expertise",
+        "What percent of your research time do you expect to spend on muon "
+        "colliders in the next few years?",
+    ]
+
+    def build(rows):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws.append(header)
+        for r in rows:
+            ws.append(r)
+        path = tmp_path / "members.xlsx"
+        wb.save(path)
+        return path
+
+    common = [datetime(2025, 4, 10), "Voting member"]
+    path = build(
+        [
+            common
+            + ["Pia", None, "Percentson", "PctU", None,
+               "pia.percentson@example.edu", None, "Faculty",
+               "Accelerator Physics", "10-24%"],
+            common
+            + ["Ulla", None, "Unsure", "PctU", None,
+               "ulla.unsure@example.edu", None, "Postdoc",
+               "Accelerator Physics", "Too unsure to estimate here"],
+        ]
+    )
+    import_members_xlsx(
+        xlsx_path=path, sheet="Members", authors_from_voting=False, dry_run=False
+    )
+
+    pia = admin.get("/api/v1/people", params={"q": "pia.percentson"}).json()[0]
+    assert admin.get(f"/api/v1/people/{pia['id']}").json()["usmcc_percent"] == 17
+    ulla = admin.get("/api/v1/people", params={"q": "ulla.unsure"}).json()[0]
+    assert admin.get(f"/api/v1/people/{ulla['id']}").json()["usmcc_percent"] is None
+
+    # Re-import (upsert): a real answer updates the stored value, and a
+    # non-answer must not wipe one that exists.
+    path = build(
+        [
+            common
+            + ["Pia", None, "Percentson", "PctU", None,
+               "pia.percentson@example.edu", None, "Faculty",
+               "Accelerator Physics", "Too unsure to estimate here"],
+            common
+            + ["Ulla", None, "Unsure", "PctU", None,
+               "ulla.unsure@example.edu", None, "Postdoc",
+               "Accelerator Physics", "50-100%"],
+        ]
+    )
+    import_members_xlsx(
+        xlsx_path=path, sheet="Members", authors_from_voting=False, dry_run=False
+    )
+    assert admin.get(f"/api/v1/people/{pia['id']}").json()["usmcc_percent"] == 17
+    assert admin.get(f"/api/v1/people/{ulla['id']}").json()["usmcc_percent"] == 75
