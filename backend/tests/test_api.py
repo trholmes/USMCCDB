@@ -1233,6 +1233,113 @@ def test_imported_members_counted_in_growth_stats(admin, tmp_path):
     assert len(admin.get(f"/api/v1/people/{pid}/events").json()) == 1
 
 
+def test_import_members_institution_move(admin, tmp_path):
+    # Re-importing a member whose primary affiliation moved to another
+    # institution must close the old open primary with the API's move
+    # semantics instead of inserting a second open primary, which trips
+    # uq_one_open_primary_affiliation and rolls back the whole import
+    # (issue #54).
+    from app.cli import import_members
+
+    header = (
+        "given_name,family_name,email,orcid,institution_short_name,"
+        "career_stage,start_date,is_author\n"
+    )
+
+    def run(inst: str, start: str) -> None:
+        csv_file = tmp_path / "members.csv"
+        csv_file.write_text(
+            header
+            + f"Mona,Moverson,mona.moverson@example.edu,,{inst},faculty,{start},false\n"
+        )
+        import_members(csv_path=csv_file, dry_run=False)
+
+    run("MovA", "2024-01-10")
+    run("MovB", "2025-03-01")
+
+    pid = admin.get("/api/v1/people", params={"q": "mona.moverson"}).json()[0]["id"]
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    affils = sorted(person["affiliations"], key=lambda x: x["start_date"])
+    assert [a["institution"]["short_name"] for a in affils] == ["MovA", "MovB"]
+    # Ranges are inclusive on both ends: the old row ends the day BEFORE the move.
+    assert affils[0]["end_date"] == "2025-02-28"
+    assert affils[1]["end_date"] is None
+
+    # A same-day move is a correction: the superseded zero-length row is deleted.
+    run("MovC", "2025-03-01")
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    open_affils = [x for x in person["affiliations"] if x["end_date"] is None]
+    assert [x["institution"]["short_name"] for x in open_affils] == ["MovC"]
+    assert all(x["institution"]["short_name"] != "MovB" for x in person["affiliations"])
+
+    # A start date before the current affiliation's start can't be applied as
+    # a move; the row's affiliation change is skipped, not stacked or crashed.
+    run("MovD", "2020-01-01")
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    open_affils = [x for x in person["affiliations"] if x["end_date"] is None]
+    assert [x["institution"]["short_name"] for x in open_affils] == ["MovC"]
+
+    # Re-importing at the current institution stays idempotent.
+    run("MovC", "2026-01-01")
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert len([x for x in person["affiliations"] if x["end_date"] is None]) == 1
+
+
+def test_import_members_xlsx_institution_move(admin, tmp_path):
+    # Same as above through the XLSX importer path (issue #54).
+    from datetime import datetime
+
+    import openpyxl
+
+    from app.cli import import_members_xlsx
+
+    header = [
+        "Timestamp",
+        "According to this definition, are you registering to be a voting "
+        "or non-voting member of USMCC?",
+        "First Name",
+        "Middle Name",
+        "Last Name",
+        "Primary Affiliation",
+        "Any additional affiliations",
+        "Email",
+        "ORCID ID (if available)",
+        "Position",
+        "Area(s) of Expertise",
+        "What percent of your research time do you expect to spend on muon "
+        "colliders in the next few years?",
+    ]
+
+    def run(inst: str, ts: "datetime") -> None:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws.append(header)
+        ws.append(
+            [ts, "Voting member", "Xavier", None, "Xlsxson", inst, None,
+             "xavier.xlsxson@example.edu", None, "Faculty",
+             "Accelerator Physics", "10-24%"]
+        )
+        path = tmp_path / "members.xlsx"
+        wb.save(path)
+        import_members_xlsx(
+            xlsx_path=path, sheet="Members", authors_from_voting=False, dry_run=False
+        )
+
+    run("Xlsx Institute A", datetime(2025, 4, 10))
+    run("Xlsx Institute B", datetime(2025, 9, 2))
+
+    pid = admin.get("/api/v1/people", params={"q": "xavier.xlsxson"}).json()[0]["id"]
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    affils = sorted(person["affiliations"], key=lambda x: x["start_date"])
+    assert [a["institution"]["name"] for a in affils] == [
+        "Xlsx Institute A",
+        "Xlsx Institute B",
+    ]
+    assert affils[0]["end_date"] == "2025-09-01"
+    assert affils[1]["end_date"] is None
+
+
 def test_import_members_xlsx_percent_time(admin, tmp_path):
     # The registration form asks for percent of research time as a range
     # ('10-24%'); the importer stores the midpoint in usmcc_percent, and
