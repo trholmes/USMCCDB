@@ -1038,3 +1038,72 @@ def test_member_publication_flow(admin, monkeypatch):
         ("erin.editor@example.edu", "Publication status update: A Democratized Paper")
     ]
     assert "collab review to submitted" in sent[0].get_content()
+
+
+def test_working_group_crud(admin):
+    # Office creates a group.
+    r = admin.post(
+        "/api/v1/working-groups",
+        json={"name": "Detector Simulation", "slug": "detector-sim", "description": "Sim work"},
+    )
+    assert r.status_code == 201, r.text
+    wg = r.json()
+    assert wg["slug"] == "detector-sim"
+    assert wg["is_active"] is True
+    assert wg["member_count"] == 0
+
+    # Duplicate slug is rejected; malformed slug fails validation.
+    assert admin.post(
+        "/api/v1/working-groups", json={"name": "Dup", "slug": "detector-sim"}
+    ).status_code == 409
+    assert admin.post(
+        "/api/v1/working-groups", json={"name": "Bad", "slug": "Not A Slug!"}
+    ).status_code == 422
+
+    # Office edits name/description/is_active.
+    r = admin.patch(
+        f"/api/v1/working-groups/{wg['id']}",
+        json={"name": "Detector & Simulation", "is_active": False},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Detector & Simulation"
+    assert r.json()["is_active"] is False
+    assert admin.patch("/api/v1/working-groups/999999", json={"name": "x"}).status_code == 404
+
+    # Members can see the list but cannot create or edit groups.
+    member, pid = _linked_member(
+        admin, given="Wanda", family="Groupless", email="wanda.groupless@example.edu"
+    )
+    assert member.get("/api/v1/working-groups").status_code == 200
+    assert member.post(
+        "/api/v1/working-groups", json={"name": "Rogue", "slug": "rogue"}
+    ).status_code == 403
+    assert member.patch(
+        f"/api/v1/working-groups/{wg['id']}", json={"name": "Hijacked"}
+    ).status_code == 403
+
+    # A member may join a group themselves, but not enroll someone else.
+    r = member.post(f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid})
+    assert r.status_code == 201, r.text
+    assert member.post(
+        f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid}
+    ).status_code == 409
+    other = admin.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Otto",
+            "family_name": "Other",
+            "email": "otto.other@example.edu",
+            "career_stage": "postdoc",
+        },
+    ).json()
+    assert member.post(
+        f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": other["id"]}
+    ).status_code == 403
+
+    listed = admin.get("/api/v1/working-groups").json()
+    assert {"slug": "detector-sim", "count": 1} in [
+        {"slug": w["slug"], "count": w["member_count"]} for w in listed
+    ]
+    names = [p["family_name"] for p in admin.get(f"/api/v1/working-groups/{wg['id']}/members").json()]
+    assert names == ["Groupless"]

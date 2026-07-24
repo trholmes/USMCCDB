@@ -1,14 +1,36 @@
-import { Accordion, Badge, Button, Group, Table, Text, Title } from '@mantine/core'
+import {
+  Accordion,
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  Stack,
+  Table,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+} from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { PersonSummary, WorkingGroup } from '../api/types'
 import { useSession } from '../auth/SessionContext'
 
+const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
 export default function WorkingGroupsPage() {
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
   const [members, setMembers] = useState<Record<number, PersonSummary[]>>({})
-  const { me } = useSession()
+  const [modal, setModal] = useState<WorkingGroup | 'new' | null>(null)
+  const [form, setForm] = useState({ name: '', slug: '', description: '', is_active: true })
+  const [slugTouched, setSlugTouched] = useState(false)
+  const { me, isOffice } = useSession()
 
   const load = useCallback(() => {
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
@@ -38,11 +60,50 @@ export default function WorkingGroupsPage() {
     }
   }
 
+  const open = (target: WorkingGroup | 'new') => {
+    setForm(
+      target === 'new'
+        ? { name: '', slug: '', description: '', is_active: true }
+        : {
+            name: target.name,
+            slug: target.slug,
+            description: target.description ?? '',
+            is_active: target.is_active,
+          },
+    )
+    setSlugTouched(false)
+    setModal(target)
+  }
+
+  const save = async () => {
+    try {
+      if (modal === 'new') {
+        await api.post('/working-groups', {
+          name: form.name,
+          slug: form.slug,
+          description: form.description || null,
+          is_active: form.is_active,
+        })
+      } else if (modal) {
+        await api.patch(`/working-groups/${modal.id}`, {
+          name: form.name,
+          description: form.description || null,
+          is_active: form.is_active,
+        })
+      }
+      setModal(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
   return (
     <>
-      <Title order={3} mb="md">
-        Working groups
-      </Title>
+      <Group justify="space-between" mb="md">
+        <Title order={3}>Working groups</Title>
+        {isOffice && <Button onClick={() => open('new')}>Add working group</Button>}
+      </Group>
       <Accordion onChange={(v) => v && loadMembers(Number(v))}>
         {wgs.map((wg) => (
           <Accordion.Item key={wg.id} value={String(wg.id)}>
@@ -59,9 +120,16 @@ export default function WorkingGroupsPage() {
                   {wg.description}
                 </Text>
               )}
-              <Button size="xs" variant="light" mb="sm" onClick={() => join(wg.id)}>
-                Join this group
-              </Button>
+              <Group gap="xs" mb="sm">
+                <Button size="xs" variant="light" onClick={() => join(wg.id)}>
+                  Join this group
+                </Button>
+                {isOffice && (
+                  <Button size="xs" variant="subtle" onClick={() => open(wg)}>
+                    Edit
+                  </Button>
+                )}
+              </Group>
               <Table>
                 <Table.Tbody>
                   {(members[wg.id] ?? []).map((p) => (
@@ -79,6 +147,57 @@ export default function WorkingGroupsPage() {
           </Accordion.Item>
         ))}
       </Accordion>
+
+      <Modal
+        opened={modal !== null}
+        onClose={() => setModal(null)}
+        title={modal === 'new' ? 'Add working group' : 'Edit working group'}
+      >
+        <Stack gap="sm">
+          <TextInput
+            label="Name"
+            required
+            value={form.name}
+            onChange={(e) => {
+              const name = e.currentTarget.value
+              setForm((f) => ({
+                ...f,
+                name,
+                slug: modal === 'new' && !slugTouched ? slugify(name) : f.slug,
+              }))
+            }}
+          />
+          <TextInput
+            label="Slug"
+            description={
+              modal === 'new'
+                ? 'Short identifier: lowercase letters, digits, and hyphens. Cannot be changed later.'
+                : 'Slugs cannot be changed.'
+            }
+            required
+            disabled={modal !== 'new'}
+            value={form.slug}
+            onChange={(e) => {
+              setSlugTouched(true)
+              setForm({ ...form, slug: e.currentTarget.value })
+            }}
+          />
+          <Textarea
+            label="Description"
+            autosize
+            minRows={2}
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.currentTarget.value })}
+          />
+          <Checkbox
+            label="Active"
+            description="Inactive groups stay listed with their membership but are flagged as inactive."
+            checked={form.is_active}
+            onChange={(e) => setForm({ ...form, is_active: e.currentTarget.checked })}
+          />
+          <Button onClick={save}>Save</Button>
+        </Stack>
+      </Modal>
     </>
   )
 }
