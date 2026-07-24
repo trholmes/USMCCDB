@@ -9,7 +9,6 @@ import {
   Select,
   Stack,
   Table,
-  TagsInput,
   Text,
   TextInput,
   Title,
@@ -50,7 +49,6 @@ export default function PersonPage() {
   const [usmccPercent, setUsmccPercent] = useState<number | string>('')
   const [voting, setVoting] = useState(false)
   const [researchAreas, setResearchAreas] = useState<string[]>([])
-  const [expertise, setExpertise] = useState<string[]>([])
   const { me, isOffice } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
@@ -59,14 +57,16 @@ export default function PersonPage() {
   const [institutions, setInstitutions] = useState<Institution[]>([])
   const [events, setEvents] = useState<MembershipEvent[]>([])
 
-  // Institution move form.
+  // Institution move form (collapsed behind a button until requested).
+  const [instOpen, setInstOpen] = useState(false)
   const [instId, setInstId] = useState<string | null>(null)
   const [instName, setInstName] = useState('')
   const [instDate, setInstDate] = useState(today())
   const [instStage, setInstStage] = useState<string | null>(null) // null = keep current
   const [instBusy, setInstBusy] = useState(false)
 
-  // Status change form (self-service).
+  // Status change form (self-service; collapsed behind a button until requested).
+  const [statusOpen, setStatusOpen] = useState(false)
   const [newStatus, setNewStatus] = useState<string | null>(null)
   const [statusDate, setStatusDate] = useState(today())
   const [statusBusy, setStatusBusy] = useState(false)
@@ -172,7 +172,6 @@ export default function PersonPage() {
     })
     setUsmccPercent(person.usmcc_percent ?? '')
     setResearchAreas(splitList(person.research_areas))
-    setExpertise(splitList(person.expertise))
     setVoting(person.is_voting)
     setEditing(true)
   }
@@ -220,7 +219,6 @@ export default function PersonPage() {
       joinList(researchAreas),
       joinList(splitList(person.research_areas)),
     )
-    changed('expertise', joinList(expertise), joinList(splitList(person.expertise)))
     changed('is_voting', effectiveVoting, person.is_voting)
     if (Object.keys(payload).length === 0) {
       setEditing(false)
@@ -254,6 +252,14 @@ export default function PersonPage() {
     }
   }
 
+  const closeInstForm = () => {
+    setInstOpen(false)
+    setInstId(null)
+    setInstName('')
+    setInstDate(today())
+    setInstStage(null)
+  }
+
   const moveInstitution = async () => {
     if (!instId && !instName.trim()) {
       notifications.show({ color: 'red', message: 'Pick an institution or enter a name' })
@@ -268,10 +274,7 @@ export default function PersonPage() {
         career_stage: instStage,
       })
       notifications.show({ message: 'Institution updated' })
-      setInstId(null)
-      setInstName('')
-      setInstDate(today())
-      setInstStage(null)
+      closeInstForm()
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -280,15 +283,18 @@ export default function PersonPage() {
     }
   }
 
+  const closeStatusForm = () => {
+    setStatusOpen(false)
+    setNewStatus(null)
+    setStatusDate(today())
+  }
+
   const submitStatus = async () => {
     if (!newStatus) return
     setStatusBusy(true)
     const ok = await postStatus(newStatus, statusDate)
     setStatusBusy(false)
-    if (ok) {
-      setNewStatus(null)
-      setStatusDate(today())
-    }
+    if (ok) closeStatusForm()
   }
 
   const roleDef = COLLAB_ROLES.find((r) => r.value === roleType)
@@ -478,15 +484,6 @@ export default function PersonPage() {
               disabled={!canEditFull}
               clearable
             />
-            <TagsInput
-              label="Topics of focus"
-              description="Type a topic and press Enter (e.g. muon cooling, tracking detectors)."
-              placeholder="Add a topic…"
-              value={expertise}
-              onChange={setExpertise}
-              disabled={!canEditFull}
-              clearable
-            />
             <Checkbox
               label="Voting member"
               checked={effectiveVoting}
@@ -544,16 +541,27 @@ export default function PersonPage() {
                 ))}
               </Group>
             )}
-            {person.expertise && (
+            {(person.working_groups.length > 0 || isSelf) && (
               <Group gap={6}>
                 <Text size="sm">
-                  <b>Topics:</b>
+                  <b>Working groups:</b>
                 </Text>
-                {splitList(person.expertise).map((topic) => (
-                  <Badge key={topic} variant="light" color="gray" size="sm">
-                    {topic}
-                  </Badge>
-                ))}
+                {person.working_groups.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    none
+                  </Text>
+                ) : (
+                  person.working_groups.map((wg) => (
+                    <Badge key={wg.id} variant="light" color="gray" size="sm">
+                      {wg.name}
+                    </Badge>
+                  ))
+                )}
+                {isSelf && (
+                  <Text size="sm" c="dimmed">
+                    — join or leave on the <Link to="/working-groups">working groups</Link> page
+                  </Text>
+                )}
               </Group>
             )}
           </Stack>
@@ -562,78 +570,100 @@ export default function PersonPage() {
 
       {canEditFull && (
         <Group align="flex-start" gap="md">
-          <Card withBorder w={340}>
-            <Stack gap="sm">
-              <Title order={5}>Change institution</Title>
-              <Text size="xs" c="dimmed">
-                Records a move as of the date you enter; your current affiliation is closed
-                on that date and history is kept.
-              </Text>
-              <Select
-                label="New institution"
-                placeholder="Search institutions…"
-                searchable
-                clearable
-                data={institutions.map((i) => ({
-                  value: String(i.id),
-                  label: i.short_name ? `${i.name} (${i.short_name})` : i.name,
-                }))}
-                value={instId}
-                onChange={setInstId}
-              />
-              {!instId && (
-                <TextInput
-                  label="…or a new institution not in the list"
-                  placeholder="Institution name"
-                  value={instName}
-                  onChange={(e) => setInstName(e.currentTarget.value)}
+          {instOpen ? (
+            <Card withBorder w={340}>
+              <Stack gap="sm">
+                <Title order={5}>Change institution</Title>
+                <Text size="xs" c="dimmed">
+                  Records a move as of the date you enter; your current affiliation is closed
+                  on that date and history is kept.
+                </Text>
+                <Select
+                  label="New institution"
+                  placeholder="Search institutions…"
+                  searchable
+                  clearable
+                  data={institutions.map((i) => ({
+                    value: String(i.id),
+                    label: i.short_name ? `${i.name} (${i.short_name})` : i.name,
+                  }))}
+                  value={instId}
+                  onChange={setInstId}
                 />
-              )}
-              <Select
-                label="Career stage at the new institution"
-                placeholder={`Keep current (${careerStageLabel(person.career_stage)})`}
-                data={CAREER_STAGES}
-                value={instStage}
-                onChange={setInstStage}
-                clearable
-              />
-              <TextInput
-                label="Effective date"
-                type="date"
-                value={instDate}
-                onChange={(e) => setInstDate(e.currentTarget.value)}
-              />
-              <Button onClick={moveInstitution} loading={instBusy}>
-                Update institution
-              </Button>
-            </Stack>
-          </Card>
+                {!instId && (
+                  <TextInput
+                    label="…or a new institution not in the list"
+                    placeholder="Institution name"
+                    value={instName}
+                    onChange={(e) => setInstName(e.currentTarget.value)}
+                  />
+                )}
+                <Select
+                  label="Career stage at the new institution"
+                  placeholder={`Keep current (${careerStageLabel(person.career_stage)})`}
+                  data={CAREER_STAGES}
+                  value={instStage}
+                  onChange={setInstStage}
+                  clearable
+                />
+                <TextInput
+                  label="Effective date"
+                  type="date"
+                  value={instDate}
+                  onChange={(e) => setInstDate(e.currentTarget.value)}
+                />
+                <Group>
+                  <Button onClick={moveInstitution} loading={instBusy}>
+                    Update institution
+                  </Button>
+                  <Button variant="subtle" onClick={closeInstForm}>
+                    Cancel
+                  </Button>
+                </Group>
+              </Stack>
+            </Card>
+          ) : (
+            <Button variant="default" onClick={() => setInstOpen(true)}>
+              Change institution…
+            </Button>
+          )}
 
-          <Card withBorder w={340}>
-            <Stack gap="sm">
-              <Title order={5}>Change status</Title>
-              <Text size="xs" c="dimmed">
-                Update your membership status as of a date. The change is recorded in your
-                membership history.
-              </Text>
-              <Select
-                label="New status"
-                placeholder="Select status…"
-                data={SELF_STATUSES}
-                value={newStatus}
-                onChange={setNewStatus}
-              />
-              <TextInput
-                label="Effective date"
-                type="date"
-                value={statusDate}
-                onChange={(e) => setStatusDate(e.currentTarget.value)}
-              />
-              <Button onClick={submitStatus} loading={statusBusy} disabled={!newStatus}>
-                Update status
-              </Button>
-            </Stack>
-          </Card>
+          {statusOpen ? (
+            <Card withBorder w={340}>
+              <Stack gap="sm">
+                <Title order={5}>Change status</Title>
+                <Text size="xs" c="dimmed">
+                  Update your membership status as of a date. The change is recorded in your
+                  membership history.
+                </Text>
+                <Select
+                  label="New status"
+                  placeholder="Select status…"
+                  data={SELF_STATUSES}
+                  value={newStatus}
+                  onChange={setNewStatus}
+                />
+                <TextInput
+                  label="Effective date"
+                  type="date"
+                  value={statusDate}
+                  onChange={(e) => setStatusDate(e.currentTarget.value)}
+                />
+                <Group>
+                  <Button onClick={submitStatus} loading={statusBusy} disabled={!newStatus}>
+                    Update status
+                  </Button>
+                  <Button variant="subtle" onClick={closeStatusForm}>
+                    Cancel
+                  </Button>
+                </Group>
+              </Stack>
+            </Card>
+          ) : (
+            <Button variant="default" onClick={() => setStatusOpen(true)}>
+              Change status…
+            </Button>
+          )}
         </Group>
       )}
 

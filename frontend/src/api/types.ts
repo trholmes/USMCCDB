@@ -72,6 +72,7 @@ export interface Person extends PersonSummary {
   status_changed_at: string | null
   affiliations: Affiliation[]
   author_periods: AuthorPeriod[]
+  working_groups: { id: number; name: string; slug: string }[]
 }
 
 export interface MembershipEvent {

@@ -16,6 +16,7 @@ from app.models import (
     MemberStatus,
     Person,
     User,
+    WorkingGroupMember,
 )
 from app.models.membership import RESEARCH_AREAS
 from app.schemas.membership import (
@@ -35,6 +36,7 @@ from app.schemas.membership import (
     PersonSummary,
     PersonUpdate,
     StatusChange,
+    WorkingGroupRef,
     YearCount,
 )
 from app.config import get_settings
@@ -262,8 +264,6 @@ def list_people(
             Affiliation.end_date.is_(None),
         )
     if working_group_id is not None:
-        from app.models import WorkingGroupMember
-
         stmt = stmt.join(WorkingGroupMember).where(
             WorkingGroupMember.working_group_id == working_group_id
         )
@@ -291,12 +291,18 @@ def get_person(
         .options(
             selectinload(Person.affiliations).selectinload(Affiliation.institution),
             selectinload(Person.author_periods),
+            selectinload(Person.wg_memberships).selectinload(WorkingGroupMember.working_group),
         )
         .where(Person.id == person_id)
     ).scalar_one_or_none()
     if person is None:
         raise HTTPException(404, "Person not found")
-    return PersonOut.model_validate(person)
+    out = PersonOut.model_validate(person)
+    out.working_groups = sorted(
+        (WorkingGroupRef.model_validate(m.working_group) for m in person.wg_memberships),
+        key=lambda w: w.name.lower(),
+    )
+    return out
 
 
 @router.patch("/{person_id}")
