@@ -193,7 +193,7 @@ function MembershipStats() {
         </Card>
       </SimpleGrid>
 
-      <Card withBorder h={320} mb="md">
+      <Card withBorder h={320} mb="md" maw={860}>
         <Text size="sm" fw={600} mb={2}>
           New members per month
         </Text>
