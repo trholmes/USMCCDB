@@ -86,6 +86,15 @@ Members whose ORCID iD is already in the database are linked automatically on
 first sign-in; unknown ORCIDs get a pending application for the office to
 approve. Set `ORCID_HOST=sandbox.orcid.org` to test against the ORCID sandbox.
 
+### Email notifications (optional)
+
+Set `SMTP_HOST` (plus `SMTP_USERNAME`/`SMTP_PASSWORD` as needed — see
+`.env.example`) to enable publication-workflow email: the office
+(`CONTACT_EMAIL`) is notified when someone requests collaboration review,
+reviewers are notified when the office assigns them, and a paper's editors
+are notified of status changes. Leave `SMTP_HOST` empty to run without
+email — the workflow works the same, nothing is sent.
+
 ### Importing the existing spreadsheets
 
 Drop the exports in `data/` (gitignored — never commit member data) and run:

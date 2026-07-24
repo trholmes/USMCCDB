@@ -29,6 +29,12 @@ services:
       ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
       ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
       ORCID_HOST: ${ORCID_HOST:-orcid.org}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_TLS: ${SMTP_TLS:-starttls}
+      EMAIL_FROM: ${EMAIL_FROM:-}
     volumes:
       # Drop spreadsheets/CSVs here (gitignored) to import them, e.g.:
       #   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
