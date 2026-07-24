@@ -19,6 +19,10 @@ if TEST_DB:
     os.environ["SECRET_KEY"] = "test-secret"
     os.environ["BOOTSTRAP_ADMIN_USERNAME"] = "testadmin"
     os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "testadmin-pw"
+    # Enable email composition; tests monkeypatch delivery, and any
+    # unpatched send fails fast against the invalid host and is logged.
+    os.environ["SMTP_HOST"] = "smtp.test.invalid"
+    os.environ["CONTACT_EMAIL"] = "office@example.edu"
 
     from fastapi.testclient import TestClient
 
@@ -919,10 +923,16 @@ def test_admin_contact_role_and_scoped_edits(admin):
     ).status_code == 403
 
 
-def test_member_publication_flow(admin):
+def test_member_publication_flow(admin, monkeypatch):
     """Any member can register a publication, attach involved people, build a
     subset author list, and request collaboration review — but only the office
-    can move it further or assign reviewers."""
+    can move it further or assign reviewers. Workflow steps notify the right
+    people by email."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+
     editor, editor_pid = _linked_member(
         admin, given="Erin", family="Editor", email="erin.editor@example.edu"
     )
@@ -980,12 +990,17 @@ def test_member_publication_flow(admin):
     assert friend.post(
         f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
     ).status_code == 403
-    # …but an editor may request collaboration review.
+    # …but an editor may request collaboration review, which emails the office.
+    sent.clear()
     r = editor.post(
         f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
     )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "collab_review"
+    assert [(m["To"], m["Subject"]) for m in sent] == [
+        ("office@example.edu", "Collaboration review requested: A Democratized Paper")
+    ]
+    assert "Erin Editor" in sent[0].get_content()
 
     # Suggested acknowledgment: generic until the office assigns reviewers.
     ack = editor.get(f"/api/v1/publications/{pub['id']}/acknowledgment").json()
@@ -1001,10 +1016,25 @@ def test_member_publication_flow(admin):
             "career_stage": "faculty",
         },
     ).json()
+    # Assigning a reviewer emails them…
+    sent.clear()
     assert admin.post(
         f"/api/v1/publications/{pub['id']}/people",
         json={"person_id": reviewer_person["id"], "role": "reviewer"},
     ).status_code == 201
+    assert [(m["To"], m["Subject"]) for m in sent] == [
+        ("rae.reviewer@example.edu", "Review request: A Democratized Paper")
+    ]
+    # …and they now appear in the suggested acknowledgment.
     ack = editor.get(f"/api/v1/publications/{pub['id']}/acknowledgment").json()
     assert ack["reviewers"] == ["Rae Reviewer"]
     assert "Rae Reviewer" in ack["text"]
+
+    # Office status changes notify the paper's editors.
+    sent.clear()
+    r = admin.post(f"/api/v1/publications/{pub['id']}/status", json={"status": "submitted"})
+    assert r.status_code == 200, r.text
+    assert [(m["To"], m["Subject"]) for m in sent] == [
+        ("erin.editor@example.edu", "Publication status update: A Democratized Paper")
+    ]
+    assert "collab review to submitted" in sent[0].get_content()

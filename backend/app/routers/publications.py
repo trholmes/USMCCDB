@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -31,6 +31,8 @@ from app.security import (
     is_convener_of,
     is_office,
 )
+from app.services import notifications
+from app.services.email import send_email
 
 router = APIRouter(prefix="/publications", tags=["publications"])
 
@@ -168,6 +170,7 @@ def update_publication(
 def change_status(
     pub_id: int,
     body: PubStatusChange,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PublicationOut:
@@ -186,10 +189,11 @@ def change_status(
             raise HTTPException(403, "Only the office can make this transition")
     if body.status == pub.status:
         raise HTTPException(400, f"Publication is already {pub.status.value}")
+    from_status = pub.status.value
     db.add(
         PublicationEvent(
             publication_id=pub.id,
-            from_status=pub.status.value,
+            from_status=from_status,
             to_status=body.status.value,
             actor_user_id=user.id,
             note=body.note,
@@ -197,6 +201,16 @@ def change_status(
     )
     pub.status = body.status
     db.commit()
+    # Compose emails now (the session closes before background tasks run),
+    # deliver after the response.
+    for msg in (
+        notifications.review_requested(db, pub, user)
+        if body.status == PublicationStatus.collab_review
+        else None,
+        notifications.status_changed(db, pub, from_status, body.status.value, user),
+    ):
+        if msg is not None:
+            background.add_task(send_email, *msg)
     return PublicationOut.model_validate(_load_pub(db, pub_id))
 
 
@@ -212,6 +226,7 @@ def _can_manage_people(db: Session, user: User, pub: Publication) -> bool:
 def add_person(
     pub_id: int,
     body: PubPersonAdd,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PubPersonOut:
@@ -222,7 +237,8 @@ def add_person(
         raise HTTPException(403, "Only editors, conveners, or the office can add people")
     if body.role == PublicationPersonRole.reviewer and not is_office(user):
         raise HTTPException(403, "Only the office can assign reviewers")
-    if db.get(Person, body.person_id) is None:
+    person = db.get(Person, body.person_id)
+    if person is None:
         raise HTTPException(404, "Person not found")
     exists = db.execute(
         select(PublicationPerson).where(
@@ -237,6 +253,10 @@ def add_person(
     db.add(pp)
     db.commit()
     db.refresh(pp)
+    if body.role == PublicationPersonRole.reviewer:
+        msg = notifications.reviewer_assigned(db, pub, person, user)
+        if msg is not None:
+            background.add_task(send_email, *msg)
     return PubPersonOut.model_validate(pp)
 
 

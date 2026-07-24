@@ -23,9 +23,20 @@ class Settings(BaseSettings):
     orcid_client_secret: str = ""
     orcid_host: str = "orcid.org"
 
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_tls: str = "starttls"  # starttls | ssl | none
+    email_from: str = ""  # falls back to CONTACT_EMAIL
+
     @property
     def orcid_enabled(self) -> bool:
         return bool(self.orcid_client_id and self.orcid_client_secret)
+
+    @property
+    def email_enabled(self) -> bool:
+        return bool(self.smtp_host)
 
 
 @lru_cache
