@@ -491,6 +491,79 @@ def test_voting_requires_us_institution(admin):
     assert member.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
 
 
+def test_apply_voting_eligibility_enforced(admin):
+    us = admin.post("/api/v1/institutions", json={"name": "Apply US University"}).json()
+    abroad = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Apply Overseas Institute", "country": "France", "is_us": False},
+    ).json()
+    base = {
+        "given_name": "Vic",
+        "family_name": "Applicant",
+        "email": "vic.applicant@example.edu",
+        "is_voting": True,
+    }
+
+    # A student cannot register as a voting member…
+    r = admin.post(
+        "/api/v1/people/apply",
+        json={**base, "career_stage": "grad", "institution_id": us["id"]},
+    )
+    assert r.status_code == 422
+    # …nor can anyone without an institution to qualify through…
+    assert admin.post(
+        "/api/v1/people/apply", json={**base, "career_stage": "postdoc"}
+    ).status_code == 422
+    # …nor through a non-US institution.
+    assert admin.post(
+        "/api/v1/people/apply",
+        json={**base, "career_stage": "postdoc", "institution_id": abroad["id"]},
+    ).status_code == 422
+    # The rejected attempts created no person record.
+    assert all(
+        p["email"] != "vic.applicant@example.edu" for p in admin.get("/api/v1/people").json()
+    )
+
+    # An eligible registration goes through, and approval keeps the flag.
+    r = admin.post(
+        "/api/v1/people/apply",
+        json={**base, "career_stage": "postdoc", "institution_id": us["id"]},
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert r.json()["is_voting"] is True
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is True
+
+
+def test_activation_revalidates_voting(admin):
+    # A registration naming a new free-text institution is taken at its word…
+    r = admin.post(
+        "/api/v1/people/apply",
+        json={
+            "given_name": "Renata",
+            "family_name": "Recheck",
+            "email": "renata.recheck@example.edu",
+            "career_stage": "postdoc",
+            "institution_name": "Recheck Institute",
+            "is_voting": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+
+    # …but the office review finds it bogus and removes the affiliation
+    # before approving, so with no US institution left to qualify through the
+    # approval transition drops the requested voting flag instead of granting
+    # it unchecked.
+    affil_id = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]["id"]
+    assert admin.delete(f"/api/v1/people/{pid}/affiliations/{affil_id}").status_code == 204
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert person["status"] == "active"
+    assert person["is_voting"] is False
+
+
 def test_research_areas_normalized(admin):
     member, pid = _linked_member(
         admin, given="Ria", family="Areas", email="ria.areas@example.edu"

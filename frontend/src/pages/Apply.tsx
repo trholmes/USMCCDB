@@ -15,7 +15,7 @@ import { notifications } from '@mantine/notifications'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { CAREER_STAGES, joinList, RESEARCH_AREAS } from '../constants'
+import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
 
 export default function ApplyPage() {
   const [form, setForm] = useState({
@@ -40,8 +40,23 @@ export default function ApplyPage() {
   const [params] = useSearchParams()
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
+  // Charter voting rules the form can check itself (mirrors the backend
+  // validation on /people/apply): students are not eligible, and voting
+  // requires a US institution — so an institution must be given at all.
+  const votingError = !form.is_voting
+    ? null
+    : STUDENT_STAGES.includes(form.career_stage)
+      ? 'Graduate and undergraduate students are not eligible for voting membership — update your position or register as a non-voting member.'
+      : !form.institution_name.trim()
+        ? 'Voting membership requires a US institution — enter your primary institution above or register as a non-voting member.'
+        : null
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (votingError) {
+      notifications.show({ color: 'red', message: votingError })
+      return
+    }
     setBusy(true)
     try {
       await api.post('/people/apply', {
@@ -164,11 +179,17 @@ export default function ApplyPage() {
                 <Text size="sm" fw={700}>
                   Register as a voting member
                 </Text>
+                <Text size="xs" c="dimmed">
+                  Per the USMCC charter, voting members are PhD-holding physicists at a US
+                  institution who are actively contributing to the muon collider effort.
+                  Graduate and undergraduate students are not eligible.
+                </Text>
                 <Checkbox
-                  mt={4}
-                  label="PhD-holding physicist at a US institution, actively contributing to the muon collider effort"
+                  mt={6}
+                  label="I meet these requirements and register as a voting member"
                   checked={form.is_voting}
                   onChange={(e) => set('is_voting', e.currentTarget.checked)}
+                  error={votingError}
                 />
               </div>
               <MultiSelect
