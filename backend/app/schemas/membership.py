@@ -209,6 +209,14 @@ class PersonSummary(ORMModel):
     primary_institution: InstitutionRef | None = None
 
 
+class WorkingGroupRef(ORMModel):
+    """Small reference used for cross-links (collab-role rows, etc.)."""
+
+    id: int
+    name: str
+    slug: str
+
+
 class PersonOut(PersonSummary):
     professional_title: str | None = None
     department: str | None = None
@@ -218,6 +226,8 @@ class PersonOut(PersonSummary):
     status_changed_at: datetime | None
     affiliations: list[AffiliationOut] = []
     author_periods: list[AuthorPeriodOut] = []
+    # Working groups the person belongs to; filled by the router.
+    working_groups: list[WorkingGroupRef] = []
 
 
 class WorkingGroupCreate(BaseModel):
@@ -244,14 +254,6 @@ class WorkingGroupOut(ORMModel):
 
 class WGMemberAdd(BaseModel):
     person_id: int
-
-
-class WorkingGroupRef(ORMModel):
-    """Small reference used for cross-links (collab-role rows, etc.)."""
-
-    id: int
-    name: str
-    slug: str
 
 
 class CollabRoleCreate(BaseModel):

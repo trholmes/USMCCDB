@@ -1085,6 +1085,9 @@ def test_working_group_crud(admin):
     # A member may join a group themselves, but not enroll someone else.
     r = member.post(f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid})
     assert r.status_code == 201, r.text
+    # The membership shows up on the person detail (profile page display).
+    detail = member.get(f"/api/v1/people/{pid}").json()
+    assert [w["slug"] for w in detail["working_groups"]] == ["detector-sim"]
     assert member.post(
         f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid}
     ).status_code == 409
@@ -1118,6 +1121,7 @@ def test_working_group_crud(admin):
     assert member.delete(
         f"/api/v1/working-groups/{wg['id']}/members/{pid}"
     ).status_code == 204
+    assert member.get(f"/api/v1/people/{pid}").json()["working_groups"] == []
     # Leaving again is a 404 — no longer a member.
     assert member.delete(
         f"/api/v1/working-groups/{wg['id']}/members/{pid}"
