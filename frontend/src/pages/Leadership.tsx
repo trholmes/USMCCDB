@@ -96,11 +96,7 @@ export default function LeadershipPage() {
         Leadership
       </Title>
       <Text size="sm" c="dimmed" mb="md">
-        Collaboration roles per the USMCC organigram (
-        <Anchor href="https://www.muoncollider.us/contact/" target="_blank" size="sm">
-          muoncollider.us/contact
-        </Anchor>
-        ).{isOffice && ' Roles are managed from each person’s profile page.'}
+        Collaboration roles
       </Text>
 
       {current.length === 0 ? (
