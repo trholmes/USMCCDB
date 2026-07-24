@@ -718,6 +718,26 @@ def test_membership_notes_hidden_from_members(admin):
     assert all(e["note"] is None and e["actor_user_id"] is None for e in member_events)
 
 
+def test_person_notes_hidden_from_members(admin):
+    member, pid = _linked_member(
+        admin, given="Priya", family="Private", email="priya.private@example.edu"
+    )
+    r = admin.patch(
+        f"/api/v1/people/{pid}", json={"notes": "application dubious — verify employment"}
+    )
+    assert r.status_code == 200, r.text
+    # Office sees the note on the profile; everyone else — including the
+    # person themselves — gets it scrubbed (same policy as event notes).
+    assert admin.get(f"/api/v1/people/{pid}").json()["notes"] == (
+        "application dubious — verify employment"
+    )
+    assert member.get(f"/api/v1/people/{pid}").json()["notes"] is None
+    # The PersonOut returned by a self-edit must not leak it either.
+    r = member.patch(f"/api/v1/people/{pid}", json={"preferred_name": "Pri"})
+    assert r.status_code == 200, r.text
+    assert r.json()["notes"] is None
+
+
 def test_photo_upload_and_serve(admin, tmp_path_factory):
     os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
     from app.config import get_settings

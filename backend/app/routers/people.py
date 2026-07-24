@@ -371,7 +371,7 @@ def list_people(
 def get_person(
     person_id: int,
     db: Session = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> PersonOut:
     person = db.execute(
         select(Person)
@@ -385,6 +385,11 @@ def get_person(
     if person is None:
         raise HTTPException(404, "Person not found")
     out = PersonOut.model_validate(person)
+    if not is_office(user):
+        # Notes are office-internal annotations (same policy as membership-
+        # event notes in list_events) — hidden from members, including the
+        # person themselves.
+        out.notes = None
     out.working_groups = sorted(
         (WorkingGroupRef.model_validate(m.working_group) for m in person.wg_memberships),
         key=lambda w: w.name.lower(),
