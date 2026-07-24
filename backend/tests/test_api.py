@@ -1108,6 +1108,30 @@ def test_working_group_crud(admin):
     names = [p["family_name"] for p in admin.get(f"/api/v1/working-groups/{wg['id']}/members").json()]
     assert names == ["Groupless"]
 
+    # A member may not remove someone else, but may leave themselves.
+    assert admin.post(
+        f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": other["id"]}
+    ).status_code == 201
+    assert member.delete(
+        f"/api/v1/working-groups/{wg['id']}/members/{other['id']}"
+    ).status_code == 403
+    assert member.delete(
+        f"/api/v1/working-groups/{wg['id']}/members/{pid}"
+    ).status_code == 204
+    # Leaving again is a 404 — no longer a member.
+    assert member.delete(
+        f"/api/v1/working-groups/{wg['id']}/members/{pid}"
+    ).status_code == 404
+
+    # The office can remove anyone.
+    assert admin.delete(
+        f"/api/v1/working-groups/{wg['id']}/members/{other['id']}"
+    ).status_code == 204
+    listed = admin.get("/api/v1/working-groups").json()
+    assert {"slug": "detector-sim", "count": 0} in [
+        {"slug": w["slug"], "count": w["member_count"]} for w in listed
+    ]
+
 
 def test_member_stats(admin):
     # An active member with a research area and a US affiliation, so every
