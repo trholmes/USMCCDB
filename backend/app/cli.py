@@ -497,6 +497,22 @@ def _split_expertise(raw: str | None) -> tuple[str | None, str | None]:
     return ", ".join(areas) or None, ", ".join(topics) or None
 
 
+def _percent_time(raw) -> int | None:
+    """Map the form's percent-time answer to a single integer percent for
+    ``usmcc_percent``. Range answers ('0-10%', '25-49%', ...) become the
+    range midpoint; plain numbers are taken as-is; anything else ('Too
+    unsure to estimate here', blank) becomes None."""
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        pct = round(raw)
+        return pct if 0 <= pct <= 100 else None
+    bounds = [int(n) for n in re.findall(r"\d+", str(raw)) if int(n) <= 100][:2]
+    if not bounds:
+        return None
+    return round(sum(bounds) / len(bounds))
+
+
 def _get_or_create_institution(db, name: str) -> Institution:
     name = name.strip()
     inst = db.execute(select(Institution).where(Institution.name == name)).scalar_one_or_none()
@@ -523,18 +539,24 @@ def import_members_xlsx(
     """Import the USMCC membership registration spreadsheet (Google-form
     export: Timestamp, voting question, First/Middle/Last Name, Primary
     Affiliation, additional affiliations, Email, ORCID, Position, ...,
-    Area(s) of Expertise)."""
+    Area(s) of Expertise, percent of research time)."""
     import openpyxl
 
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     ws = wb[sheet]
     header = [str(c or "").strip() for c in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
 
-    def col(label_start: str) -> int:
+    def col_opt(label_start: str) -> int | None:
         for i, h in enumerate(header):
             if h.lower().startswith(label_start.lower()):
                 return i
-        raise typer.BadParameter(f"Column starting with '{label_start}' not found in sheet")
+        return None
+
+    def col(label_start: str) -> int:
+        i = col_opt(label_start)
+        if i is None:
+            raise typer.BadParameter(f"Column starting with '{label_start}' not found in sheet")
+        return i
 
     c_ts = col("Timestamp")
     c_voting = col("According to this definition")
@@ -544,6 +566,11 @@ def import_members_xlsx(
     # secondary institutions are out of scope for now (issue #3, first pass).
     c_email, c_orcid, c_position = col("Email"), col("ORCID"), col("Position")
     c_expertise = col("Area(s) of Expertise")
+    # The office-maintained "Simplified time" column is the cleaned-up version
+    # of the form's percent-of-research-time question; use it when present.
+    c_percent = col_opt("Simplified time")
+    if c_percent is None:
+        c_percent = col_opt("What percent of your research time")
 
     created = updated = skipped = 0
     with SessionLocal() as db:
@@ -562,6 +589,7 @@ def import_members_xlsx(
             orcid = _clean_orcid(row[c_orcid])
             stage = _career_stage(str(row[c_position] or ""))
             research_areas, expertise = _split_expertise(str(row[c_expertise] or ""))
+            percent = _percent_time(row[c_percent]) if c_percent is not None else None
             ts = row[c_ts]
             start = ts.date() if hasattr(ts, "date") else date.today()
 
@@ -582,6 +610,7 @@ def import_members_xlsx(
                     is_voting=voting,
                     research_areas=research_areas,
                     expertise=expertise,
+                    usmcc_percent=percent,
                 )
                 db.add(person)
                 db.flush()
@@ -593,6 +622,8 @@ def import_members_xlsx(
                 person.is_voting = voting
                 person.research_areas = research_areas or person.research_areas
                 person.expertise = expertise or person.expertise
+                if percent is not None:
+                    person.usmcc_percent = percent
                 updated += 1
             _ensure_activation_event(db, person, start)
 
