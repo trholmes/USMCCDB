@@ -31,6 +31,9 @@ export default function ApplyPage() {
     is_voting: false,
     research_areas: [] as string[],
   })
+  // "Too uncertain to estimate" for the research-time question: an answer is
+  // required, but this checkbox satisfies it (submits a null percentage).
+  const [percentUncertain, setPercentUncertain] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const navigate = useNavigate()
@@ -46,7 +49,8 @@ export default function ApplyPage() {
         middle_name: form.middle_name || null,
         preferred_name: form.preferred_name || null,
         orcid: form.orcid || null,
-        usmcc_percent: form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
+        usmcc_percent:
+          percentUncertain || form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
         institution_name: form.institution_name || null,
         research_areas: joinList(form.research_areas),
       })
@@ -135,14 +139,27 @@ export default function ApplyPage() {
                 value={form.institution_name}
                 onChange={(e) => set('institution_name', e.currentTarget.value)}
               />
-              <NumberInput
-                label="Research time on USMCC (%) (optional)"
-                description="Fraction of your research time devoted to the USMCC."
-                min={0}
-                max={100}
-                value={form.usmcc_percent}
-                onChange={(v) => set('usmcc_percent', v)}
-              />
+              <div>
+                <NumberInput
+                  label="Research time on USMCC (%)"
+                  description="Fraction of your research time devoted to the USMCC."
+                  min={0}
+                  max={100}
+                  required={!percentUncertain}
+                  disabled={percentUncertain}
+                  value={form.usmcc_percent}
+                  onChange={(v) => set('usmcc_percent', v)}
+                />
+                <Checkbox
+                  mt={6}
+                  label="Too uncertain to estimate"
+                  checked={percentUncertain}
+                  onChange={(e) => {
+                    setPercentUncertain(e.currentTarget.checked)
+                    if (e.currentTarget.checked) set('usmcc_percent', '')
+                  }}
+                />
+              </div>
               <div>
                 <Text size="sm" fw={700}>
                   Register as a voting member
