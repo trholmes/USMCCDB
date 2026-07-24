@@ -1168,7 +1168,11 @@ def test_member_stats(admin):
 
     # Everyone active in this run went through a recorded pending→active
     # transition, so the growth series accounts for at least all of them.
-    assert sum(row["count"] for row in stats["new_members_by_year"]) >= stats["active"]
+    assert sum(row["count"] for row in stats["new_members_by_month"]) >= stats["active"]
+    # The series is a contiguous, ordered run of YYYY-MM buckets.
+    months = [row["month"] for row in stats["new_members_by_month"]]
+    assert months == sorted(months)
+    assert all(len(m) == 7 and m[4] == "-" for m in months)
 
     # Voting members and US-based members are subsets of the active members
     # (non-voting is presented as active - voting, so the bound covers both).
@@ -1180,6 +1184,10 @@ def test_member_stats(admin):
     # at least the 50% reported above.
     assert 1 <= stats["usmcc_reporting"] <= stats["active"]
     assert 0 < stats["avg_usmcc_percent"] <= 100
+    # The percent-time buckets partition exactly the members reporting.
+    assert sum(row["count"] for row in stats["by_usmcc_percent"]) == stats["usmcc_reporting"]
+    by_pct = {row["label"]: row["count"] for row in stats["by_usmcc_percent"]}
+    assert by_pct.get("50-100%", 0) >= 1  # the 50% reported above
     assert stats["usmcc_fte"] >= 0.5
     # avg × reporting and summed FTE describe the same underlying values.
     expected_fte = stats["avg_usmcc_percent"] * stats["usmcc_reporting"] / 100
@@ -1196,7 +1204,7 @@ def test_member_stats(admin):
 def test_imported_members_counted_in_growth_stats(admin, tmp_path):
     # The CSV/XLSX importers create people directly as active, bypassing the
     # status-change endpoint; they must still record the transition-to-active
-    # event that the "new members per year" chart is built from (issue #41).
+    # event that the "new members per month" chart is built from (issue #41).
     from app.cli import import_members
 
     csv_file = tmp_path / "members.csv"
@@ -1215,10 +1223,10 @@ def test_imported_members_counted_in_growth_stats(admin, tmp_path):
         ("active", "2019-05-01")
     ]
 
-    # The growth series buckets the import under its start_date year.
+    # The growth series buckets the import under its start_date month.
     stats = admin.get("/api/v1/stats/members").json()
-    years = {row["year"]: row["count"] for row in stats["new_members_by_year"]}
-    assert years.get(2019, 0) >= 1
+    months = {row["month"]: row["count"] for row in stats["new_members_by_month"]}
+    assert months.get("2019-05", 0) >= 1
 
     # Re-importing (upsert) must not duplicate the activation event.
     import_members(csv_path=csv_file, dry_run=False)

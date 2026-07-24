@@ -157,16 +157,18 @@ function MembershipStats() {
 
         <Card withBorder h={320}>
           <Text size="sm" fw={600} mb={2}>
-            New members per year
+            Percentage of time on USMCC
           </Text>
           <Text size="xs" c="dimmed" mb="xs">
-            First activation of each membership
+            {stats.usmcc_reporting
+              ? `Self-reported effort of the ${stats.usmcc_reporting} active members reporting`
+              : 'No active member has reported effort'}
           </Text>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={stats.new_members_by_year} barCategoryGap="28%">
+            <BarChart data={stats.by_usmcc_percent} barCategoryGap="28%">
               <CartesianGrid vertical={false} stroke={GRID} />
               <XAxis
-                dataKey="year"
+                dataKey="label"
                 tickLine={false}
                 axisLine={{ stroke: GRID }}
                 tick={TICK}
@@ -181,7 +183,7 @@ function MembershipStats() {
               <Tooltip {...TOOLTIP} />
               <Bar
                 dataKey="count"
-                name="New members"
+                name="Members"
                 fill={BLUE}
                 radius={[4, 4, 0, 0]}
                 maxBarSize={28}
@@ -190,6 +192,42 @@ function MembershipStats() {
           </ResponsiveContainer>
         </Card>
       </SimpleGrid>
+
+      <Card withBorder h={320} mb="md">
+        <Text size="sm" fw={600} mb={2}>
+          New members per month
+        </Text>
+        <Text size="xs" c="dimmed" mb="xs">
+          First activation of each membership
+        </Text>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={stats.new_members_by_month} barCategoryGap="28%">
+            <CartesianGrid vertical={false} stroke={GRID} />
+            <XAxis
+              dataKey="month"
+              tickLine={false}
+              axisLine={{ stroke: GRID }}
+              tick={TICK}
+              minTickGap={24}
+            />
+            <YAxis
+              allowDecimals={false}
+              tickLine={false}
+              axisLine={false}
+              tick={TICK}
+              width={32}
+            />
+            <Tooltip {...TOOLTIP} />
+            <Bar
+              dataKey="count"
+              name="New members"
+              fill={BLUE}
+              radius={[4, 4, 0, 0]}
+              maxBarSize={28}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
 
       <SimpleGrid cols={{ base: 1, md: 2 }} maw={860}>
         <Card withBorder>

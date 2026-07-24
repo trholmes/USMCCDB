@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import Date, cast, extract, func, or_, select
+from sqlalchemy import Date, case, cast, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -37,7 +37,7 @@ from app.schemas.membership import (
     PersonUpdate,
     StatusChange,
     WorkingGroupRef,
-    YearCount,
+    MonthCount,
 )
 from app.config import get_settings
 from app.security import get_current_user, is_admin_contact_for, is_office, require_office
@@ -777,7 +777,25 @@ def member_stats(
         ).where(active)
     ).one()
 
-    # Growth: each person's first transition to active, bucketed by year
+    # Distribution of the reported percentages, bucketed to match the ranges
+    # the registration form offers ('0-10%', '10-24%', '25-49%', '50-100%');
+    # the importer stores range midpoints, so each answer lands in its bucket.
+    pct_buckets = [("<10%", 10), ("10-24%", 25), ("25-49%", 50), ("50-100%", 101)]
+    bucket = case(
+        *[(Person.usmcc_percent < upper, label) for label, upper in pct_buckets]
+    ).label("bucket")
+    bucket_counts = dict(
+        db.execute(
+            select(bucket, func.count())
+            .where(active, Person.usmcc_percent.is_not(None))
+            .group_by(bucket)
+        ).all()
+    )
+    by_usmcc_percent = [
+        LabelCount(label=label, count=bucket_counts.get(label, 0)) for label, _ in pct_buckets
+    ]
+
+    # Growth: each person's first transition to active, bucketed by month
     # (effective_date as entered, falling back to the recorded timestamp).
     first_active = (
         select(
@@ -792,8 +810,21 @@ def member_stats(
         .group_by(MembershipEvent.person_id)
         .subquery()
     )
-    year = extract("year", first_active.c.joined).label("year")
-    year_rows = db.execute(select(year, func.count()).group_by(year).order_by(year)).all()
+    month = func.to_char(first_active.c.joined, "YYYY-MM").label("month")
+    month_counts = dict(
+        db.execute(select(month, func.count()).group_by(month).order_by(month)).all()
+    )
+    # Fill the gaps so the chart gets a continuous month axis.
+    new_members_by_month = []
+    if month_counts:
+        y, m = map(int, min(month_counts).split("-"))
+        last = max(month_counts)
+        while True:
+            key = f"{y:04d}-{m:02d}"
+            new_members_by_month.append(MonthCount(month=key, count=month_counts.get(key, 0)))
+            if key == last:
+                break
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
 
     return MemberStats(
         total_people=sum(status_counts.values()),
@@ -812,8 +843,9 @@ def member_stats(
             if s in stage_counts
         ],
         by_research_area=by_research_area,
-        new_members_by_year=[YearCount(year=int(y), count=n) for y, n in year_rows],
+        new_members_by_month=new_members_by_month,
         usmcc_reporting=usmcc_reporting or 0,
         avg_usmcc_percent=float(usmcc_avg) if usmcc_avg is not None else None,
+        by_usmcc_percent=by_usmcc_percent,
         usmcc_fte=(usmcc_sum or 0) / 100,
     )
