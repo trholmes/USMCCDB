@@ -85,7 +85,7 @@ def _ensure_activation_event(db, person: Person, effective: date) -> None:
     """Record the transition to active for an imported member, if no such
     event exists yet. Imports create people directly as active, bypassing the
     status-change endpoint that normally writes the audit trail — without this
-    the "new members per year" statistics never see imported members."""
+    the "new members per month" statistics never see imported members."""
     if person.status != MemberStatus.active:
         return
     has_event = db.execute(

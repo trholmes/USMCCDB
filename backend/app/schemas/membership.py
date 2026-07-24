@@ -319,8 +319,8 @@ class LabelCount(BaseModel):
     count: int
 
 
-class YearCount(BaseModel):
-    year: int
+class MonthCount(BaseModel):
+    month: str  # "YYYY-MM"
     count: int
 
 
@@ -335,9 +335,14 @@ class MemberStats(BaseModel):
     # Active members per research area; the field is multi-valued, so these
     # counts can add up to more than the active total.
     by_research_area: list[LabelCount]
-    new_members_by_year: list[YearCount]  # first activation per person
+    # First activation per person, bucketed by calendar month; months with no
+    # activations between the first and last are included with count 0.
+    new_members_by_month: list[MonthCount]
     # Effort on the USMCC, from the self-reported usmcc_percent of active
     # members. The field is optional, so aggregates cover only those reporting.
     usmcc_reporting: int  # active members with a reported percentage
     avg_usmcc_percent: float | None  # mean percentage over those reporting
+    # Distribution of the reported percentages, bucketed to match the ranges
+    # offered on the registration form; every bucket is present (count 0 if empty).
+    by_usmcc_percent: list[LabelCount]
     usmcc_fte: float  # summed reported effort, in full-time equivalents
