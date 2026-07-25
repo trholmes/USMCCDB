@@ -63,7 +63,14 @@ export default function App() {
         <Group h="100%" px="md" justify="space-between">
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <Title order={4}>US Muon Collider Collaboration</Title>
+            <Title
+              order={4}
+              component={Link}
+              to="/"
+              style={{ color: 'inherit', textDecoration: 'none' }}
+            >
+              US Muon Collider Collaboration
+            </Title>
             <Badge variant="light" color="orange" size="sm">
               alpha
             </Badge>
@@ -82,10 +89,12 @@ export default function App() {
                 title="View / edit your profile"
               >
                 {me.display_name || me.user.username || me.user.orcid}
+                {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
               </Text>
             ) : (
               <Text size="sm" c="dimmed">
                 {me.display_name || me.user.username || me.user.orcid}
+                {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
               </Text>
             )}
             <Text

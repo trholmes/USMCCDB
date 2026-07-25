@@ -1,4 +1,4 @@
-import { Badge, Group, Select, Table, Text, TextInput, Title } from '@mantine/core'
+import { Anchor, Badge, Group, Select, Table, Text, TextInput, Title } from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
@@ -180,9 +180,21 @@ export default function DirectoryPage() {
                 {p.is_voting ? <Badge variant="light">voting</Badge> : null}
               </Table.Td>
               <Table.Td>
-                <Text size="sm" c="dimmed">
-                  {p.orcid || '—'}
-                </Text>
+                {p.orcid ? (
+                  <Anchor
+                    href={`https://orcid.org/${p.orcid}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    size="sm"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {p.orcid}
+                  </Anchor>
+                ) : (
+                  <Text size="sm" c="dimmed">
+                    —
+                  </Text>
+                )}
               </Table.Td>
               {isOffice && (
                 <Table.Td>

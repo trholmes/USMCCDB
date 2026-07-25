@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -407,9 +408,14 @@ export default function PersonPage() {
               {person.career_stage}
             </Text>
             {person.orcid && (
-              <Text size="sm" c="dimmed">
+              <Anchor
+                href={`https://orcid.org/${person.orcid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                size="sm"
+              >
                 ORCID: {person.orcid}
-              </Text>
+              </Anchor>
             )}
           </Group>
         </div>

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { CollabRole } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import { COLLAB_ROLES, collabRoleLabel } from '../constants'
 import { today } from '../dates'
@@ -18,20 +19,29 @@ const byOrgChart = (a: CollabRole, b: CollabRole) =>
   (a.detail ?? '').localeCompare(b.detail ?? '') ||
   (a.person?.family_name ?? '').localeCompare(b.person?.family_name ?? '')
 
+const ACCESSORS: Accessors<CollabRole> = {
+  role: (r) => roleOrder(r),
+  person: (r) => (r.person ? `${r.person.family_name} ${r.person.given_name}` : null),
+  scope: (r) => r.working_group?.name ?? r.institution?.name,
+  from: (r) => r.start_date,
+  to: (r) => r.end_date,
+}
+
 function RoleRows({ roles, past }: { roles: CollabRole[]; past?: boolean }) {
+  const { sorted, sort, toggle } = useSortable(roles, ACCESSORS)
   return (
     <Table maw={860}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>Role</Table.Th>
-          <Table.Th>Person</Table.Th>
-          <Table.Th>Scope</Table.Th>
-          <Table.Th>{past ? 'From' : 'Since'}</Table.Th>
-          {past && <Table.Th>To</Table.Th>}
+          <SortableTh label="Role" k="role" sort={sort} toggle={toggle} />
+          <SortableTh label="Person" k="person" sort={sort} toggle={toggle} />
+          <SortableTh label="Scope" k="scope" sort={sort} toggle={toggle} />
+          <SortableTh label={past ? 'From' : 'Since'} k="from" sort={sort} toggle={toggle} />
+          <SortableTh label={past ? 'To' : 'Until'} k="to" sort={sort} toggle={toggle} />
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {roles.map((r) => (
+        {sorted.map((r) => (
           <Table.Tr key={r.id}>
             <Table.Td>
               <Text size="sm" fw={600}>
@@ -52,7 +62,7 @@ function RoleRows({ roles, past }: { roles: CollabRole[]; past?: boolean }) {
             </Table.Td>
             <Table.Td>{r.working_group?.name ?? r.institution?.name ?? '—'}</Table.Td>
             <Table.Td>{r.start_date}</Table.Td>
-            {past && <Table.Td>{r.end_date}</Table.Td>}
+            <Table.Td>{r.end_date ?? '—'}</Table.Td>
           </Table.Tr>
         ))}
       </Table.Tbody>

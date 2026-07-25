@@ -62,12 +62,23 @@ def _is_editor(db: Session, user: User, pub_id: int) -> bool:
     return row is not None
 
 
+# Human-readable type codes for short_code generation; the auto-derived
+# 4-char truncation produced awkward codes like "PAPE" for papers.
+_SHORT_CODE_TYPE = {
+    "paper": "PUB",
+    "proceedings": "PROC",
+    "note": "NOTE",
+    "white_paper": "WHIT",
+}
+
+
 def _next_short_code(db: Session, pub_type: str) -> str:
     # One past the highest existing suffix, not a row count: a count repeats
     # numbers as soon as the sequence has gaps (deleted rows, concurrent
     # creates), colliding with the unique constraint on short_code.
     year = datetime.now(UTC).year
-    prefix = f"USMCC-{pub_type.upper().replace('_', '')[:4]}-{year}-"
+    type_code = _SHORT_CODE_TYPE.get(pub_type, pub_type.upper().replace("_", "")[:4])
+    prefix = f"USMCC-{type_code}-{year}-"
     codes = db.execute(
         select(Publication.short_code).where(Publication.short_code.like(f"{prefix}%"))
     ).scalars()
