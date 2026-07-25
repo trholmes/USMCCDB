@@ -58,10 +58,9 @@ def _editor_emails(db, pub: Publication, exclude_person_id: int | None = None) -
     return [e for e in db.execute(stmt).scalars() if e]
 
 
-def registration_submitted(db, person: Person) -> Message | None:
-    """Ask everyone who can approve a new registration to review it: office
-    and admin accounts, the Administrative Institutional Contacts of the
-    registrant's institution, and the collaboration contact address."""
+def _office_recipients(db) -> set[str]:
+    """The collaboration contact address plus every active office/admin
+    account with an email on file."""
     recipients: set[str] = set()
     settings = get_settings()
     if settings.contact_email:
@@ -76,6 +75,15 @@ def registration_submitted(db, person: Person) -> Message | None:
             )
         ).scalars()
     )
+    return recipients
+
+
+def registration_submitted(db, person: Person) -> Message | None:
+    """Ask everyone who can approve a new registration to review it: office
+    and admin accounts, the Administrative Institutional Contacts of the
+    registrant's institution, and the collaboration contact address."""
+    settings = get_settings()
+    recipients = _office_recipients(db)
 
     affil = db.execute(
         select(Affiliation).where(
@@ -125,6 +133,39 @@ def registration_submitted(db, person: Person) -> Message | None:
         "approves it.",
     ]
     return (to, f"New membership registration: {person.display_name}", "\n".join(lines))
+
+
+def registration_duplicate(
+    db, existing: Person, submitted_name: str, submitted_email: str, submitted_orcid: str | None
+) -> Message | None:
+    """Tell the office a public registration matched an existing member
+    record. The submitter got the same neutral acknowledgement as everyone
+    else — confirming the match to them would let anyone probe which emails
+    and ORCID iDs belong to collaboration members (issue #62) — so the
+    office has to follow up by hand."""
+    to = [addr for addr in _office_recipients(db) if addr]
+    if not to:
+        return None
+
+    lines = [
+        f"A membership registration was submitted for {submitted_name} "
+        "but matched an existing record, so no new record was created.",
+        "",
+        f"Submitted email: {submitted_email}",
+    ]
+    if submitted_orcid:
+        lines.append(f"Submitted ORCID iD: {submitted_orcid}")
+    lines.append(f"Existing record: {existing.display_name}")
+    site = get_settings().site_url
+    if site:
+        lines.append(f"{site.rstrip('/')}/people/{existing.id}")
+    lines += [
+        "",
+        "The submitter was told the registration is pending review and was "
+        "NOT told about the existing record. If this is the same person, "
+        "please contact them directly.",
+    ]
+    return (to, f"Duplicate membership registration: {submitted_name}", "\n".join(lines))
 
 
 def review_requested(db, pub: Publication, actor: User) -> Message | None:

@@ -26,6 +26,10 @@ if TEST_DB:
     # Enable the ORCID endpoints; tests monkeypatch the code exchange.
     os.environ["ORCID_CLIENT_ID"] = "test-client"
     os.environ["ORCID_CLIENT_SECRET"] = "test-secret"
+    # Every request here comes from the same TestClient address; the
+    # dedicated rate-limit tests dial these back down on the live limiters.
+    os.environ["LOGIN_RATE_LIMIT"] = "100000"
+    os.environ["REGISTRATION_RATE_LIMIT"] = "100000"
 
     from fastapi.testclient import TestClient
 
@@ -1851,20 +1855,35 @@ def test_import_members_xlsx_voting_eligibility(admin, tmp_path):
 
 
 def _orcid_signin(monkeypatch, orcid_id, name):
-    """Drive the OAuth callback with a faked code exchange; returns a fresh
-    client (carrying whatever cookie the callback set) and the redirect."""
+    """Drive the full OAuth round trip with a faked code exchange; returns a
+    fresh client (carrying whatever cookie the callback set) and the
+    redirect. Starting at /orcid/login matters: the callback only accepts a
+    state whose nonce matches the cookie minted there (issue #62)."""
+    from urllib.parse import parse_qs, urlparse
+
     from app.routers import auth as auth_router
 
     async def fake_exchange(code, redirect_uri):
         return {"orcid": orcid_id, "name": name}
 
     monkeypatch.setattr(auth_router.orcid_svc, "exchange_code", fake_exchange)
-    state = auth_router._state_serializer().dumps({"next": "/"})
     c = TestClient(app)
+    r = c.get("/api/v1/auth/orcid/login", follow_redirects=False)
+    assert r.status_code == 307, r.text
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
     r = c.get(
         f"/api/v1/auth/orcid/callback?code=fake&state={state}", follow_redirects=False
     )
     return c, r
+
+
+def _no_session_cookie(r) -> bool:
+    """True when the response granted no login session. (The callback always
+    sends one Set-Cookie clearing its single-use state cookie, so 'no
+    set-cookie at all' is not the right check.)"""
+    return not any(
+        c.startswith("usmccdb_session=") for c in r.headers.get_list("set-cookie")
+    )
 
 
 def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
@@ -1906,9 +1925,13 @@ def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["id"] == pid
-    assert r.json()["orcid"] == "0000-0002-1825-0097"
-    assert r.json()["status"] == "pending"
+    # Non-office registration answers with the neutral acknowledgement only
+    # (issue #62); the record itself shows the completed registration.
+    assert set(r.json()) == {"detail"}
+    completed = admin.get(f"/api/v1/people/{pid}").json()
+    assert completed["email"] == "josiah.carberry@example.edu"
+    assert completed["orcid"] == "0000-0002-1825-0097"
+    assert completed["status"] == "pending"
     events = admin.get(f"/api/v1/people/{pid}/events").json()
     assert [e["to_status"] for e in events] == ["pending"]
 
@@ -1922,7 +1945,7 @@ def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
     assert stranger.get("/api/v1/people").status_code == 403
     parked, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
     assert r.headers["location"] == "/login?error=membership_pending"
-    assert "set-cookie" not in r.headers
+    assert _no_session_cookie(r)
 
     # Approval opens the door: the existing session works immediately and a
     # new ORCID sign-in lands on the home page.
@@ -1948,14 +1971,14 @@ def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
         json={"given_name": "Rae", "family_name": "Jected", "email": "rae.jected@example.edu"},
     )
     assert r.status_code == 201, r.text
-    pid = r.json()["id"]
+    pid = admin.get("/api/v1/people", params={"q": "rae.jected@example.edu"}).json()[0]["id"]
     admin.post(f"/api/v1/people/{pid}/status", json={"status": "rejected"})
 
     # The rejection cuts off the existing session and future sign-ins alike.
     assert stranger.get("/api/v1/people").status_code == 403
     _, r = _orcid_signin(monkeypatch, "0000-0003-1111-2222", "Rae Jected")
     assert r.headers["location"] == "/login?error=membership_rejected"
-    assert "set-cookie" not in r.headers
+    assert _no_session_cookie(r)
 
 
 def test_orcid_links_existing_approved_member(admin, monkeypatch):
@@ -2023,7 +2046,7 @@ def test_admin_contact_approves_pending_registration(admin, monkeypatch):
         },
     )
     assert r.status_code == 201, r.text
-    pid = r.json()["id"]
+    pid = admin.get("/api/v1/people", params={"q": "new.comer@example.edu"}).json()[0]["id"]
 
     # The approval request went to the office and the institution's contact.
     assert len(sent) == 1
@@ -2050,6 +2073,201 @@ def test_admin_contact_approves_pending_registration(admin, monkeypatch):
         },
     )
     assert r.status_code == 201, r.text
+    els_id = admin.get("/api/v1/people", params={"q": "els.ewhere@example.edu"}).json()[0]["id"]
     assert contact.post(
-        f"/api/v1/people/{r.json()['id']}/status", json={"status": "rejected"}
+        f"/api/v1/people/{els_id}/status", json={"status": "rejected"}
     ).status_code == 403
+
+
+# --- Auth hardening (issue #62) -------------------------------------------------
+
+
+def test_login_gives_one_generic_failure_answer(admin):
+    """Unknown username, wrong password, and disabled account must be
+    indistinguishable — a distinct answer confirms the account exists."""
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "dis.abled", "password": "pw-123456", "role": "member"},
+    )
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    assert admin.patch(f"/api/v1/auth/users/{uid}", json={"is_active": False}).status_code == 200
+
+    c = TestClient(app)
+    unknown = c.post(
+        "/api/v1/auth/login", json={"username": "no.such.user", "password": "whatever"}
+    )
+    wrong = c.post(
+        "/api/v1/auth/login", json={"username": "dis.abled", "password": "not-the-pw"}
+    )
+    disabled = c.post(
+        "/api/v1/auth/login", json={"username": "dis.abled", "password": "pw-123456"}
+    )
+    assert unknown.status_code == wrong.status_code == disabled.status_code == 401
+    assert unknown.json() == wrong.json() == disabled.json()
+
+
+def test_orcid_callback_rejects_state_from_another_session(admin, monkeypatch):
+    """A signed state minted in one browser must not sign in another browser:
+    an attacker could otherwise hand their own callback URL to a victim and
+    silently log the victim into the attacker's account (login CSRF)."""
+    from urllib.parse import parse_qs, urlparse
+
+    from app.routers import auth as auth_router
+
+    async def fake_exchange(code, redirect_uri):
+        return {"orcid": "0000-0002-0000-0001", "name": "Eve Attacker"}
+
+    monkeypatch.setattr(auth_router.orcid_svc, "exchange_code", fake_exchange)
+
+    # The attacker starts a sign-in and captures their callback URL…
+    attacker = TestClient(app)
+    r = attacker.get("/api/v1/auth/orcid/login", follow_redirects=False)
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+
+    # …but the victim's browser carries no matching state cookie.
+    victim = TestClient(app)
+    r = victim.get(
+        f"/api/v1/auth/orcid/callback?code=fake&state={state}", follow_redirects=False
+    )
+    assert r.headers["location"] == "/login?error=orcid_state"
+    assert _no_session_cookie(r)
+
+    # A validly-signed state without a nonce (the pre-fix format) fails too.
+    legacy_state = auth_router._state_serializer().dumps({"next": "/"})
+    r = victim.get(
+        f"/api/v1/auth/orcid/callback?code=fake&state={legacy_state}",
+        follow_redirects=False,
+    )
+    assert r.headers["location"] == "/login?error=orcid_state"
+    assert _no_session_cookie(r)
+
+
+def test_registration_does_not_reveal_existing_records(admin, monkeypatch):
+    """Anonymous registration answers identically whether or not the email /
+    ORCID iD already belongs to a member; the office is told about the
+    duplicate instead. Office callers keep the informative 409."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+
+    existing = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Dana",
+            "family_name": "Duplicated",
+            "email": "dana.duplicated@example.edu",
+            "orcid": "0000-0002-4444-5555",
+        },
+    )
+    assert existing.status_code == 201, existing.text
+
+    anon = TestClient(app)
+    sent.clear()
+
+    # Same email as the existing member…
+    dup = anon.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Pat",
+            "family_name": "Probe",
+            "email": "dana.duplicated@example.edu",
+        },
+    )
+    # …same ORCID iD…
+    dup_orcid = anon.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Pat",
+            "family_name": "Probe",
+            "email": "pat.probe.orcid@example.edu",
+            "orcid": "0000-0002-4444-5555",
+        },
+    )
+    # …and a genuinely new person all get the exact same answer.
+    fresh = anon.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Frida",
+            "family_name": "Fresh",
+            "email": "frida.fresh@example.edu",
+        },
+    )
+    assert dup.status_code == dup_orcid.status_code == fresh.status_code == 201
+    assert dup.json() == dup_orcid.json() == fresh.json()
+    assert set(fresh.json()) == {"detail"}
+
+    # The probes created nothing; the real registration went through.
+    assert admin.get("/api/v1/people", params={"q": "Probe"}).json() == []
+    assert len(admin.get("/api/v1/people", params={"q": "dana.duplicated"}).json()) == 1
+    assert len(admin.get("/api/v1/people", params={"q": "frida.fresh"}).json()) == 1
+
+    # The office heard about both duplicate attempts (and the fresh one).
+    subjects = [m["Subject"] for m in sent]
+    assert subjects.count("Duplicate membership registration: Pat Probe") == 2
+    assert "New membership registration: Frida Fresh" in subjects
+    dup_mail = next(m for m in sent if m["Subject"].startswith("Duplicate"))
+    assert "office@example.edu" in dup_mail["To"]
+    assert "Dana Duplicated" in dup_mail.get_content()
+
+    # Office/admin callers still get the informative 409.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Dana",
+            "family_name": "Duplicated",
+            "email": "dana.duplicated@example.edu",
+        },
+    )
+    assert r.status_code == 409
+    assert "already exists" in r.json()["detail"]
+
+
+def test_login_rate_limited_per_ip(admin, monkeypatch):
+    from app import ratelimit
+
+    limiter = ratelimit.login_limiter()
+    monkeypatch.setattr(limiter, "limit", 3)
+    limiter.reset()
+    try:
+        c = TestClient(app)
+        bad = {"username": "no.such.user", "password": "guess"}
+        for _ in range(3):
+            assert c.post("/api/v1/auth/login", json=bad).status_code == 401
+        r = c.post("/api/v1/auth/login", json=bad)
+        assert r.status_code == 429
+        assert "retry-after" in r.headers
+        # Existing sessions are untouched — only the login endpoint is gated.
+        assert admin.get("/api/v1/auth/me").status_code == 200
+    finally:
+        limiter.reset()
+
+
+def test_registration_rate_limited_for_non_office(admin, monkeypatch):
+    import app.services.email as email_mod
+    from app import ratelimit
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+    limiter = ratelimit.registration_limiter()
+    monkeypatch.setattr(limiter, "limit", 2)
+    limiter.reset()
+    try:
+        anon = TestClient(app)
+
+        def payload(i):
+            return {
+                "given_name": "Rate",
+                "family_name": f"Limited{i}",
+                "email": f"rate.limited{i}@example.edu",
+            }
+
+        assert anon.post("/api/v1/people/register", json=payload(1)).status_code == 201
+        assert anon.post("/api/v1/people/register", json=payload(2)).status_code == 201
+        r = anon.post("/api/v1/people/register", json=payload(3))
+        assert r.status_code == 429
+        assert "retry-after" in r.headers
+        # Signed-in office accounts are not rate limited.
+        assert admin.post("/api/v1/people/register", json=payload(4)).status_code == 201
+    finally:
+        limiter.reset()

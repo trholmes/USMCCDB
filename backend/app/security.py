@@ -1,4 +1,6 @@
+import secrets
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 
 import jwt
 from fastapi import Depends, HTTPException, Request, Response, status
@@ -24,6 +26,25 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
+@lru_cache
+def _phantom_hash() -> str:
+    """A throwaway bcrypt hash used to burn the same work on unknown
+    usernames as on real ones (login timing must not reveal whether an
+    account exists — issue #62). Never matches: verification runs against
+    a random secret that is not the submitted password."""
+    return pwd_context.hash(secrets.token_hex(16))
+
+
+def check_login_password(user: User | None, password: str) -> bool:
+    """Constant-work password check for login: unknown usernames and
+    ORCID-only accounts (no local password) still pay for one bcrypt
+    verification before being turned away."""
+    if user is not None and user.password_hash:
+        return verify_password(password, user.password_hash)
+    verify_password(password, _phantom_hash())
+    return False
+
+
 def create_access_token(user: User) -> str:
     settings = get_settings()
     payload = {
@@ -36,21 +57,25 @@ def create_access_token(user: User) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
-def set_session_cookie(response: Response, request: Request, token: str) -> None:
+def cookie_secure(request: Request) -> bool:
     settings = get_settings()
     if settings.cookie_secure == "true":
-        secure = True
-    elif settings.cookie_secure == "false":
-        secure = False
-    else:  # auto: honor X-Forwarded-Proto set by caddy/nginx
-        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        secure = proto == "https"
+        return True
+    if settings.cookie_secure == "false":
+        return False
+    # auto: honor X-Forwarded-Proto set by caddy/nginx
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return proto == "https"
+
+
+def set_session_cookie(response: Response, request: Request, token: str) -> None:
+    settings = get_settings()
     response.set_cookie(
         COOKIE_NAME,
         token,
         max_age=settings.access_token_hours * 3600,
         httponly=True,
-        secure=secure,
+        secure=cookie_secure(request),
         samesite="lax",
         path="/",
     )
