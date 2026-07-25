@@ -1,4 +1,16 @@
-import { AppShell, Badge, Burger, Group, Loader, NavLink, Text, Title } from '@mantine/core'
+import {
+  ActionIcon,
+  AppShell,
+  Badge,
+  Burger,
+  Group,
+  Loader,
+  NavLink,
+  Text,
+  Title,
+  useComputedColorScheme,
+  useMantineColorScheme,
+} from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useSession } from './auth/SessionContext'
@@ -27,6 +39,22 @@ const NAV = [
   { to: '/publications', label: 'Publications' },
   { to: '/stats', label: 'Statistics' },
 ]
+
+function ColorSchemeToggle() {
+  const { setColorScheme } = useMantineColorScheme()
+  const computed = useComputedColorScheme('light')
+  return (
+    <ActionIcon
+      variant="subtle"
+      color="gray"
+      aria-label={computed === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={computed === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      onClick={() => setColorScheme(computed === 'dark' ? 'light' : 'dark')}
+    >
+      {computed === 'dark' ? '☀' : '☾'}
+    </ActionIcon>
+  )
+}
 
 export default function App() {
   const { me, loading, logout, isAdmin } = useSession()
@@ -63,14 +91,9 @@ export default function App() {
         <Group h="100%" px="md" justify="space-between">
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <Title
-              order={4}
-              component={Link}
-              to="/"
-              style={{ color: 'inherit', textDecoration: 'none' }}
-            >
-              US Muon Collider Collaboration
-            </Title>
+            <Link to="/" style={{ color: 'inherit', textDecoration: 'none' }}>
+              <Title order={4}>US Muon Collider Collaboration</Title>
+            </Link>
             <Badge variant="light" color="orange" size="sm">
               alpha
             </Badge>
@@ -79,6 +102,7 @@ export default function App() {
             </Text>
           </Group>
           <Group gap="xs">
+            <ColorSchemeToggle />
             {me.person_id ? (
               <Text
                 component={Link}

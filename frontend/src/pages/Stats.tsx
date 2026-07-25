@@ -1,4 +1,14 @@
-import { Card, Group, SegmentedControl, SimpleGrid, Table, Tabs, Text, Title } from '@mantine/core'
+import {
+  Card,
+  Group,
+  SegmentedControl,
+  SimpleGrid,
+  Table,
+  Tabs,
+  Text,
+  Title,
+  useComputedColorScheme,
+} from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -16,16 +26,37 @@ import type { MemberStats, TalkStatRow } from '../api/types'
 import { careerStageLabel } from '../constants'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 
-// Shared chart chrome (matches the talks chart below): recessive grid/axes,
-// text in ink tokens, series color only on the marks.
-const GRID = '#e7e6e2'
-const TICK = { fill: '#52514e', fontSize: 12 }
-const TOOLTIP = {
-  cursor: { fill: 'rgba(42, 120, 214, 0.06)' },
-  contentStyle: { borderRadius: 8, border: '1px solid #e7e6e2', fontSize: 13 },
-}
 // Categorical slot 1 (blue) — the single-series hue used across this page.
 const BLUE = '#2a78d6'
+
+// Growth-chart research-area series (labels shortened from RESEARCH_AREAS).
+const GROWTH_AREAS = [
+  { area: 'Experimental Particle Physics', key: 'experimental', label: 'Experimental', color: BLUE },
+  { area: 'Theoretical Particle Physics', key: 'theoretical', label: 'Theoretical', color: '#008300' },
+  { area: 'Accelerator Physics', key: 'accelerator', label: 'Accelerator', color: '#b45309' },
+  { area: 'Other', key: 'other', label: 'Other', color: '#8a8781' },
+]
+
+// Shared chart chrome (grid, ticks, tooltip): recessive grid/axes, text in ink
+// tokens, series color only on the marks — resolved against the active color
+// scheme so axis labels stay readable in dark mode.
+function useChartChrome() {
+  const dark = useComputedColorScheme('light') === 'dark'
+  return {
+    grid: dark ? '#464646' : '#e7e6e2',
+    tick: { fill: dark ? '#b5b3af' : '#52514e', fontSize: 12 },
+    tooltip: {
+      cursor: { fill: dark ? 'rgba(103, 162, 226, 0.12)' : 'rgba(42, 120, 214, 0.06)' },
+      contentStyle: {
+        borderRadius: 8,
+        border: `1px solid ${dark ? '#464646' : '#e7e6e2'}`,
+        backgroundColor: dark ? '#2e2e2e' : '#ffffff',
+        color: dark ? '#e4e2de' : '#1f1e1c',
+        fontSize: 13,
+      },
+    },
+  }
+}
 
 export default function StatsPage() {
   const [tab, setTab] = useState<string | null>('members')
@@ -67,9 +98,39 @@ function StatTile({ label, value, sub }: { label: string; value: number | string
 
 function MembershipStats() {
   const [stats, setStats] = useState<MemberStats | null>(null)
+  const [growthBucket, setGrowthBucket] = useState('quarter')
+  const [growthSplit, setGrowthSplit] = useState('total')
+  const { grid, tick, tooltip } = useChartChrome()
   useEffect(() => {
     api.get<MemberStats>('/stats/members').then(setStats).catch(() => setStats(null))
   }, [])
+
+  // Re-bucket the monthly growth series into quarters or half-years, carrying
+  // the per-area breakdown along.
+  const growth = useMemo(() => {
+    if (!stats) return []
+    const label = (m: string) => {
+      const [y, mo] = m.split('-').map(Number)
+      if (growthBucket === 'month') return m
+      if (growthBucket === 'quarter') return `${y} Q${Math.floor((mo - 1) / 3) + 1}`
+      return `${y} H${mo <= 6 ? 1 : 2}`
+    }
+    const out: Record<string, string | number>[] = []
+    for (const row of stats.new_members_by_month) {
+      const period = label(row.month)
+      let last = out[out.length - 1]
+      if (!last || last.period !== period) {
+        last = { period, count: 0 }
+        for (const a of GROWTH_AREAS) last[a.key] = 0
+        out.push(last)
+      }
+      last.count = (last.count as number) + row.count
+      for (const a of GROWTH_AREAS)
+        last[a.key] = (last[a.key] as number) + (row.areas?.[a.area] ?? 0)
+    }
+    return out
+  }, [stats, growthBucket])
+
   if (!stats) return null
 
   const pctActive = (n: number) =>
@@ -126,13 +187,13 @@ function MembershipStats() {
           </Text>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={stages} layout="vertical" barCategoryGap="28%">
-              <CartesianGrid horizontal={false} stroke={GRID} />
+              <CartesianGrid horizontal={false} stroke={grid} />
               <XAxis
                 type="number"
                 allowDecimals={false}
                 tickLine={false}
-                axisLine={{ stroke: GRID }}
-                tick={TICK}
+                axisLine={{ stroke: grid }}
+                tick={tick}
                 height={24}
               />
               <YAxis
@@ -140,10 +201,10 @@ function MembershipStats() {
                 dataKey="label"
                 tickLine={false}
                 axisLine={false}
-                tick={TICK}
+                tick={tick}
                 width={150}
               />
-              <Tooltip {...TOOLTIP} />
+              <Tooltip {...tooltip} />
               <Bar
                 dataKey="count"
                 name="Active members"
@@ -166,21 +227,21 @@ function MembershipStats() {
           </Text>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={stats.by_usmcc_percent} barCategoryGap="28%">
-              <CartesianGrid vertical={false} stroke={GRID} />
+              <CartesianGrid vertical={false} stroke={grid} />
               <XAxis
                 dataKey="label"
                 tickLine={false}
-                axisLine={{ stroke: GRID }}
-                tick={TICK}
+                axisLine={{ stroke: grid }}
+                tick={tick}
               />
               <YAxis
                 allowDecimals={false}
                 tickLine={false}
                 axisLine={false}
-                tick={TICK}
+                tick={tick}
                 width={32}
               />
-              <Tooltip {...TOOLTIP} />
+              <Tooltip {...tooltip} />
               <Bar
                 dataKey="count"
                 name="Members"
@@ -193,38 +254,81 @@ function MembershipStats() {
         </Card>
       </SimpleGrid>
 
-      <Card withBorder h={320} mb="md" maw={860}>
-        <Text size="sm" fw={600} mb={2}>
-          New members per month
-        </Text>
-        <Text size="xs" c="dimmed" mb="xs">
-          First activation of each membership
-        </Text>
+      <Card withBorder h={360} mb="md" maw={860}>
+        <Group justify="space-between" align="flex-start" mb={2}>
+          <div>
+            <Text size="sm" fw={600} mb={2}>
+              New members
+            </Text>
+            <Text size="xs" c="dimmed">
+              First activation of each membership
+              {growthSplit === 'area' &&
+                ' — people with several research areas count in each'}
+            </Text>
+          </div>
+          <Group gap="xs">
+            <SegmentedControl
+              size="xs"
+              data={[
+                { value: 'month', label: 'Monthly' },
+                { value: 'quarter', label: 'Quarterly' },
+                { value: 'half', label: 'Half-yearly' },
+              ]}
+              value={growthBucket}
+              onChange={setGrowthBucket}
+            />
+            <SegmentedControl
+              size="xs"
+              data={[
+                { value: 'total', label: 'Total' },
+                { value: 'area', label: 'By research area' },
+              ]}
+              value={growthSplit}
+              onChange={setGrowthSplit}
+            />
+          </Group>
+        </Group>
         <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={stats.new_members_by_month} barCategoryGap="28%">
-            <CartesianGrid vertical={false} stroke={GRID} />
+          <BarChart data={growth} barGap={1} barCategoryGap="24%">
+            <CartesianGrid vertical={false} stroke={grid} />
             <XAxis
-              dataKey="month"
+              dataKey="period"
               tickLine={false}
-              axisLine={{ stroke: GRID }}
-              tick={TICK}
+              axisLine={{ stroke: grid }}
+              tick={tick}
               minTickGap={24}
             />
             <YAxis
               allowDecimals={false}
               tickLine={false}
               axisLine={false}
-              tick={TICK}
+              tick={tick}
               width={32}
             />
-            <Tooltip {...TOOLTIP} />
-            <Bar
-              dataKey="count"
-              name="New members"
-              fill={BLUE}
-              radius={[4, 4, 0, 0]}
-              maxBarSize={28}
-            />
+            <Tooltip {...tooltip} />
+            {growthSplit === 'area' && (
+              <Legend wrapperStyle={{ fontSize: 13 }} iconType="circle" iconSize={9} />
+            )}
+            {growthSplit === 'area' ? (
+              GROWTH_AREAS.map((a) => (
+                <Bar
+                  key={a.key}
+                  dataKey={a.key}
+                  name={a.label}
+                  fill={a.color}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={20}
+                />
+              ))
+            ) : (
+              <Bar
+                dataKey="count"
+                name="New members"
+                fill={BLUE}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={28}
+              />
+            )}
           </BarChart>
         </ResponsiveContainer>
       </Card>
@@ -289,6 +393,7 @@ const ACCESSORS: Accessors<TotalRow> = {
 function TalkStats() {
   const [by, setBy] = useState('person')
   const [rows, setRows] = useState<TalkStatRow[]>([])
+  const { grid, tick, tooltip } = useChartChrome()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -348,21 +453,21 @@ function TalkStats() {
             identity is also carried by the legend, never color alone. */}
         <ResponsiveContainer width="100%" height={240}>
           <BarChart data={perYear} barGap={2} barCategoryGap="28%">
-            <CartesianGrid vertical={false} stroke={GRID} />
+            <CartesianGrid vertical={false} stroke={grid} />
             <XAxis
               dataKey="year"
               tickLine={false}
-              axisLine={{ stroke: GRID }}
-              tick={TICK}
+              axisLine={{ stroke: grid }}
+              tick={tick}
             />
             <YAxis
               allowDecimals={false}
               tickLine={false}
               axisLine={false}
-              tick={TICK}
+              tick={tick}
               width={32}
             />
-            <Tooltip {...TOOLTIP} />
+            <Tooltip {...tooltip} />
             <Legend wrapperStyle={{ fontSize: 13 }} iconType="circle" iconSize={9} />
             <Bar dataKey="talks" name="All talks" fill={BLUE} radius={[4, 4, 0, 0]} maxBarSize={28} />
             <Bar dataKey="invited" name="Invited" fill="#008300" radius={[4, 4, 0, 0]} maxBarSize={28} />
