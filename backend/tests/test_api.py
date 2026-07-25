@@ -192,6 +192,57 @@ def test_author_list_generation(admin):
     assert "<collaborationauthorlist" in xml.text
 
 
+def test_author_list_dedup_and_missing_affiliation_warning(admin):
+    inst = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Dup University", "latex_address": "Dup University, USA"},
+    ).json()
+
+    # Two overlapping affiliation rows at the same institution (possible via
+    # office add_affiliation or importer re-runs) must yield one id, not two.
+    dup = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Dee", "family_name": "Dupe", "email": "dee.dupe@example.edu"},
+    ).json()
+    admin.post(f"/api/v1/people/{dup['id']}/status", json={"status": "active"})
+    r = admin.post(
+        f"/api/v1/people/{dup['id']}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2025-01-01"},
+    )
+    assert r.status_code == 201, r.text
+    r = admin.post(
+        f"/api/v1/people/{dup['id']}/affiliations",
+        json={
+            "institution_id": inst["id"],
+            "is_primary": False,
+            "start_date": "2025-06-01",
+            "end_date": "2027-01-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    admin.post(f"/api/v1/people/{dup['id']}/author-periods", json={"start_date": "2025-01-01"})
+
+    # An active author period but no affiliation on the cutoff date.
+    gap = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Gale", "family_name": "Gapp", "email": "gale.gapp@example.edu"},
+    ).json()
+    admin.post(f"/api/v1/people/{gap['id']}/status", json={"status": "active"})
+    admin.post(f"/api/v1/people/{gap['id']}/author-periods", json={"start_date": "2025-01-01"})
+
+    snap = admin.post(
+        "/api/v1/author-lists/preview", json={"cutoff_date": "2026-06-01"}
+    ).json()
+
+    dup_row = next(a for a in snap["authors"] if a["person_id"] == dup["id"])
+    assert dup_row["institution_ids"] == [inst["id"]]
+
+    gap_row = next(a for a in snap["authors"] if a["person_id"] == gap["id"])
+    assert gap_row["institution_ids"] == []
+    assert any("Gale Gapp" in w for w in snap["warnings"])
+    assert not any("Dee Dupe" in w for w in snap["warnings"])
+
+
 def test_member_cannot_do_office_things(admin):
     # Create a plain member account.
     r = admin.post(
