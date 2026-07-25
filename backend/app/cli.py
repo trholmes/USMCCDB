@@ -11,7 +11,7 @@ CSV columns (header required):
 
 import csv
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -184,10 +184,16 @@ def import_members(
             except ValueError:
                 typer.echo(f"line {i}: unknown career_stage '{stage_raw}', using 'other'")
                 stage = CareerStage.other
+            raw_start = (row.get("start_date") or "").strip()
             try:
-                start = date.fromisoformat((row.get("start_date") or "").strip())
+                start = date.fromisoformat(raw_start)
             except ValueError:
                 start = date.today()
+                if raw_start:
+                    typer.echo(
+                        f"line {i}: unparseable start_date '{raw_start}' (expected "
+                        f"YYYY-MM-DD), using today ({start.isoformat()})"
+                    )
             is_author = (row.get("is_author") or "").strip().lower() in ("true", "yes", "1")
 
             person = db.execute(select(Person).where(Person.email == email)).scalar_one_or_none()
@@ -231,6 +237,11 @@ def import_members(
                 ).scalar_one_or_none()
                 if has_period is None:
                     db.add(AuthorPeriod(person_id=person.id, start_date=start))
+
+            # The session is autoflush=False: flush so the dedup SELECTs above
+            # see this row's pending inserts when the same person appears twice
+            # in one file.
+            db.flush()
 
         if dry_run:
             db.rollback()
@@ -542,6 +553,11 @@ def _percent_time(raw) -> int | None:
     if raw is None:
         return None
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        # A cell *displayed* as "25%" is stored by Excel as the fraction
+        # 0.25, which would silently round to 0 — scale fractions (and 1.0,
+        # a formatted 100%) back to percent.
+        if 0 < raw <= 1:
+            raw *= 100
         pct = round(raw)
         return pct if 0 <= pct <= 100 else None
     bounds = [int(n) for n in re.findall(r"\d+", str(raw)) if int(n) <= 100][:2]
@@ -633,7 +649,16 @@ def import_members_xlsx(
             research_areas, expertise = _split_expertise(str(row[c_expertise] or ""))
             percent = _percent_time(row[c_percent]) if c_percent is not None else None
             ts = row[c_ts]
-            start = ts.date() if hasattr(ts, "date") else date.today()
+            if isinstance(ts, datetime):
+                start = ts.date()
+            elif isinstance(ts, date):
+                start = ts
+            else:
+                start = date.today()
+                typer.echo(
+                    f"row {i}: Timestamp {ts!r} is not a date cell, using today "
+                    f"({start.isoformat()}) as the registration date"
+                )
 
             person = db.execute(select(Person).where(Person.email == email)).scalar_one_or_none()
             if person is None and orcid:
@@ -701,6 +726,11 @@ def import_members_xlsx(
                 ).scalar_one_or_none()
                 if has_period is None:
                     db.add(AuthorPeriod(person_id=person.id, start_date=start))
+
+            # The session is autoflush=False: flush so the dedup SELECTs above
+            # see this row's pending inserts when the same person appears twice
+            # in one file.
+            db.flush()
 
         if dry_run:
             db.rollback()
@@ -798,6 +828,9 @@ def import_talks_xlsx(
                 )
             )
             created += 1
+            # The session is autoflush=False: flush so the duplicate SELECT
+            # above sees this talk when the same row appears twice in one file.
+            db.flush()
 
         if dry_run:
             db.rollback()
