@@ -1,7 +1,15 @@
 from datetime import UTC, datetime, date, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy import Date, case, cast, func, null, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -36,11 +44,13 @@ from app.schemas.membership import (
     PersonOut,
     PersonSummary,
     PersonUpdate,
+    RegistrationAck,
     StatusChange,
     WorkingGroupRef,
     MonthCount,
 )
 from app.config import get_settings
+from app.ratelimit import enforce, registration_limiter
 from app.security import (
     get_registrant_user,
     get_current_user,
@@ -58,6 +68,21 @@ PHOTO_TYPES = {
     "image/gif": ".gif",
 }
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
+PHOTO_CHUNK_BYTES = 1024 * 1024
+
+
+def _photo_signature_ok(content_type: str, head: bytes) -> bool:
+    # The client-declared Content-Type is not trusted; the file must open
+    # with the magic bytes of the format it claims to be.
+    if content_type == "image/jpeg":
+        return head.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    if content_type == "image/gif":
+        return head[:6] in (b"GIF87a", b"GIF89a")
+    return False
 
 router = APIRouter(prefix="/people", tags=["membership"])
 
@@ -192,17 +217,35 @@ def _close_primary(db: Session, affil: Affiliation, move_date: date) -> None:
         affil.end_date = move_date - timedelta(days=1)
 
 
+def _registration_ack() -> RegistrationAck:
+    """The one answer non-office registration gets, duplicate or not."""
+    return RegistrationAck(
+        detail="Registration received — pending review by the USMCC office."
+    )
+
+
 @router.post("/register", status_code=201)
 def register(
     body: PersonRegistration,
     background: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
     registrant: User | None = Depends(get_registrant_user),
-) -> PersonSummary:
+) -> PersonSummary | RegistrationAck:
     """Public membership registration; creates a pending person record and
     notifies everyone who can approve it. A signed-in ORCID user still
     carrying the placeholder record from their first sign-in completes that
-    record instead of creating a duplicate."""
+    record instead of creating a duplicate.
+
+    Non-office callers always get the same neutral acknowledgement: a
+    submission matching an existing record creates nothing and is reported
+    to the office instead — distinct duplicate errors would let anonymous
+    callers probe which emails/ORCID iDs belong to members (issue #62).
+    Office/admin callers keep the informative 409 and the created record."""
+    office_caller = registrant is not None and is_office(registrant)
+    if not office_caller:
+        enforce(registration_limiter(), request)
+
     email = body.email.lower()
 
     person: Person | None = None
@@ -214,16 +257,23 @@ def register(
     email_clash = select(Person).where(Person.email == email)
     if person is not None:
         email_clash = email_clash.where(Person.id != person.id)
-    if db.execute(email_clash).scalar_one_or_none():
-        raise HTTPException(409, "A record with this email already exists — contact the office")
-    if body.orcid:
+    clash = db.execute(email_clash).scalar_one_or_none()
+    clash_field = "email"
+    if clash is None and body.orcid:
         orcid_clash = select(Person).where(Person.orcid == body.orcid)
         if person is not None:
             orcid_clash = orcid_clash.where(Person.id != person.id)
-        if db.execute(orcid_clash).scalar_one_or_none():
-            raise HTTPException(
-                409, "A record with this ORCID iD already exists — contact the office"
-            )
+        clash = db.execute(orcid_clash).scalar_one_or_none()
+        clash_field = "ORCID iD"
+    if clash is not None:
+        if office_caller:
+            raise HTTPException(409, f"A record with this {clash_field} already exists")
+        msg = notifications.registration_duplicate(
+            db, clash, f"{body.given_name} {body.family_name}", email, body.orcid
+        )
+        if msg:
+            background.add_task(send_email, *msg)
+        return _registration_ack()
 
     # Charter voting rules are checked at registration so a registrant cannot
     # self-grant voting membership (issue #51): the question stays on the
@@ -320,7 +370,9 @@ def register(
         background.add_task(send_email, *msg)
     db.commit()
     db.refresh(person)
-    return PersonSummary.model_validate(person)
+    if office_caller:
+        return PersonSummary.model_validate(person)
+    return _registration_ack()
 
 
 @router.get("")
@@ -612,9 +664,18 @@ async def upload_photo(
     ext = PHOTO_TYPES.get(file.content_type or "")
     if ext is None:
         raise HTTPException(422, f"Unsupported type; use one of {sorted(PHOTO_TYPES)}")
-    content = await file.read()
-    if len(content) > MAX_PHOTO_BYTES:
-        raise HTTPException(413, "Photo too large (max 10 MB)")
+    # Read in chunks so an oversized body is aborted at the limit instead of
+    # being buffered whole first.
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await file.read(PHOTO_CHUNK_BYTES):
+        size += len(chunk)
+        if size > MAX_PHOTO_BYTES:
+            raise HTTPException(413, "Photo too large (max 10 MB)")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    if not _photo_signature_ok(file.content_type or "", content[:16]):
+        raise HTTPException(422, "File content does not match the declared image type")
     photos = Path(get_settings().photos_dir)
     photos.mkdir(parents=True, exist_ok=True)
     # Fixed name per person, timestamped to bust caches on replacement.

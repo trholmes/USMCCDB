@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     access_token_hours: int = 12
     cookie_secure: str = "auto"  # auto | true | false
 
+    # Per-IP limits on the unauthenticated endpoints (0 disables a limiter).
+    login_rate_limit: int = 10
+    login_rate_window_seconds: int = 60
+    registration_rate_limit: int = 5
+    registration_rate_window_seconds: int = 3600
+
     photos_dir: str = "/photos"
 
     orcid_client_id: str = ""
