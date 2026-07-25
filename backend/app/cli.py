@@ -11,7 +11,7 @@ CSV columns (header required):
 
 import csv
 import re
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import typer
@@ -112,8 +112,9 @@ def _set_primary_affiliation(
     """Ensure the person's open primary affiliation is at ``inst``, applying
     the same move semantics as the API (``_close_primary`` in
     app/routers/people.py): an open primary at another institution is closed
-    the day *before* ``start`` (date ranges are inclusive on both ends), and a
-    same-day move deletes the superseded zero-length row instead."""
+    ON ``start`` (date ranges are inclusive on both ends, so the person
+    carries both affiliations on the transition day), and a same-day move
+    deletes the superseded row instead."""
     open_primary = db.execute(
         select(Affiliation).where(
             Affiliation.person_id == person.id,
@@ -137,7 +138,7 @@ def _set_primary_affiliation(
             # while this one still exists.
             db.flush()
         else:
-            open_primary.end_date = start - timedelta(days=1)
+            open_primary.end_date = start
     elif db.execute(
         select(Affiliation.id).where(
             Affiliation.person_id == person.id,

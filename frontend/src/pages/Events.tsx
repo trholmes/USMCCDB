@@ -14,6 +14,17 @@ const ACCESSORS: Accessors<EventItem> = {
   talks: (e) => e.talk_count,
 }
 
+// Stored URLs render as clickable links for everyone, so only http(s) may
+// ever reach an href (a stored javascript: URL would execute on click).
+const safeUrl = (url: string | null): string | null => {
+  if (!url) return null
+  try {
+    return ['http:', 'https:'].includes(new URL(url).protocol) ? url : null
+  } catch {
+    return null
+  }
+}
+
 export default function EventsPage() {
   const [rows, setRows] = useState<EventItem[]>([])
   const [modal, setModal] = useState(false)
@@ -34,6 +45,13 @@ export default function EventsPage() {
   useEffect(load, [load])
 
   const save = async () => {
+    if (form.url && !safeUrl(form.url)) {
+      notifications.show({
+        color: 'red',
+        message: 'Event URL must be a full http:// or https:// address',
+      })
+      return
+    }
     try {
       await api.post('/events', {
         name: form.name,
@@ -70,8 +88,8 @@ export default function EventsPage() {
           {sorted.map((e) => (
             <Table.Tr key={e.id}>
               <Table.Td>
-                {e.url ? (
-                  <Anchor href={e.url} target="_blank" rel="noreferrer">
+                {safeUrl(e.url) ? (
+                  <Anchor href={safeUrl(e.url)!} target="_blank" rel="noreferrer">
                     {e.name}
                   </Anchor>
                 ) : (
