@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import Date, case, cast, func, null, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -751,9 +752,23 @@ def update_affiliation(
     affil = db.get(Affiliation, affiliation_id)
     if affil is None or affil.person_id != person_id:
         raise HTTPException(404, "Affiliation not found")
+    person = _get_person(db, person_id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(affil, field, value)
-    db.commit()
+    try:
+        # Flush before re-checking eligibility (session is autoflush=False);
+        # this is also where an edit that opens a second primary trips
+        # uq_one_open_primary_affiliation.
+        db.flush()
+        # An edit that closes or re-points the open primary can end voting
+        # eligibility — clear the flag, like a status change or an is_us
+        # reclassification does (issue #57).
+        if person.is_voting and not _current_institution_is_us(db, person_id):
+            person.is_voting = False
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Person already has an open primary affiliation")
     db.refresh(affil)
     return AffiliationOut.model_validate(affil)
 
@@ -767,7 +782,13 @@ def delete_affiliation(person_id: int, affiliation_id: int, db: Session = Depend
     affil = db.get(Affiliation, affiliation_id)
     if affil is None or affil.person_id != person_id:
         raise HTTPException(404, "Affiliation not found")
+    person = _get_person(db, person_id)
     db.delete(affil)
+    db.flush()  # session is autoflush=False; make the removal visible below
+    # Removing the open primary can end voting eligibility — clear the flag,
+    # like a status change or an is_us reclassification does (issue #57).
+    if person.is_voting and not _current_institution_is_us(db, person_id):
+        person.is_voting = False
     db.commit()
 
 
