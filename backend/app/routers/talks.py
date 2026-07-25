@@ -243,6 +243,7 @@ def update_nomination(
         own = user.person_id == nom.person_id or user.id == nom.nominated_by_user_id
         if not (own and body.status == NominationStatus.withdrawn):
             raise HTTPException(403, "Members can only withdraw their own nominations")
+    previous_status = nom.status
     nom.status = body.status
     if body.note is not None:
         nom.note = body.note
@@ -260,6 +261,25 @@ def update_nomination(
         ).scalars()
         for other in others:
             other.status = NominationStatus.shortlisted
+    elif previous_status == NominationStatus.assigned:
+        # Moving the assigned nomination out of "assigned" (withdrawn, declined,
+        # back to shortlisted, ...) must release the talk, or it keeps showing
+        # the departed speaker and crediting them in /stats/talks (issue #64).
+        talk = db.get(Talk, nom.talk_id)
+        if talk.status == TalkStatus.assigned and talk.speaker_person_id == nom.person_id:
+            talk.speaker_person_id = None
+            db.flush()  # session is autoflush=False; count must see nom's new status
+            active = db.execute(
+                select(func.count())
+                .select_from(Nomination)
+                .where(
+                    Nomination.talk_id == nom.talk_id,
+                    Nomination.status.notin_(
+                        (NominationStatus.withdrawn, NominationStatus.declined)
+                    ),
+                )
+            ).scalar_one()
+            talk.status = TalkStatus.nominations if active else TalkStatus.open
     db.commit()
     db.refresh(nom)
     return NominationOut.model_validate(nom)

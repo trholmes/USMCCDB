@@ -1081,6 +1081,64 @@ def test_speakers_flow(admin):
     assert row["talks"] >= 1 and row["invited"] >= 1
 
 
+def test_withdraw_assigned_nomination_resets_talk(admin):
+    """Withdrawing an assigned nomination must release the talk instead of
+    leaving the withdrawn speaker assigned (issue #64)."""
+    member, pid = _linked_member(
+        admin, given="Wilma", family="Withdrawer", email="wilma.withdrawer@example.edu"
+    )
+    event = admin.post("/api/v1/events", json={"name": "Withdrawal Workshop"}).json()
+    talk = admin.post(
+        "/api/v1/talks",
+        json={"title": "Cooling Channel Update", "event_id": event["id"], "date": "2026-10-01"},
+    ).json()
+
+    nom = admin.post(f"/api/v1/talks/{talk['id']}/nominations", json={"person_id": pid}).json()
+    r = admin.patch(f"/api/v1/nominations/{nom['id']}", json={"status": "assigned"})
+    assert r.status_code == 200
+
+    # The assigned speaker withdraws themselves: talk goes back to open with
+    # no speaker (no other live nominations remain).
+    r = member.patch(f"/api/v1/nominations/{nom['id']}", json={"status": "withdrawn"})
+    assert r.status_code == 200, r.text
+    talk_now = admin.get(f"/api/v1/talks?event_id={event['id']}").json()[0]
+    assert talk_now["speaker_person_id"] is None
+    assert talk_now["status"] == "open"
+    stats = admin.get("/api/v1/stats/talks?by=person").json()
+    assert not any(s["key_id"] == pid for s in stats)
+
+    # With another live nomination the talk drops back to "nominations" instead.
+    other = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Norm",
+            "family_name": "Nominee",
+            "email": "norm.nominee@example.edu",
+            "career_stage": "postdoc",
+        },
+    ).json()
+    admin.post(f"/api/v1/talks/{talk['id']}/nominations", json={"person_id": other["id"]})
+    r = admin.patch(f"/api/v1/nominations/{nom['id']}", json={"status": "assigned"})
+    assert r.status_code == 200
+    r = admin.patch(f"/api/v1/nominations/{nom['id']}", json={"status": "withdrawn"})
+    assert r.status_code == 200
+    talk_now = admin.get(f"/api/v1/talks?event_id={event['id']}").json()[0]
+    assert talk_now["speaker_person_id"] is None
+    assert talk_now["status"] == "nominations"
+
+    # Office demoting the assigned nomination to shortlisted also unassigns,
+    # and the still-live nomination keeps the talk in "nominations".
+    other_nom = admin.get(f"/api/v1/talks?event_id={event['id']}").json()[0]["nominations"]
+    other_nom_id = next(n["id"] for n in other_nom if n["person"]["id"] == other["id"])
+    r = admin.patch(f"/api/v1/nominations/{other_nom_id}", json={"status": "assigned"})
+    assert r.status_code == 200
+    r = admin.patch(f"/api/v1/nominations/{other_nom_id}", json={"status": "shortlisted"})
+    assert r.status_code == 200
+    talk_now = admin.get(f"/api/v1/talks?event_id={event['id']}").json()[0]
+    assert talk_now["speaker_person_id"] is None
+    assert talk_now["status"] == "nominations"
+
+
 def test_dangling_references_are_404(admin):
     # Nonexistent FK targets on talk / publication writes must come back as
     # 404s, not unhandled IntegrityError 500s (issue #61).
