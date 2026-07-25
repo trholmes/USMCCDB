@@ -1042,6 +1042,21 @@ def member_stats(
     month_counts = dict(
         db.execute(select(month, func.count()).group_by(month).order_by(month)).all()
     )
+    # Per-area breakdown of the same joins. research_areas is a normalized
+    # comma-separated subset of RESEARCH_AREAS, so split in Python (row counts
+    # are one per distinct (month, areas-string) pair — small).
+    area_month_counts: dict[str, dict[str, int]] = {}
+    for mo, areas_str, n in db.execute(
+        select(month, Person.research_areas, func.count())
+        .select_from(first_active)
+        .join(Person, Person.id == first_active.c.person_id)
+        .group_by(month, Person.research_areas)
+    ).all():
+        for area in (areas_str or "").split(","):
+            area = area.strip()
+            if area:
+                bucket = area_month_counts.setdefault(mo, {})
+                bucket[area] = bucket.get(area, 0) + n
     # Fill the gaps so the chart gets a continuous month axis.
     new_members_by_month = []
     if month_counts:
@@ -1049,7 +1064,13 @@ def member_stats(
         last = max(month_counts)
         while True:
             key = f"{y:04d}-{m:02d}"
-            new_members_by_month.append(MonthCount(month=key, count=month_counts.get(key, 0)))
+            new_members_by_month.append(
+                MonthCount(
+                    month=key,
+                    count=month_counts.get(key, 0),
+                    areas=area_month_counts.get(key, {}),
+                )
+            )
             if key == last:
                 break
             y, m = (y + 1, 1) if m == 12 else (y, m + 1)

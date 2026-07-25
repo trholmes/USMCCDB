@@ -25,17 +25,20 @@ const safeUrl = (url: string | null): string | null => {
   }
 }
 
+const EMPTY_FORM = {
+  name: '',
+  url: '',
+  location: '',
+  start_date: '',
+  end_date: '',
+  abstract_deadline: '',
+}
+
 export default function EventsPage() {
   const [rows, setRows] = useState<EventItem[]>([])
   const [modal, setModal] = useState(false)
-  const [form, setForm] = useState({
-    name: '',
-    url: '',
-    location: '',
-    start_date: '',
-    end_date: '',
-    abstract_deadline: '',
-  })
+  const [editId, setEditId] = useState<number | null>(null)
+  const [form, setForm] = useState(EMPTY_FORM)
   const { isOffice } = useSession()
   const { sorted, sort, toggle } = useSortable(rows, ACCESSORS)
 
@@ -43,6 +46,25 @@ export default function EventsPage() {
     api.get<EventItem[]>('/events').then(setRows).catch(() => setRows([]))
   }, [])
   useEffect(load, [load])
+
+  const openCreate = () => {
+    setEditId(null)
+    setForm(EMPTY_FORM)
+    setModal(true)
+  }
+
+  const openEdit = (e: EventItem) => {
+    setEditId(e.id)
+    setForm({
+      name: e.name,
+      url: e.url ?? '',
+      location: e.location ?? '',
+      start_date: e.start_date ?? '',
+      end_date: e.end_date ?? '',
+      abstract_deadline: e.abstract_deadline ?? '',
+    })
+    setModal(true)
+  }
 
   const save = async () => {
     if (form.url && !safeUrl(form.url)) {
@@ -52,16 +74,28 @@ export default function EventsPage() {
       })
       return
     }
+    const body = {
+      name: form.name,
+      url: form.url || null,
+      location: form.location || null,
+      start_date: form.start_date || null,
+      end_date: form.end_date || null,
+      abstract_deadline: form.abstract_deadline || null,
+    }
     try {
-      await api.post('/events', {
-        name: form.name,
-        url: form.url || null,
-        location: form.location || null,
-        start_date: form.start_date || null,
-        end_date: form.end_date || null,
-        abstract_deadline: form.abstract_deadline || null,
-      })
+      if (editId === null) await api.post('/events', body)
+      else await api.patch(`/events/${editId}`, body)
       setModal(false)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const remove = async (e: EventItem) => {
+    if (!window.confirm(`Delete event "${e.name}"?`)) return
+    try {
+      await api.delete(`/events/${e.id}`)
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -72,7 +106,7 @@ export default function EventsPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Conferences & events</Title>
-        {isOffice && <Button onClick={() => setModal(true)}>Add event</Button>}
+        {isOffice && <Button onClick={openCreate}>Add event</Button>}
       </Group>
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -82,6 +116,7 @@ export default function EventsPage() {
             <SortableTh label="Dates" k="dates" sort={sort} toggle={toggle} />
             <SortableTh label="Abstract deadline" k="abstract_deadline" sort={sort} toggle={toggle} />
             <SortableTh label="Talks" k="talks" sort={sort} toggle={toggle} />
+            {isOffice && <Table.Th />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -103,12 +138,33 @@ export default function EventsPage() {
               </Table.Td>
               <Table.Td>{e.abstract_deadline}</Table.Td>
               <Table.Td>{e.talk_count}</Table.Td>
+              {isOffice && (
+                <Table.Td>
+                  <Group gap={4} wrap="nowrap">
+                    <Button size="compact-xs" variant="subtle" onClick={() => openEdit(e)}>
+                      Edit
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => remove(e)}
+                    >
+                      Delete
+                    </Button>
+                  </Group>
+                </Table.Td>
+              )}
             </Table.Tr>
           ))}
         </Table.Tbody>
       </Table>
 
-      <Modal opened={modal} onClose={() => setModal(false)} title="Add event">
+      <Modal
+        opened={modal}
+        onClose={() => setModal(false)}
+        title={editId === null ? 'Add event' : 'Edit event'}
+      >
         <Stack gap="sm">
           <TextInput
             label="Name"

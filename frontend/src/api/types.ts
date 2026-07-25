@@ -171,7 +171,7 @@ export interface MemberStats {
   by_status: LabelCount[]
   by_career_stage: LabelCount[]
   by_research_area: LabelCount[]
-  new_members_by_month: { month: string; count: number }[]
+  new_members_by_month: { month: string; count: number; areas: Record<string, number> }[]
   usmcc_reporting: number
   avg_usmcc_percent: number | null
   by_usmcc_percent: LabelCount[]

@@ -33,6 +33,7 @@ const SIGNIN_ERRORS: Record<string, string> = {
 export default function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [capsLock, setCapsLock] = useState(false)
   const [busy, setBusy] = useState(false)
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const { refresh } = useSession()
@@ -103,6 +104,9 @@ export default function LoginPage() {
                 label="Password"
                 value={password}
                 onChange={(e) => setPassword(e.currentTarget.value)}
+                onKeyDown={(e) => setCapsLock(e.getModifierState('CapsLock'))}
+                onKeyUp={(e) => setCapsLock(e.getModifierState('CapsLock'))}
+                error={capsLock ? 'Caps Lock is on' : undefined}
                 required
               />
               <Button type="submit" loading={busy}>

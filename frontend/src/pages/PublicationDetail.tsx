@@ -5,10 +5,12 @@ import {
   Card,
   CopyButton,
   Group,
+  Modal,
   Select,
   Stack,
   Table,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -16,7 +18,7 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, exportUrl } from '../api/client'
-import type { AuthorList, PersonSummary, Publication } from '../api/types'
+import type { AuthorList, PersonSummary, Publication, WorkingGroup } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 import { today } from '../dates'
@@ -40,6 +42,18 @@ export default function PublicationDetailPage() {
   const [personPick, setPersonPick] = useState<string | null>(null)
   const [rolePick, setRolePick] = useState<string | null>('contributor')
   const [ack, setAck] = useState<string | null>(null)
+  const [wgs, setWgs] = useState<WorkingGroup[]>([])
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState({
+    title: '',
+    pub_type: 'paper',
+    working_group_id: '',
+    arxiv_id: '',
+    doi: '',
+    journal: '',
+    target_journal: '',
+    abstract: '',
+  })
   const { me, isOffice } = useSession()
 
   const load = useCallback(() => {
@@ -62,6 +76,7 @@ export default function PublicationDetailPage() {
       .then(setLists)
       .catch(() => setLists([]))
     api.get<PersonSummary[]>('/people?status=active').then(setPeople).catch(() => setPeople([]))
+    api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
   }, [id])
   useEffect(load, [load])
 
@@ -83,11 +98,62 @@ export default function PublicationDetailPage() {
   }
 
   const requestReview = async () => {
+    if (
+      !window.confirm(
+        'Request collaboration review? This notifies the office, which will assign readers.',
+      )
+    )
+      return
     try {
       await api.post(`/publications/${pub.id}/status`, { status: 'collab_review' })
       notifications.show({
         message: 'Collaboration review requested — suggested acknowledgment text is below.',
       })
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const revokeReview = async () => {
+    if (!window.confirm('Revoke the collaboration review request and move back to in progress?'))
+      return
+    try {
+      await api.post(`/publications/${pub.id}/status`, { status: 'in_progress' })
+      notifications.show({ message: 'Collaboration review request revoked.' })
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const startEdit = () => {
+    setEditForm({
+      title: pub.title,
+      pub_type: pub.pub_type,
+      working_group_id: pub.working_group_id ? String(pub.working_group_id) : '',
+      arxiv_id: pub.arxiv_id ?? '',
+      doi: pub.doi ?? '',
+      journal: pub.journal ?? '',
+      target_journal: pub.target_journal ?? '',
+      abstract: pub.abstract ?? '',
+    })
+    setEditOpen(true)
+  }
+
+  const saveEdit = async () => {
+    try {
+      await api.patch(`/publications/${pub.id}`, {
+        title: editForm.title,
+        pub_type: editForm.pub_type,
+        working_group_id: editForm.working_group_id ? Number(editForm.working_group_id) : null,
+        arxiv_id: editForm.arxiv_id || null,
+        doi: editForm.doi || null,
+        journal: editForm.journal || null,
+        target_journal: editForm.target_journal || null,
+        abstract: editForm.abstract || null,
+      })
+      setEditOpen(false)
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -155,8 +221,14 @@ export default function PublicationDetailPage() {
           </Group>
         </div>
         <Group gap="xs">
+          {canManage && <Button variant="default" onClick={startEdit}>Edit details</Button>}
           {canManage && pub.status === 'in_progress' && (
             <Button onClick={requestReview}>Request collaboration review</Button>
+          )}
+          {canManage && pub.status === 'collab_review' && (
+            <Button variant="light" color="orange" onClick={revokeReview}>
+              Revoke review request
+            </Button>
           )}
           {isOffice && (
             <Select placeholder="Change status…" data={STATUSES} onChange={changeStatus} w={170} />
@@ -303,6 +375,73 @@ export default function PublicationDetailPage() {
           </Button>
         </Group>
       </Card>
+
+      <Modal opened={editOpen} onClose={() => setEditOpen(false)} title="Edit publication">
+        <Stack gap="sm">
+          <TextInput
+            label="Title"
+            required
+            value={editForm.title}
+            onChange={(e) => setEditForm({ ...editForm, title: e.currentTarget.value })}
+          />
+          <Group grow>
+            <Select
+              label="Type"
+              data={[
+                { value: 'paper', label: 'Paper' },
+                { value: 'proceedings', label: 'Proceedings' },
+                { value: 'note', label: 'Note' },
+                { value: 'white_paper', label: 'White paper' },
+              ]}
+              value={editForm.pub_type}
+              onChange={(v) => setEditForm({ ...editForm, pub_type: v ?? editForm.pub_type })}
+            />
+            <Select
+              label="Working group"
+              data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
+              value={editForm.working_group_id}
+              onChange={(v) => setEditForm({ ...editForm, working_group_id: v ?? '' })}
+              clearable
+              searchable
+            />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="arXiv id"
+              placeholder="2401.01234"
+              value={editForm.arxiv_id}
+              onChange={(e) => setEditForm({ ...editForm, arxiv_id: e.currentTarget.value })}
+            />
+            <TextInput
+              label="DOI"
+              value={editForm.doi}
+              onChange={(e) => setEditForm({ ...editForm, doi: e.currentTarget.value })}
+            />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="Journal"
+              value={editForm.journal}
+              onChange={(e) => setEditForm({ ...editForm, journal: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Target journal"
+              value={editForm.target_journal}
+              onChange={(e) => setEditForm({ ...editForm, target_journal: e.currentTarget.value })}
+            />
+          </Group>
+          <Textarea
+            label="Abstract"
+            autosize
+            minRows={3}
+            value={editForm.abstract}
+            onChange={(e) => setEditForm({ ...editForm, abstract: e.currentTarget.value })}
+          />
+          <Button onClick={saveEdit} disabled={!editForm.title.trim()}>
+            Save
+          </Button>
+        </Stack>
+      </Modal>
     </Stack>
   )
 }

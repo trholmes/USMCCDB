@@ -396,6 +396,9 @@ class LabelCount(BaseModel):
 class MonthCount(BaseModel):
     month: str  # "YYYY-MM"
     count: int
+    # Same count broken down by research area. The field is multi-valued per
+    # person, so the per-area numbers can add up to more than count.
+    areas: dict[str, int] = Field(default_factory=dict)
 
 
 class MemberStats(BaseModel):

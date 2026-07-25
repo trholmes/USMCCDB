@@ -1,0 +1,5 @@
+/* macOS renders a native caps-lock badge inside password inputs that collides
+   with Mantine's visibility toggle; the login form shows its own hint instead. */
+input::-webkit-caps-lock-indicator {
+  visibility: hidden;
+}

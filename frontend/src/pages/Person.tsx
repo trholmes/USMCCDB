@@ -1,9 +1,11 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
   Checkbox,
   Group,
+  Modal,
   MultiSelect,
   NumberInput,
   Select,
@@ -17,7 +19,16 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, uploadFile } from '../api/client'
-import type { CollabRole, Institution, MembershipEvent, Person, Talk, WorkingGroup } from '../api/types'
+import type {
+  Affiliation,
+  AuthorPeriod,
+  CollabRole,
+  Institution,
+  MembershipEvent,
+  Person,
+  Talk,
+  WorkingGroup,
+} from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
@@ -76,6 +87,20 @@ export default function PersonPage() {
   const [roleInst, setRoleInst] = useState<string | null>(null)
   const [roleStart, setRoleStart] = useState(today())
   const [roleBusy, setRoleBusy] = useState(false)
+
+  // Office-only history editing (affiliations, role dates, author periods).
+  const [affEdit, setAffEdit] = useState<Affiliation | null>(null)
+  const [affForm, setAffForm] = useState({
+    career_stage: '' as string | null,
+    is_primary: false,
+    start_date: '',
+    end_date: '',
+  })
+  const [roleEdit, setRoleEdit] = useState<CollabRole | null>(null)
+  const [roleForm, setRoleForm] = useState({ detail: '', start_date: '', end_date: '' })
+  // 'new' opens the modal in create mode.
+  const [apEdit, setApEdit] = useState<AuthorPeriod | 'new' | null>(null)
+  const [apForm, setApForm] = useState({ start_date: '', end_date: '', signing_name: '' })
 
   const load = useCallback(() => {
     api.get<Person>(`/people/${id}`).then(setPerson).catch(() => setPerson(null))
@@ -340,10 +365,111 @@ export default function PersonPage() {
   }
 
   const deleteRole = async (roleId: number) => {
+    if (!window.confirm('Delete this role? This removes it from the leadership history.')) return
     try {
       await api.delete(`/collab-roles/${roleId}`)
       notifications.show({ message: 'Role deleted' })
       loadRoles()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const openRoleEdit = (r: CollabRole) => {
+    setRoleForm({ detail: r.detail ?? '', start_date: r.start_date, end_date: r.end_date ?? '' })
+    setRoleEdit(r)
+  }
+
+  const saveRoleEdit = async () => {
+    if (!roleEdit) return
+    try {
+      await api.patch(`/collab-roles/${roleEdit.id}`, {
+        detail: roleForm.detail.trim() || null,
+        start_date: roleForm.start_date,
+        end_date: roleForm.end_date || null,
+      })
+      notifications.show({ message: 'Role updated' })
+      setRoleEdit(null)
+      loadRoles()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const openAffEdit = (a: Affiliation) => {
+    setAffForm({
+      career_stage: a.career_stage,
+      is_primary: a.is_primary,
+      start_date: a.start_date,
+      end_date: a.end_date ?? '',
+    })
+    setAffEdit(a)
+  }
+
+  const saveAffEdit = async () => {
+    if (!affEdit || !person) return
+    try {
+      await api.patch(`/people/${person.id}/affiliations/${affEdit.id}`, {
+        career_stage: affForm.career_stage || null,
+        is_primary: affForm.is_primary,
+        start_date: affForm.start_date,
+        end_date: affForm.end_date || null,
+      })
+      notifications.show({ message: 'Affiliation updated' })
+      setAffEdit(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const deleteAffiliation = async (a: Affiliation) => {
+    if (
+      !window.confirm(
+        `Delete the ${a.institution.name} affiliation? Use this only for records added in error — an institution move should get an end date instead.`,
+      )
+    )
+      return
+    try {
+      await api.delete(`/people/${person!.id}/affiliations/${a.id}`)
+      notifications.show({ message: 'Affiliation deleted' })
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const openApEdit = (p: AuthorPeriod | 'new') => {
+    if (p === 'new') setApForm({ start_date: today(), end_date: '', signing_name: '' })
+    else setApForm({ start_date: p.start_date, end_date: p.end_date ?? '', signing_name: p.signing_name ?? '' })
+    setApEdit(p)
+  }
+
+  const saveApEdit = async () => {
+    if (!apEdit || !person) return
+    const body = {
+      start_date: apForm.start_date,
+      end_date: apForm.end_date || null,
+      signing_name: apForm.signing_name.trim() || null,
+    }
+    try {
+      if (apEdit === 'new') await api.post(`/people/${person.id}/author-periods`, body)
+      else await api.patch(`/people/${person.id}/author-periods/${apEdit.id}`, body)
+      notifications.show({ message: 'Authorship period saved' })
+      setApEdit(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const deleteAp = async (p: AuthorPeriod) => {
+    if (!window.confirm('Delete this authorship period? Generated author lists depend on it.'))
+      return
+    try {
+      await api.delete(`/people/${person!.id}/author-periods/${p.id}`)
+      notifications.show({ message: 'Authorship period deleted' })
+      load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
     }
@@ -407,9 +533,14 @@ export default function PersonPage() {
               {person.career_stage}
             </Text>
             {person.orcid && (
-              <Text size="sm" c="dimmed">
+              <Anchor
+                href={`https://orcid.org/${person.orcid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                size="sm"
+              >
                 ORCID: {person.orcid}
-              </Text>
+              </Anchor>
             )}
           </Group>
         </div>
@@ -688,7 +819,7 @@ export default function PersonPage() {
       )}
 
       <Title order={5}>Affiliations</Title>
-      <Table maw={720}>
+      <Table maw={860}>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Institution</Table.Th>
@@ -696,6 +827,7 @@ export default function PersonPage() {
             <Table.Th>Primary</Table.Th>
             <Table.Th>From</Table.Th>
             <Table.Th>To</Table.Th>
+            {isOffice && <Table.Th />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -708,6 +840,23 @@ export default function PersonPage() {
               <Table.Td>{a.is_primary ? 'yes' : ''}</Table.Td>
               <Table.Td>{a.start_date}</Table.Td>
               <Table.Td>{a.end_date ?? 'present'}</Table.Td>
+              {isOffice && (
+                <Table.Td>
+                  <Group gap={4} justify="flex-end" wrap="nowrap">
+                    <Button size="compact-xs" variant="subtle" onClick={() => openAffEdit(a)}>
+                      Edit
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => deleteAffiliation(a)}
+                    >
+                      Delete
+                    </Button>
+                  </Group>
+                </Table.Td>
+              )}
             </Table.Tr>
           ))}
         </Table.Tbody>
@@ -748,6 +897,13 @@ export default function PersonPage() {
                               End today
                             </Button>
                           )}
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            onClick={() => openRoleEdit(r)}
+                          >
+                            Edit
+                          </Button>
                           <Button
                             size="compact-xs"
                             variant="subtle"
@@ -911,6 +1067,7 @@ export default function PersonPage() {
               <Table.Th>From</Table.Th>
               <Table.Th>To</Table.Th>
               <Table.Th>Signing name</Table.Th>
+              {isOffice && <Table.Th />}
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -919,11 +1076,137 @@ export default function PersonPage() {
                 <Table.Td>{p.start_date}</Table.Td>
                 <Table.Td>{p.end_date ?? 'present'}</Table.Td>
                 <Table.Td>{p.signing_name ?? '—'}</Table.Td>
+                {isOffice && (
+                  <Table.Td>
+                    <Group gap={4} justify="flex-end" wrap="nowrap">
+                      <Button size="compact-xs" variant="subtle" onClick={() => openApEdit(p)}>
+                        Edit
+                      </Button>
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={() => deleteAp(p)}
+                      >
+                        Delete
+                      </Button>
+                    </Group>
+                  </Table.Td>
+                )}
               </Table.Tr>
             ))}
           </Table.Tbody>
         </Table>
       )}
+      {isOffice && (
+        <Button size="xs" variant="light" w="fit-content" onClick={() => openApEdit('new')}>
+          Add authorship period
+        </Button>
+      )}
+
+      <Modal
+        opened={affEdit !== null}
+        onClose={() => setAffEdit(null)}
+        title={`Edit affiliation — ${affEdit?.institution.name ?? ''}`}
+      >
+        <Stack gap="sm">
+          <Select
+            label="Position"
+            data={CAREER_STAGES}
+            value={affForm.career_stage}
+            onChange={(v) => setAffForm({ ...affForm, career_stage: v })}
+            clearable
+          />
+          <Checkbox
+            label="Primary affiliation"
+            checked={affForm.is_primary}
+            onChange={(e) => setAffForm({ ...affForm, is_primary: e.currentTarget.checked })}
+          />
+          <Group grow>
+            <TextInput
+              label="From"
+              type="date"
+              required
+              value={affForm.start_date}
+              onChange={(e) => setAffForm({ ...affForm, start_date: e.currentTarget.value })}
+            />
+            <TextInput
+              label="To (empty = present)"
+              type="date"
+              value={affForm.end_date}
+              onChange={(e) => setAffForm({ ...affForm, end_date: e.currentTarget.value })}
+            />
+          </Group>
+          <Button onClick={saveAffEdit} disabled={!affForm.start_date}>
+            Save
+          </Button>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={roleEdit !== null}
+        onClose={() => setRoleEdit(null)}
+        title={`Edit role — ${roleEdit ? collabRoleLabel(roleEdit.role, roleEdit.detail) : ''}`}
+      >
+        <Stack gap="sm">
+          <TextInput
+            label="Detail / qualifier"
+            value={roleForm.detail}
+            onChange={(e) => setRoleForm({ ...roleForm, detail: e.currentTarget.value })}
+          />
+          <Group grow>
+            <TextInput
+              label="From"
+              type="date"
+              required
+              value={roleForm.start_date}
+              onChange={(e) => setRoleForm({ ...roleForm, start_date: e.currentTarget.value })}
+            />
+            <TextInput
+              label="To (empty = open)"
+              type="date"
+              value={roleForm.end_date}
+              onChange={(e) => setRoleForm({ ...roleForm, end_date: e.currentTarget.value })}
+            />
+          </Group>
+          <Button onClick={saveRoleEdit} disabled={!roleForm.start_date}>
+            Save
+          </Button>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={apEdit !== null}
+        onClose={() => setApEdit(null)}
+        title={apEdit === 'new' ? 'Add authorship period' : 'Edit authorship period'}
+      >
+        <Stack gap="sm">
+          <Group grow>
+            <TextInput
+              label="From"
+              type="date"
+              required
+              value={apForm.start_date}
+              onChange={(e) => setApForm({ ...apForm, start_date: e.currentTarget.value })}
+            />
+            <TextInput
+              label="To (empty = open)"
+              type="date"
+              value={apForm.end_date}
+              onChange={(e) => setApForm({ ...apForm, end_date: e.currentTarget.value })}
+            />
+          </Group>
+          <TextInput
+            label="Signing name"
+            placeholder="Defaults to profile name"
+            value={apForm.signing_name}
+            onChange={(e) => setApForm({ ...apForm, signing_name: e.currentTarget.value })}
+          />
+          <Button onClick={saveApEdit} disabled={!apForm.start_date}>
+            Save
+          </Button>
+        </Stack>
+      </Modal>
     </Stack>
   )
 }
