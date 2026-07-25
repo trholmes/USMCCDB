@@ -91,7 +91,17 @@ export default function App() {
         <Group h="100%" px="md" justify="space-between">
           <Group>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
-            <Link to="/" style={{ color: 'inherit', textDecoration: 'none' }}>
+            <Link
+              to="/"
+              style={{
+                color: 'inherit',
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <img src="/usmcc-mark.png" alt="" height={32} width={32} />
               <Title order={4}>US Muon Collider Collaboration</Title>
             </Link>
             <Badge variant="light" color="orange" size="sm">
