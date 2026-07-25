@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   Title,
+  useComputedColorScheme,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
@@ -39,6 +40,10 @@ export default function LoginPage() {
   const { refresh } = useSession()
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  // The wordmark under the logo is baked into the image, so pick the variant
+  // matching the active color scheme.
+  const logo =
+    useComputedColorScheme('light') === 'dark' ? '/usmcc-logo-dark.png' : '/usmcc-logo-light.png'
 
   useEffect(() => {
     api.get<AuthConfig>('/auth/config').then(setConfig).catch(() => setConfig(null))
@@ -69,6 +74,9 @@ export default function LoginPage() {
     <Center mih="100vh" p="md">
       <Card withBorder shadow="sm" w={380} p="xl">
         <Stack>
+          <Center>
+            <img src={logo} alt="USMCC logo" width={120} height={120} />
+          </Center>
           <div>
             <Title order={3}>
               USMCC Collaboration Database
