@@ -579,6 +579,8 @@ def import_members_xlsx(
     Area(s) of Expertise, percent of research time)."""
     import openpyxl
 
+    from app.routers.people import _current_institution_is_us, _voting_eligible
+
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     ws = wb[sheet]
     header = [str(c or "").strip() for c in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
@@ -622,7 +624,10 @@ def import_members_xlsx(
                 continue
             middle = str(row[c_middle] or "").strip()
             given = f"{first} {middle}".strip() if middle else first
-            voting = "non-voting" not in str(row[c_voting] or "").lower()
+            # A blank voting answer is NOT a voting request — only an explicit
+            # answer other than "non-voting" asks for the flag (issue #58).
+            voting_answer = str(row[c_voting] or "").strip().lower()
+            wants_voting = bool(voting_answer) and "non-voting" not in voting_answer
             orcid = _clean_orcid(row[c_orcid])
             stage = _career_stage(str(row[c_position] or ""))
             research_areas, expertise = _split_expertise(str(row[c_expertise] or ""))
@@ -644,7 +649,9 @@ def import_members_xlsx(
                     orcid=orcid,
                     career_stage=stage,
                     status=MemberStatus.active,
-                    is_voting=voting,
+                    # Stamped below, once the affiliation is in place and the
+                    # charter eligibility rules can be checked.
+                    is_voting=False,
                     research_areas=research_areas,
                     expertise=expertise,
                     usmcc_percent=percent,
@@ -656,7 +663,6 @@ def import_members_xlsx(
                 person.given_name, person.family_name = given, last
                 person.orcid = orcid or person.orcid
                 person.career_stage = stage
-                person.is_voting = voting
                 person.research_areas = research_areas or person.research_areas
                 person.expertise = expertise or person.expertise
                 if percent is not None:
@@ -668,6 +674,23 @@ def import_members_xlsx(
             if primary_name:
                 inst = _get_or_create_institution(db, primary_name)
                 _set_primary_affiliation(db, f"row {i}", person, inst, stage, start)
+
+            # Stamp the voting flag only now, with the affiliation in place,
+            # applying the same charter rules the API enforces: active,
+            # non-student, currently at a US institution. A blank answer on a
+            # re-import keeps the stored flag (still subject to the rules).
+            db.flush()  # session is autoflush=False; expose the new affiliation
+            voting = wants_voting if voting_answer else person.is_voting
+            if voting and not (
+                _voting_eligible(person.status, person.career_stage)
+                and _current_institution_is_us(db, person.id)
+            ):
+                typer.echo(
+                    f"row {i}: voting flag dropped (requires an active, "
+                    "non-student member at a US institution)"
+                )
+                voting = False
+            person.is_voting = voting
 
             if authors_from_voting and voting:
                 has_period = db.execute(
