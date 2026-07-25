@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -54,6 +55,21 @@ def _check_new_institution_is_us(
         )
 
 
+# ROR ids are 9 chars starting with 0 (https://ror.org/registry); accept the
+# full URL form too and store the bare id.
+_ROR_RE = re.compile(r"^(?:https?://ror\.org/)?(0[a-z0-9]{8})$")
+
+
+def _normalize_ror_id(v: str | None) -> str | None:
+    v = (v or "").strip().lower()
+    if not v:
+        return None
+    m = _ROR_RE.match(v)
+    if m is None:
+        raise ValueError("ror_id must be a ROR id like 05gvnxz63 or https://ror.org/05gvnxz63")
+    return m.group(1)
+
+
 class InstitutionBase(BaseModel):
     name: str = Field(min_length=2, max_length=300)
     short_name: str | None = Field(default=None, max_length=80)
@@ -64,9 +80,16 @@ class InstitutionBase(BaseModel):
     latex_address: str | None = None
     is_active: bool = True
 
+    @field_validator("ror_id")
+    @classmethod
+    def check_ror_id(cls, v: str | None) -> str | None:
+        return _normalize_ror_id(v)
+
 
 class InstitutionCreate(InstitutionBase):
-    pass
+    # Set to override the similar-name duplicate warning (409) after the
+    # office confirms the new entry really is a different institution.
+    allow_similar: bool = False
 
 
 class InstitutionUpdate(BaseModel):
@@ -77,6 +100,11 @@ class InstitutionUpdate(BaseModel):
     is_us: bool | None = None
     latex_address: str | None = None
     is_active: bool | None = None
+
+    @field_validator("ror_id")
+    @classmethod
+    def check_ror_id(cls, v: str | None) -> str | None:
+        return _normalize_ror_id(v)
 
 
 class InstitutionOut(ORMModel, InstitutionBase):
@@ -91,6 +119,16 @@ class InstitutionRef(ORMModel):
     id: int
     name: str
     short_name: str | None
+
+
+class InstitutionPublic(ORMModel):
+    """Minimal shape for the unauthenticated registration autocomplete —
+    just enough to pick an existing institution and skip the US question."""
+
+    id: int
+    name: str
+    short_name: str | None
+    is_us: bool
 
 
 class AffiliationCreate(BaseModel):

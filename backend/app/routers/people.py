@@ -167,6 +167,17 @@ def _resolve_institution_id(
         name = (institution_name or "").strip()
         if not name:
             raise HTTPException(422, "Provide institution_id or institution_name")
+        # Free text that exactly names an existing institution (case-
+        # insensitively, by name or short name) links to it instead of
+        # creating a duplicate the office would have to merge (issue #105);
+        # the stored row's is_us wins over the registrant's declaration.
+        existing = db.execute(
+            select(Institution).where(func.lower(Institution.name) == name.lower())
+        ).scalar_one_or_none() or db.execute(
+            select(Institution).where(func.lower(Institution.short_name) == name.lower())
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.id
         if institution_is_us is None:  # schema validators enforce this already
             raise HTTPException(422, "Specify whether the new institution is US-based")
         inst = Institution(

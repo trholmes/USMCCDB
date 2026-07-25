@@ -15,7 +15,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 import typer
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.db import SessionLocal
 from app.models.membership import RESEARCH_AREAS
@@ -167,6 +167,7 @@ def import_members(
 ):
     """Import an initial member list from CSV (upsert on email)."""
     created = updated = skipped = 0
+    created_institutions: list[str] = []
     with SessionLocal() as db, open(csv_path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
         for i, row in enumerate(reader, start=2):  # header is line 1
@@ -220,12 +221,15 @@ def import_members(
             short = (row.get("institution_short_name") or "").strip()
             if short:
                 inst = db.execute(
-                    select(Institution).where(Institution.short_name == short)
+                    select(Institution).where(func.lower(Institution.short_name) == short.lower())
                 ).scalar_one_or_none()
                 if inst is None:
-                    inst = Institution(name=short, short_name=short)
+                    # Held inactive for office review, like the XLSX importer
+                    # and free-text registration (issue #108).
+                    inst = Institution(name=short, short_name=short, is_active=False)
                     db.add(inst)
                     db.flush()
+                    created_institutions.append(short)
                     typer.echo(f"line {i}: created institution '{short}' (fill in details later)")
                 _set_primary_affiliation(db, f"line {i}", person, inst, stage, start)
 
@@ -244,6 +248,13 @@ def import_members(
             # in one file.
             db.flush()
 
+        if created_institutions:
+            typer.echo(
+                f"Created {len(created_institutions)} institution(s), held inactive "
+                "for office review (fill in details and activate them):"
+            )
+            for name in created_institutions:
+                typer.echo(f"  - {name}")
         if dry_run:
             db.rollback()
             typer.echo(f"DRY RUN — would create {created}, update {updated}, skip {skipped}")
@@ -567,17 +578,27 @@ def _percent_time(raw) -> int | None:
     return round(sum(bounds) / len(bounds))
 
 
-def _get_or_create_institution(db, name: str) -> Institution:
+def _get_or_create_institution(
+    db, name: str, created_names: list[str] | None = None
+) -> Institution:
+    """Match case-insensitively on name or short name; otherwise create a
+    minimal row held inactive for office review (issue #108). is_us keeps the
+    model default (True) — non-US institutions are rare here, and the office
+    reviews every import-created row."""
     name = name.strip()
-    inst = db.execute(select(Institution).where(Institution.name == name)).scalar_one_or_none()
+    inst = db.execute(
+        select(Institution).where(func.lower(Institution.name) == name.lower())
+    ).scalar_one_or_none()
     if inst is None:
         inst = db.execute(
-            select(Institution).where(Institution.short_name == name)
+            select(Institution).where(func.lower(Institution.short_name) == name.lower())
         ).scalar_one_or_none()
     if inst is None:
-        inst = Institution(name=name)
+        inst = Institution(name=name, is_active=False)
         db.add(inst)
         db.flush()
+        if created_names is not None:
+            created_names.append(name)
     return inst
 
 
@@ -629,6 +650,7 @@ def import_members_xlsx(
         c_percent = col_opt("What percent of your research time")
 
     created = updated = skipped = 0
+    created_institutions: list[str] = []
     with SessionLocal() as db:
         for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
             email = str(row[c_email] or "").strip().lower()
@@ -698,7 +720,7 @@ def import_members_xlsx(
 
             primary_name = str(row[c_primary] or "").strip()
             if primary_name:
-                inst = _get_or_create_institution(db, primary_name)
+                inst = _get_or_create_institution(db, primary_name, created_institutions)
                 _set_primary_affiliation(db, f"row {i}", person, inst, stage, start)
 
             # Stamp the voting flag only now, with the affiliation in place,
@@ -733,6 +755,13 @@ def import_members_xlsx(
             # in one file.
             db.flush()
 
+        if created_institutions:
+            typer.echo(
+                f"Created {len(created_institutions)} institution(s), held inactive "
+                "for office review (fill in details and activate them):"
+            )
+            for name in created_institutions:
+                typer.echo(f"  - {name}")
         if dry_run:
             db.rollback()
             typer.echo(f"DRY RUN — would create {created}, update {updated}, skip {skipped}")

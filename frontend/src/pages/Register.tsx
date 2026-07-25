@@ -1,4 +1,5 @@
 import {
+  Autocomplete,
   Button,
   Card,
   Center,
@@ -12,10 +13,21 @@ import {
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
+
+interface InstitutionPublic {
+  id: number
+  name: string
+  short_name: string | null
+  is_us: boolean
+}
+
+// Mirrors the backend's ORCID_RE (schemas/membership.py) so a typo fails
+// on the field instead of as a page-level 422.
+const ORCID_FORM_RE = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/
 
 export default function RegisterPage() {
   const [form, setForm] = useState({
@@ -39,9 +51,39 @@ export default function RegisterPage() {
   const [percentUncertain, setPercentUncertain] = useState(false)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
+  const [insts, setInsts] = useState<InstitutionPublic[]>([])
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    api.get<InstitutionPublic[]>('/institutions/public').then(setInsts).catch(() => setInsts([]))
+  }, [])
+
+  // Typed text that names a known institution (by full or short name) links
+  // to it — no US question, no duplicate entry for the office to merge.
+  const instMatch = useMemo(() => {
+    const typed = form.institution_name.trim().toLowerCase()
+    if (!typed) return null
+    return (
+      insts.find((i) => i.name.toLowerCase() === typed) ??
+      insts.find((i) => (i.short_name ?? '').toLowerCase() === typed) ??
+      null
+    )
+  }, [insts, form.institution_name])
+
+  const institutionIsUs = instMatch
+    ? instMatch.is_us
+    : form.institution_is_us === 'us'
+      ? true
+      : form.institution_is_us === 'non-us'
+        ? false
+        : null
+
+  const orcidError =
+    form.orcid.trim() && !ORCID_FORM_RE.test(form.orcid.trim().toUpperCase())
+      ? 'Enter your ORCID as 0000-0000-0000-0000, or leave it blank.'
+      : null
 
   // Charter voting rules the form can check itself (mirrors the backend
   // validation on /people/register): students are not eligible, and voting
@@ -52,20 +94,20 @@ export default function RegisterPage() {
       ? 'Graduate and undergraduate students are not eligible for voting membership — update your position or register as a non-voting member.'
       : !form.institution_name.trim()
         ? 'Voting membership requires a US institution — enter your primary institution above or register as a non-voting member.'
-        : form.institution_is_us === 'non-us'
+        : institutionIsUs === false
           ? 'Voting membership requires a US institution — register as a non-voting member.'
           : null
 
   // A new institution must be declared US or non-US (its US status gates
   // voting eligibility, so the backend refuses to guess).
   const instUsError =
-    form.institution_name.trim() && !form.institution_is_us
+    form.institution_name.trim() && !instMatch && !form.institution_is_us
       ? 'Please indicate whether this is a US institution.'
       : null
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const error = instUsError || votingError
+    const error = orcidError || instUsError || votingError
     if (error) {
       notifications.show({ color: 'red', message: error })
       return
@@ -76,11 +118,13 @@ export default function RegisterPage() {
         ...form,
         middle_name: form.middle_name || null,
         preferred_name: form.preferred_name || null,
-        orcid: form.orcid || null,
+        orcid: form.orcid.trim().toUpperCase() || null,
         usmcc_percent:
           percentUncertain || form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
-        institution_name: form.institution_name || null,
-        institution_is_us: form.institution_name.trim() ? form.institution_is_us === 'us' : null,
+        institution_id: instMatch?.id ?? null,
+        institution_name: instMatch ? null : form.institution_name.trim() || null,
+        institution_is_us:
+          instMatch || !form.institution_name.trim() ? null : form.institution_is_us === 'us',
         research_areas: joinList(form.research_areas),
       })
       setDone(true)
@@ -156,6 +200,7 @@ export default function RegisterPage() {
                 label="ORCID iD (0000-0000-0000-0000)"
                 value={form.orcid}
                 onChange={(e) => set('orcid', e.currentTarget.value)}
+                error={orcidError}
               />
               <Select
                 label="Position"
@@ -163,15 +208,24 @@ export default function RegisterPage() {
                 value={form.career_stage}
                 onChange={(v) => set('career_stage', v || 'other')}
               />
-              <TextInput
+              <Autocomplete
                 label="Primary institution"
+                description="Start typing and pick your institution; if it isn't listed, enter its full name."
+                data={insts.map((i) => i.name)}
+                limit={8}
                 value={form.institution_name}
-                onChange={(e) => set('institution_name', e.currentTarget.value)}
+                onChange={(v) => set('institution_name', v)}
               />
-              {form.institution_name.trim() && (
+              {instMatch && (
+                <Text size="xs" c="green" mt={-8}>
+                  Matched to {instMatch.name}
+                  {instMatch.short_name ? ` (${instMatch.short_name})` : ''}.
+                </Text>
+              )}
+              {form.institution_name.trim() && !instMatch && (
                 <Select
                   label="Is this a US institution?"
-                  description="US status gates voting eligibility; new institutions are reviewed by the USMCC office."
+                  description="This institution isn't in our list yet — it will be reviewed by the USMCC office. US status gates voting eligibility."
                   placeholder="Select…"
                   data={[
                     { value: 'us', label: 'US institution' },

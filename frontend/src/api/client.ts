@@ -19,10 +19,21 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const isJson = resp.headers.get('content-type')?.includes('application/json')
   const data = isJson ? await resp.json() : await resp.text()
   if (!resp.ok) {
-    const detail =
-      isJson && data && typeof data.detail === 'string'
-        ? data.detail
-        : `Request failed (${resp.status})`
+    let detail = `Request failed (${resp.status})`
+    if (isJson && data && typeof data.detail === 'string') {
+      detail = data.detail
+    } else if (isJson && Array.isArray(data?.detail)) {
+      // FastAPI validation errors (422) come as a list of {loc, msg} — turn
+      // them into something a user can act on instead of a bare status code.
+      detail = data.detail
+        .map((e: { loc?: unknown[]; msg?: string }) => {
+          const loc = Array.isArray(e.loc)
+            ? e.loc.filter((p) => p !== 'body' && typeof p !== 'number').join('.')
+            : ''
+          return loc ? `${loc}: ${e.msg}` : (e.msg ?? 'invalid value')
+        })
+        .join('; ')
+    }
     throw new ApiError(resp.status, detail)
   }
   return data as T
