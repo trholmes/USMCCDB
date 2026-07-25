@@ -13,6 +13,7 @@ from app.models import (
     Talk,
     TalkStatus,
     User,
+    WorkingGroup,
 )
 from app.schemas.speakers import (
     EventCreate,
@@ -131,14 +132,25 @@ def _require_talk_editor(user: User, talk: Talk) -> None:
         raise HTTPException(403, "Members can only edit talks they added")
 
 
+def _check_talk_refs(db: Session, data: dict) -> None:
+    """404 on dangling references instead of an IntegrityError 500 (issue #61)."""
+    for field, model in (
+        ("event_id", Event),
+        ("speaker_person_id", Person),
+        ("working_group_id", WorkingGroup),
+    ):
+        value = data.get(field)
+        if value is not None and db.get(model, value) is None:
+            raise HTTPException(404, f"{field} not found")
+
+
 @router.post("/talks", status_code=201)
 def create_talk(
     body: TalkCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TalkOut:
-    if body.event_id is not None and db.get(Event, body.event_id) is None:
-        raise HTTPException(404, "event_id not found")
+    _check_talk_refs(db, body.model_dump())
     talk = Talk(**body.model_dump(), created_by_user_id=user.id)
     db.add(talk)
     db.commit()
@@ -156,7 +168,9 @@ def update_talk(
     if talk is None:
         raise HTTPException(404, "Talk not found")
     _require_talk_editor(user, talk)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True)
+    _check_talk_refs(db, data)
+    for field, value in data.items():
         setattr(talk, field, value)
     db.commit()
     return TalkOut.model_validate(_load_talk(db, talk_id))
