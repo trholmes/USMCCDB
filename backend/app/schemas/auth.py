@@ -35,6 +35,11 @@ class UserUpdate(BaseModel):
     person_id: int | None = None
 
 
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class MeOut(BaseModel):
     user: UserOut
     person_id: int | None
