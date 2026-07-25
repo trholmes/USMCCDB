@@ -160,7 +160,14 @@ def update_publication(
         or is_convener_of(db, user, pub.working_group_id)
     ):
         raise HTTPException(403, "Only editors, conveners, or the office can edit")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True)
+    # Same check as create: a dangling reference must 404, not surface as an
+    # IntegrityError 500 (issue #61).
+    if data.get("working_group_id") is not None and (
+        db.get(WorkingGroup, data["working_group_id"]) is None
+    ):
+        raise HTTPException(404, "working_group_id not found")
+    for field, value in data.items():
         setattr(pub, field, value)
     db.commit()
     return PublicationOut.model_validate(_load_pub(db, pub_id))

@@ -35,6 +35,13 @@ def _normalize_research_areas(v: str | None) -> str | None:
     return ", ".join(values) or None
 
 
+def _check_date_order(start_date: date | None, end_date: date | None) -> None:
+    """Date ranges are inclusive on both ends; an inverted range matches no
+    cutoff date, silently dropping the person from author lists (issue #61)."""
+    if start_date is not None and end_date is not None and end_date < start_date:
+        raise ValueError("end_date must be on or after start_date")
+
+
 def _check_new_institution_is_us(
     institution_id: int | None, institution_name: str | None, institution_is_us: bool | None
 ) -> None:
@@ -94,12 +101,24 @@ class AffiliationCreate(BaseModel):
     start_date: date
     end_date: date | None = None
 
+    @model_validator(mode="after")
+    def check_date_order(self) -> "AffiliationCreate":
+        _check_date_order(self.start_date, self.end_date)
+        return self
+
 
 class AffiliationUpdate(BaseModel):
     is_primary: bool | None = None
     career_stage: CareerStage | None = None
     start_date: date | None = None
     end_date: date | None = None
+
+    @model_validator(mode="after")
+    def check_date_order(self) -> "AffiliationUpdate":
+        # Partial updates: when only one bound is sent, the router re-checks
+        # the merged row against the stored other bound.
+        _check_date_order(self.start_date, self.end_date)
+        return self
 
 
 class AffiliationOut(ORMModel):
@@ -116,11 +135,23 @@ class AuthorPeriodCreate(BaseModel):
     end_date: date | None = None
     signing_name: str | None = None
 
+    @model_validator(mode="after")
+    def check_date_order(self) -> "AuthorPeriodCreate":
+        _check_date_order(self.start_date, self.end_date)
+        return self
+
 
 class AuthorPeriodUpdate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     signing_name: str | None = None
+
+    @model_validator(mode="after")
+    def check_date_order(self) -> "AuthorPeriodUpdate":
+        # Partial updates: when only one bound is sent, the router re-checks
+        # the merged row against the stored other bound.
+        _check_date_order(self.start_date, self.end_date)
+        return self
 
 
 class AuthorPeriodOut(ORMModel):
