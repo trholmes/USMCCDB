@@ -611,12 +611,15 @@ def test_affiliation_edit_and_delete_revalidate_voting(admin):
     pid = r.json()["id"]
     assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
     assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is True
-    affil_id = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]["id"]
+    affil = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]
+    affil_id = affil["id"]
 
     # Recording a departure by closing the open primary leaves no current US
-    # affiliation — the voting flag is cleared, not left stale.
+    # affiliation — the voting flag is cleared, not left stale. (Closing on
+    # the start date keeps the range valid: ranges are inclusive, and the
+    # affiliation began today.)
     r = admin.patch(
-        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": "2025-12-31"}
+        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": affil["start_date"]}
     )
     assert r.status_code == 200, r.text
     assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
@@ -674,6 +677,74 @@ def test_affiliation_edit_second_open_primary_is_409(admin):
     second = next(a for a in person["affiliations"] if a["id"] == second_id)
     assert second["is_primary"] is False
     assert second["end_date"] == "2020-12-31"
+
+
+def test_inverted_date_ranges_rejected(admin):
+    # An affiliation or author period with end_date < start_date matches no
+    # cutoff date — the person silently drops off every generated author
+    # list — so inverted ranges must be rejected up front (issue #61).
+    inst = admin.post("/api/v1/institutions", json={"name": "Inverted Range University"}).json()
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Ivy",
+            "family_name": "Inverted",
+            "email": "ivy.inverted@example.edu",
+            "career_stage": "postdoc",
+            "institution_id": inst["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+
+    # Creating an inverted affiliation is rejected by the schema...
+    r = admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={"institution_id": inst["id"], "start_date": "2024-01-01", "end_date": "2023-01-01"},
+    )
+    assert r.status_code == 422, r.text
+
+    # ...and a partial edit that inverts the stored range is caught too.
+    affil_id = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]["id"]
+    r = admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": "1990-01-01"}
+    )
+    assert r.status_code == 422, r.text
+    r = admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{affil_id}",
+        json={"start_date": "2024-01-01", "end_date": "2023-01-01"},
+    )
+    assert r.status_code == 422, r.text
+    # The rejected edits left the affiliation open.
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert next(a for a in person["affiliations"] if a["id"] == affil_id)["end_date"] is None
+
+    # Author periods: an inverted create is a 422, not a misleading
+    # "overlapping" 409 from the bare daterange rejection.
+    r = admin.post(
+        f"/api/v1/people/{pid}/author-periods",
+        json={"start_date": "2024-01-01", "end_date": "2023-01-01"},
+    )
+    assert r.status_code == 422, r.text
+
+    # A valid period cannot be inverted by a partial edit either...
+    r = admin.post(
+        f"/api/v1/people/{pid}/author-periods",
+        json={"start_date": "2024-01-01", "end_date": "2024-12-31"},
+    )
+    assert r.status_code == 201, r.text
+    period_id = r.json()["id"]
+    r = admin.patch(
+        f"/api/v1/people/{pid}/author-periods/{period_id}", json={"end_date": "2023-06-01"}
+    )
+    assert r.status_code == 422, r.text
+    periods = admin.get(f"/api/v1/people/{pid}/author-periods").json()
+    assert next(p for p in periods if p["id"] == period_id)["end_date"] == "2024-12-31"
+
+    # ...and a genuine overlap still maps to 409.
+    r = admin.post(f"/api/v1/people/{pid}/author-periods", json={"start_date": "2024-06-01"})
+    assert r.status_code == 409, r.text
 
 
 def test_free_text_institution_requires_us_declaration(admin):
@@ -1008,6 +1079,34 @@ def test_speakers_flow(admin):
     stats = admin.get("/api/v1/stats/talks?by=person").json()
     row = next(s for s in stats if s["key_id"] == person["id"])
     assert row["talks"] >= 1 and row["invited"] >= 1
+
+
+def test_dangling_references_are_404(admin):
+    # Nonexistent FK targets on talk / publication writes must come back as
+    # 404s, not unhandled IntegrityError 500s (issue #61).
+    event = admin.post("/api/v1/events", json={"name": "FK Check Workshop"}).json()
+    r = admin.post("/api/v1/talks", json={"title": "Ghost speaker", "speaker_person_id": 999999})
+    assert r.status_code == 404, r.text
+    r = admin.post("/api/v1/talks", json={"title": "Ghost WG", "working_group_id": 999999})
+    assert r.status_code == 404, r.text
+
+    talk = admin.post("/api/v1/talks", json={"title": "Real talk", "event_id": event["id"]}).json()
+    for patch in (
+        {"event_id": 999999},
+        {"speaker_person_id": 999999},
+        {"working_group_id": 999999},
+    ):
+        r = admin.patch(f"/api/v1/talks/{talk['id']}", json=patch)
+        assert r.status_code == 404, r.text
+    # Clearing a reference is still allowed.
+    r = admin.patch(f"/api/v1/talks/{talk['id']}", json={"event_id": None})
+    assert r.status_code == 200 and r.json()["event_id"] is None
+
+    pub = admin.post("/api/v1/publications", json={"title": "FK Check Paper"}).json()
+    r = admin.patch(f"/api/v1/publications/{pub['id']}", json={"working_group_id": 999999})
+    assert r.status_code == 404, r.text
+
+    assert admin.delete(f"/api/v1/talks/{talk['id']}").status_code == 204
 
 
 def test_member_self_service_colloquia(admin):

@@ -755,6 +755,12 @@ def update_affiliation(
     person = _get_person(db, person_id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(affil, field, value)
+    # The schema catches an inverted range when both bounds are sent; a
+    # partial update must also be checked against the stored other bound —
+    # an inverted range matches no cutoff date and silently drops the person
+    # from author lists (issue #61).
+    if affil.end_date is not None and affil.end_date < affil.start_date:
+        raise HTTPException(422, "end_date must be on or after start_date")
     try:
         # Flush before re-checking eligibility (session is autoflush=False);
         # this is also where an edit that opens a second primary trips
@@ -795,6 +801,19 @@ def delete_affiliation(person_id: int, affiliation_id: int, db: Session = Depend
 # --- Author periods (office) ----------------------------------------------------
 
 
+def _commit_author_period(db: Session) -> None:
+    """Commit, mapping only the overlap EXCLUDE constraint to a 409 — any
+    other database error is a bug and must surface, not masquerade as an
+    overlap (issue #61)."""
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "no_overlapping_author_periods" in str(exc.orig):
+            raise HTTPException(409, "Overlapping author period for this person")
+        raise
+
+
 @router.get("/{person_id}/author-periods")
 def list_author_periods(
     person_id: int,
@@ -821,11 +840,7 @@ def add_author_period(
     _get_person(db, person_id)
     period = AuthorPeriod(person_id=person_id, **body.model_dump())
     db.add(period)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise HTTPException(409, "Overlapping author period for this person")
+    _commit_author_period(db)
     db.refresh(period)
     return AuthorPeriodOut.model_validate(period)
 
@@ -841,11 +856,11 @@ def update_author_period(
         raise HTTPException(404, "Author period not found")
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(period, field, value)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise HTTPException(409, "Overlapping author period for this person")
+    # Same merged-row check as affiliation updates: a partial update can
+    # invert the range against the stored other bound (issue #61).
+    if period.end_date is not None and period.end_date < period.start_date:
+        raise HTTPException(422, "end_date must be on or after start_date")
+    _commit_author_period(db)
     db.refresh(period)
     return AuthorPeriodOut.model_validate(period)
 
