@@ -60,6 +60,32 @@ def test_health(client):
     assert client.get("/api/v1/health").json() == {"status": "ok"}
 
 
+def test_startup_refuses_placeholder_secrets(monkeypatch):
+    """cp .env.example .env must not yield a bootable app with known secrets
+    (issue #59): lifespan refuses placeholder/empty SECRET_KEY and the
+    'change-me' bootstrap admin password."""
+    from app.config import get_settings
+
+    try:
+        for bad in ("change-me-openssl-rand-hex-32", "dev-only-change-me", "  "):
+            monkeypatch.setenv("SECRET_KEY", bad)
+            get_settings.cache_clear()
+            with pytest.raises(RuntimeError, match="SECRET_KEY"):
+                with TestClient(app):
+                    pass
+
+        monkeypatch.setenv("SECRET_KEY", "test-secret")
+        monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "change-me")
+        get_settings.cache_clear()
+        with pytest.raises(RuntimeError, match="BOOTSTRAP_ADMIN_PASSWORD"):
+            with TestClient(app):
+                pass
+    finally:
+        # monkeypatch restores the env after this; drop the poisoned cache so
+        # later tests re-read the real test settings.
+        get_settings.cache_clear()
+
+
 def test_me_requires_auth(client):
     fresh = TestClient(app)
     assert fresh.get("/api/v1/auth/me").status_code == 401
