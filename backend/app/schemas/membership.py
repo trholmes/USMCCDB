@@ -258,6 +258,14 @@ class InstitutionChange(BaseModel):
         return self
 
 
+class RegistrationAck(BaseModel):
+    """The one answer public registration gives, duplicate or not — the
+    response must not confirm whether an email/ORCID iD is already a member
+    record (issue #62)."""
+
+    detail: str
+
+
 class PersonSummary(ORMModel):
     id: int
     given_name: str
