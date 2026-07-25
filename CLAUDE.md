@@ -67,6 +67,13 @@ itself, so the database just has to exist.
 - Verify new migrations both ways on a scratch database:
   `DATABASE_URL=... SECRET_KEY=x python -m alembic upgrade head` (and
   `downgrade <prev>`).
+- Sequential ids collide when branches are developed in parallel (two PRs
+  each adding the same "next" number). **Just before pushing a migration,
+  fetch `origin/main` and renumber yours to follow the newest revision on
+  main** (file name, `revision`, `Revision ID`, and `down_revision`/`Revises`
+  all move together). `tests/test_migrations.py` enforces a single linear
+  chain and runs without a database, so a collision fails CI on the PR's
+  merge preview instead of breaking deployments.
 
 ## Conventions & invariants
 
