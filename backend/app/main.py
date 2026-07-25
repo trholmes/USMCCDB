@@ -10,6 +10,30 @@ from app.routers import auth, author_lists, institutions, people, publications, 
 from app.security import hash_password
 
 
+def refuse_placeholder_secrets() -> None:
+    """Refuse to serve with publicly-known secrets.
+
+    The compose `:?` guards only require non-empty values, so a
+    `cp .env.example .env && docker compose up` deploy could otherwise run
+    with the documented placeholder JWT signing key (anyone could mint an
+    admin token) and a guessable bootstrap admin password.
+    """
+    settings = get_settings()
+    key = settings.secret_key.strip()
+    if not key or key == "dev-only-change-me" or key.startswith("change-me"):
+        raise RuntimeError(
+            "SECRET_KEY is unset or a known placeholder — anyone could forge "
+            "login tokens. Set a real value in .env (openssl rand -hex 32) or "
+            "let scripts/start.sh generate one."
+        )
+    if settings.bootstrap_admin_password.strip().startswith("change-me"):
+        raise RuntimeError(
+            "BOOTSTRAP_ADMIN_PASSWORD is the known placeholder 'change-me'. "
+            "Set a real password in .env (or leave it empty to skip creating "
+            "the bootstrap admin)."
+        )
+
+
 def bootstrap_admin() -> None:
     """Create the bootstrap local admin — only when no users exist at all."""
     settings = get_settings()
@@ -31,6 +55,7 @@ def bootstrap_admin() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    refuse_placeholder_secrets()
     bootstrap_admin()
     yield
 
