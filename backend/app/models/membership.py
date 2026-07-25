@@ -162,7 +162,9 @@ class Institution(TimestampedBase):
 
     name: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
     short_name: Mapped[str | None] = mapped_column(String(80), unique=True)
-    ror_id: Mapped[str | None] = mapped_column(String(40))
+    # ROR id (https://ror.org) — stable external identifier, bare form
+    # (e.g. "05gvnxz63"); normalized/validated in the schema layer.
+    ror_id: Mapped[str | None] = mapped_column(String(40), unique=True)
     country: Mapped[str | None] = mapped_column(String(80), default="USA")
     # US-based institution — only people whose current primary affiliation is
     # at a US institution are eligible for voting membership.

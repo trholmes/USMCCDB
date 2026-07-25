@@ -18,7 +18,13 @@ const ACCESSORS: Accessors<Institution> = {
 export default function InstitutionsPage() {
   const [rows, setRows] = useState<Institution[]>([])
   const [modal, setModal] = useState<Institution | 'new' | null>(null)
-  const [form, setForm] = useState({ name: '', short_name: '', latex_address: '', is_us: true })
+  const [form, setForm] = useState({
+    name: '',
+    short_name: '',
+    ror_id: '',
+    latex_address: '',
+    is_us: true,
+  })
   const [q, setQ] = useState('')
   const { isOffice } = useSession()
   const navigate = useNavigate()
@@ -42,10 +48,11 @@ export default function InstitutionsPage() {
   const open = (target: Institution | 'new') => {
     setForm(
       target === 'new'
-        ? { name: '', short_name: '', latex_address: '', is_us: true }
+        ? { name: '', short_name: '', ror_id: '', latex_address: '', is_us: true }
         : {
             name: target.name,
             short_name: target.short_name ?? '',
+            ror_id: target.ror_id ?? '',
             latex_address: target.latex_address ?? '',
             is_us: target.is_us,
           },
@@ -53,19 +60,30 @@ export default function InstitutionsPage() {
     setModal(target)
   }
 
-  const save = async () => {
+  const save = async (allowSimilar = false) => {
     const body = {
       name: form.name,
       short_name: form.short_name || null,
+      ror_id: form.ror_id || null,
       latex_address: form.latex_address || null,
       is_us: form.is_us,
     }
     try {
-      if (modal === 'new') await api.post('/institutions', body)
+      if (modal === 'new') await api.post('/institutions', { ...body, allow_similar: allowSimilar })
       else if (modal) await api.patch(`/institutions/${modal.id}`, body)
       setModal(null)
       load()
     } catch (err: any) {
+      // The backend flags likely duplicates (normalized-name match) with a
+      // 409; the office can confirm it really is a distinct institution.
+      if (
+        modal === 'new' &&
+        err.status === 409 &&
+        String(err.message).includes('Similar institution') &&
+        window.confirm(`${err.message.split(' — ')[0]}.\n\nCreate it anyway?`)
+      ) {
+        return save(true)
+      }
       notifications.show({ color: 'red', message: err.message })
     }
   }
@@ -143,6 +161,13 @@ export default function InstitutionsPage() {
             onChange={(e) => setForm({ ...form, short_name: e.currentTarget.value })}
           />
           <TextInput
+            label="ROR id"
+            description="Stable identifier from ror.org, e.g. 05gvnxz63 — used to detect duplicates."
+            placeholder="05gvnxz63"
+            value={form.ror_id}
+            onChange={(e) => setForm({ ...form, ror_id: e.currentTarget.value })}
+          />
+          <TextInput
             label="Author-list address (as printed on papers)"
             value={form.latex_address}
             onChange={(e) => setForm({ ...form, latex_address: e.currentTarget.value })}
@@ -153,7 +178,7 @@ export default function InstitutionsPage() {
             checked={form.is_us}
             onChange={(e) => setForm({ ...form, is_us: e.currentTarget.checked })}
           />
-          <Button onClick={save}>Save</Button>
+          <Button onClick={() => save()}>Save</Button>
         </Stack>
       </Modal>
     </>

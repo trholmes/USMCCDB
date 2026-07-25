@@ -2684,3 +2684,105 @@ def test_registration_rate_limited_for_non_office(admin, monkeypatch):
         assert admin.post("/api/v1/people/register", json=payload(4)).status_code == 201
     finally:
         limiter.reset()
+
+
+# --- Institution dedup + public autocomplete (issues #93/#105/#108) --------------
+
+
+def test_public_institution_list_unauthenticated(admin):
+    inst = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Autocomplete University", "short_name": "AutoU", "is_us": True},
+    ).json()
+    anon = TestClient(app)
+    r = anon.get("/api/v1/institutions/public")
+    assert r.status_code == 200
+    rows = {i["name"]: i for i in r.json()}
+    assert "Autocomplete University" in rows
+    entry = rows["Autocomplete University"]
+    # Minimal shape only — no address/country/people data leaks unauthenticated.
+    assert set(entry) == {"id", "name", "short_name", "is_us"}
+    assert entry["id"] == inst["id"]
+    # Inactive (review-pending) institutions stay out of the picker.
+    admin.patch(f"/api/v1/institutions/{inst['id']}", json={"is_active": False})
+    names = [i["name"] for i in anon.get("/api/v1/institutions/public").json()]
+    assert "Autocomplete University" not in names
+
+
+def test_create_institution_warns_on_similar_name(admin):
+    assert (
+        admin.post(
+            "/api/v1/institutions", json={"name": "Dedup Institute of Technology"}
+        ).status_code
+        == 201
+    )
+    # Case/punctuation variants are flagged...
+    r = admin.post("/api/v1/institutions", json={"name": "dedup institute of technology."})
+    assert r.status_code == 409
+    assert "Similar institution" in r.json()["detail"]
+    # ...but the office can override after confirming it's really distinct.
+    r = admin.post(
+        "/api/v1/institutions",
+        json={"name": "dedup institute of technology.", "allow_similar": True},
+    )
+    assert r.status_code == 201
+
+
+def test_ror_id_unique_and_normalized(admin):
+    r = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Ror University", "ror_id": "https://ror.org/05gvnxz63"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["ror_id"] == "05gvnxz63"  # URL form stored as the bare id
+    # The same ROR id on another institution is a hard conflict.
+    r2 = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Ror College", "ror_id": "05gvnxz63"},
+    )
+    assert r2.status_code == 409
+    assert "05gvnxz63" in r2.json()["detail"]
+    # Garbage is rejected by validation, with the field named in the error.
+    r3 = admin.post(
+        "/api/v1/institutions", json={"name": "Ror Polytechnic", "ror_id": "not-a-ror"}
+    )
+    assert r3.status_code == 422
+
+
+def test_register_free_text_links_existing_institution(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+    inst = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Existing State University", "short_name": "ESU", "is_us": True},
+    ).json()
+    # Free text naming the existing institution (any case, via short name too)
+    # links to it instead of creating a review-pending duplicate (issue #105).
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Link",
+            "family_name": "Byname",
+            "email": "link.byname@example.edu",
+            "institution_name": "existing state university",
+            "institution_is_us": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    person = admin.get(f"/api/v1/people/{r.json()['id']}").json()
+    assert person["affiliations"][0]["institution"]["id"] == inst["id"]
+
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Link",
+            "family_name": "Byshort",
+            "email": "link.byshort@example.edu",
+            "institution_name": "esu",
+            "institution_is_us": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    person = admin.get(f"/api/v1/people/{r.json()['id']}").json()
+    assert person["affiliations"][0]["institution"]["id"] == inst["id"]
