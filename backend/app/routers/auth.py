@@ -1,3 +1,5 @@
+import hmac
+import secrets
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -9,23 +11,27 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.models import MembershipEvent, MemberStatus, Person, User, UserRole
+from app.ratelimit import enforce, login_limiter
 from app.schemas.auth import LoginRequest, MeOut, UserCreate, UserOut, UserUpdate
 from app.security import (
+    check_login_password,
     clear_session_cookie,
+    cookie_secure,
     create_access_token,
     get_current_user,
     hash_password,
-    is_office,
     membership_block_reason,
     require_admin,
     set_session_cookie,
-    verify_password,
 )
 from app.services import orcid as orcid_svc
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 STATE_MAX_AGE = 600  # seconds
+# Ties the signed OAuth state to the browser that started the sign-in; the
+# callback rejects any state minted for a different session (login CSRF).
+STATE_COOKIE = "usmccdb_oauth_state"
 
 
 def _state_serializer() -> URLSafeTimedSerializer:
@@ -45,13 +51,16 @@ def _redirect_uri(request: Request) -> str:
 def login(
     body: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> UserOut:
+    enforce(login_limiter(), request)
     user = db.execute(
         select(User).where(User.username == body.username)
     ).scalar_one_or_none()
-    if user is None or not user.password_hash or not verify_password(body.password, user.password_hash):
+    # One generic answer for unknown username, wrong password, and disabled
+    # account alike — the response must not confirm that an account exists
+    # (issue #62). check_login_password burns a bcrypt verification even for
+    # unknown usernames so timing gives the same nothing away.
+    if not check_login_password(user, body.password) or not user.is_active:
         raise HTTPException(401, "Invalid username or password")
-    if not user.is_active:
-        raise HTTPException(403, "Account is disabled")
     reason = membership_block_reason(db, user)
     if reason:
         raise HTTPException(403, reason)
@@ -161,8 +170,19 @@ def orcid_login(request: Request) -> RedirectResponse:
     settings = get_settings()
     if not settings.orcid_enabled:
         raise HTTPException(404, "ORCID sign-in is not configured")
-    state = _state_serializer().dumps({"next": "/"})
-    return RedirectResponse(orcid_svc.authorize_url(_redirect_uri(request), state))
+    nonce = secrets.token_urlsafe(32)
+    state = _state_serializer().dumps({"nonce": nonce})
+    response = RedirectResponse(orcid_svc.authorize_url(_redirect_uri(request), state))
+    response.set_cookie(
+        STATE_COOKIE,
+        nonce,
+        max_age=STATE_MAX_AGE,
+        httponly=True,
+        secure=cookie_secure(request),
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @router.get("/orcid/callback")
@@ -176,12 +196,27 @@ async def orcid_callback(
     settings = get_settings()
     if not settings.orcid_enabled:
         raise HTTPException(404, "ORCID sign-in is not configured")
+
+    def bounce(dest: str) -> RedirectResponse:
+        # The state cookie is single-use — drop it whichever way this ends.
+        r = RedirectResponse(dest)
+        r.delete_cookie(STATE_COOKIE, path="/")
+        return r
+
     if error or not code or not state:
-        return RedirectResponse("/login?error=orcid_denied")
+        return bounce("/login?error=orcid_denied")
     try:
-        _state_serializer().loads(state, max_age=STATE_MAX_AGE)
+        payload = _state_serializer().loads(state, max_age=STATE_MAX_AGE)
     except BadSignature:
-        return RedirectResponse("/login?error=orcid_state")
+        return bounce("/login?error=orcid_state")
+    # The state must have been minted for THIS browser: its nonce has to
+    # match the cookie set when the sign-in started. Otherwise an attacker
+    # could hand their own callback URL to a victim and silently sign the
+    # victim into the attacker's account (login CSRF, issue #62).
+    nonce = payload.get("nonce") or ""
+    cookie_nonce = request.cookies.get(STATE_COOKIE) or ""
+    if not nonce or not hmac.compare_digest(nonce, cookie_nonce):
+        return bounce("/login?error=orcid_state")
 
     token = await orcid_svc.exchange_code(code, _redirect_uri(request))
     orcid_id: str = token["orcid"]
@@ -225,7 +260,7 @@ async def orcid_callback(
         db.refresh(user)
 
     if not user.is_active:
-        return RedirectResponse("/login?error=account_disabled")
+        return bounce("/login?error=account_disabled")
 
     person = db.get(Person, user.person_id) if user.person_id else None
     needs_registration = bool(
@@ -238,14 +273,14 @@ async def orcid_callback(
     # membership_block_reason in get_current_user).
     if person is not None and user.role == UserRole.member and not needs_registration:
         if person.status == MemberStatus.pending:
-            return RedirectResponse("/login?error=membership_pending")
+            return bounce("/login?error=membership_pending")
         if person.status == MemberStatus.rejected:
-            return RedirectResponse("/login?error=membership_rejected")
+            return bounce("/login?error=membership_rejected")
 
     user.last_login_at = datetime.now(UTC)
     db.commit()
 
     dest = "/register?welcome=orcid" if needs_registration else "/"
-    response = RedirectResponse(dest)
+    response = bounce(dest)
     set_session_cookie(response, request, create_access_token(user))
     return response
