@@ -68,6 +68,21 @@ PHOTO_TYPES = {
     "image/gif": ".gif",
 }
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
+PHOTO_CHUNK_BYTES = 1024 * 1024
+
+
+def _photo_signature_ok(content_type: str, head: bytes) -> bool:
+    # The client-declared Content-Type is not trusted; the file must open
+    # with the magic bytes of the format it claims to be.
+    if content_type == "image/jpeg":
+        return head.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return head.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/webp":
+        return head[:4] == b"RIFF" and head[8:12] == b"WEBP"
+    if content_type == "image/gif":
+        return head[:6] in (b"GIF87a", b"GIF89a")
+    return False
 
 router = APIRouter(prefix="/people", tags=["membership"])
 
@@ -649,9 +664,18 @@ async def upload_photo(
     ext = PHOTO_TYPES.get(file.content_type or "")
     if ext is None:
         raise HTTPException(422, f"Unsupported type; use one of {sorted(PHOTO_TYPES)}")
-    content = await file.read()
-    if len(content) > MAX_PHOTO_BYTES:
-        raise HTTPException(413, "Photo too large (max 10 MB)")
+    # Read in chunks so an oversized body is aborted at the limit instead of
+    # being buffered whole first.
+    chunks: list[bytes] = []
+    size = 0
+    while chunk := await file.read(PHOTO_CHUNK_BYTES):
+        size += len(chunk)
+        if size > MAX_PHOTO_BYTES:
+            raise HTTPException(413, "Photo too large (max 10 MB)")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    if not _photo_signature_ok(file.content_type or "", content[:16]):
+        raise HTTPException(422, "File content does not match the declared image type")
     photos = Path(get_settings().photos_dir)
     photos.mkdir(parents=True, exist_ok=True)
     # Fixed name per person, timestamped to bust caches on replacement.

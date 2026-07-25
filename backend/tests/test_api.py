@@ -1054,6 +1054,33 @@ def test_photo_upload_and_serve(admin, tmp_path_factory):
     assert admin.get(f"/api/v1/people/{person['id']}/photo").status_code == 404
 
 
+def test_photo_upload_rejects_bad_content(admin, tmp_path_factory, monkeypatch):
+    os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    person = admin.get("/api/v1/people").json()[0]
+    before = admin.get(f"/api/v1/people/{person['id']}").json()["photo_file"]
+
+    # An allowed Content-Type whose bytes are not that format is rejected.
+    fake = admin.post(
+        f"/api/v1/people/{person['id']}/photo",
+        files={"file": ("fake.png", b"<html>not an image</html>", "image/png")},
+    )
+    assert fake.status_code == 422
+    assert admin.get(f"/api/v1/people/{person['id']}").json()["photo_file"] == before
+
+    # An oversized body is rejected (shrink the limit rather than posting 10 MB).
+    from app.routers import people as people_router
+
+    monkeypatch.setattr(people_router, "MAX_PHOTO_BYTES", 1024)
+    big = admin.post(
+        f"/api/v1/people/{person['id']}/photo",
+        files={"file": ("big.png", b"\x89PNG\r\n\x1a\n" + b"\0" * 2048, "image/png")},
+    )
+    assert big.status_code == 413
+
+
 def test_speakers_flow(admin):
     event = admin.post("/api/v1/events", json={"name": "Snowmass 2026"}).json()
     talk = admin.post(
