@@ -215,6 +215,8 @@ export interface AuthorListSnapshot {
     string,
     { id: number; index: number; name: string; short_name: string | null; latex_address: string | null }
   >
+  // Absent in snapshots generated before warnings existed.
+  warnings?: string[]
 }
 
 export interface AuthorList {
