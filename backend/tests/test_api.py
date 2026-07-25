@@ -566,6 +566,90 @@ def test_activation_revalidates_voting(admin):
     assert person["is_voting"] is False
 
 
+def test_affiliation_edit_and_delete_revalidate_voting(admin):
+    # Office affiliation PATCH/DELETE must enforce the voting invariant like
+    # every other path that touches the involved fields (issue #57).
+    us = admin.post("/api/v1/institutions", json={"name": "Affil Edit University"}).json()
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Vera",
+            "family_name": "Votingedit",
+            "email": "vera.votingedit@example.edu",
+            "career_stage": "postdoc",
+            "institution_id": us["id"],
+            "is_voting": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is True
+    affil_id = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]["id"]
+
+    # Recording a departure by closing the open primary leaves no current US
+    # affiliation — the voting flag is cleared, not left stale.
+    r = admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": "2025-12-31"}
+    )
+    assert r.status_code == 200, r.text
+    assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
+
+    # Reopening the affiliation does not silently restore the flag, but the
+    # member becomes eligible again and the office can re-grant it.
+    assert admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": None}
+    ).status_code == 200
+    assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
+    assert admin.patch(f"/api/v1/people/{pid}", json={"is_voting": True}).status_code == 200
+
+    # Deleting the open primary outright clears the flag the same way.
+    assert admin.delete(f"/api/v1/people/{pid}/affiliations/{affil_id}").status_code == 204
+    assert admin.get(f"/api/v1/people/{pid}").json()["is_voting"] is False
+
+
+def test_affiliation_edit_second_open_primary_is_409(admin):
+    # Editing a second affiliation into an open primary trips
+    # uq_one_open_primary_affiliation — a clean 409, not a 500 (issue #57).
+    us = admin.post("/api/v1/institutions", json={"name": "Affil Conflict University"}).json()
+    other = admin.post("/api/v1/institutions", json={"name": "Affil Conflict Institute"}).json()
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Colin",
+            "family_name": "Conflictson",
+            "email": "colin.conflictson@example.edu",
+            "career_stage": "postdoc",
+            "institution_id": us["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    r = admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={
+            "institution_id": other["id"],
+            "is_primary": False,
+            "start_date": "2020-01-01",
+            "end_date": "2020-12-31",
+        },
+    )
+    assert r.status_code == 201, r.text
+    second_id = r.json()["id"]
+
+    r = admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{second_id}",
+        json={"is_primary": True, "end_date": None},
+    )
+    assert r.status_code == 409, r.text
+    # The rejected edit was rolled back entirely.
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    second = next(a for a in person["affiliations"] if a["id"] == second_id)
+    assert second["is_primary"] is False
+    assert second["end_date"] == "2020-12-31"
+
+
 def test_free_text_institution_requires_us_declaration(admin):
     base = {
         "given_name": "Nina",
@@ -1631,6 +1715,110 @@ def test_import_members_xlsx_percent_time(admin, tmp_path):
     )
     assert admin.get(f"/api/v1/people/{pia['id']}").json()["usmcc_percent"] == 17
     assert admin.get(f"/api/v1/people/{ulla['id']}").json()["usmcc_percent"] == 75
+
+
+def test_import_members_xlsx_voting_eligibility(admin, tmp_path):
+    # A blank voting answer must not grant the flag, and explicit voting
+    # requests are subject to the same charter rules the API enforces:
+    # active, non-student, currently at a US institution (issue #58).
+    from datetime import datetime
+
+    import openpyxl
+
+    from app.cli import import_members_xlsx
+
+    header = [
+        "Timestamp",
+        "According to this definition, are you registering to be a voting "
+        "or non-voting member of USMCC?",
+        "First Name",
+        "Middle Name",
+        "Last Name",
+        "Primary Affiliation",
+        "Any additional affiliations",
+        "Email",
+        "ORCID ID (if available)",
+        "Position",
+        "Area(s) of Expertise",
+        "What percent of your research time do you expect to spend on muon "
+        "colliders in the next few years?",
+    ]
+
+    admin.post(
+        "/api/v1/institutions",
+        json={"name": "Xlsx Overseas Institute", "country": "Japan", "is_us": False},
+    )
+
+    def run(rows):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws.append(header)
+        for r in rows:
+            ws.append(r)
+        path = tmp_path / "members.xlsx"
+        wb.save(path)
+        import_members_xlsx(
+            xlsx_path=path, sheet="Members", authors_from_voting=True, dry_run=False
+        )
+
+    ts = datetime(2025, 4, 10)
+    run(
+        [
+            # Blank answer: imports as non-voting, not voting.
+            [ts, None, "Blanche", None, "Blankvote", "Xlsx Voting University", None,
+             "blanche.blankvote@example.edu", None, "Faculty",
+             "Accelerator Physics", "10-24%"],
+            # A grad student's voting request is dropped (charter rule).
+            [ts, "Voting member", "Stu", None, "Studentvote", "Xlsx Voting University",
+             None, "stu.studentvote@example.edu", None, "Graduate Student",
+             "Detector R&D", "10-24%"],
+            # A voting request from a non-US institution is dropped too.
+            [ts, "Voting member", "Oli", None, "Overseasvote", "Xlsx Overseas Institute",
+             None, "oli.overseasvote@example.edu", None, "Faculty",
+             "Accelerator Physics", "10-24%"],
+            # An eligible request is granted (and opens an author period).
+            [ts, "Voting member", "Val", None, "Validvote", "Xlsx Voting University",
+             None, "val.validvote@example.edu", None, "Faculty",
+             "Accelerator Physics", "10-24%"],
+        ]
+    )
+
+    def fetch(q):
+        pid = admin.get("/api/v1/people", params={"q": q}).json()[0]["id"]
+        return admin.get(f"/api/v1/people/{pid}").json()
+
+    assert fetch("blanche.blankvote")["is_voting"] is False
+    assert fetch("stu.studentvote")["is_voting"] is False
+    assert fetch("oli.overseasvote")["is_voting"] is False
+    val = fetch("val.validvote")
+    assert val["is_voting"] is True
+
+    # authors_from_voting only opens periods for members actually granted
+    # the flag.
+    assert admin.get(f"/api/v1/people/{val['id']}/author-periods").json() != []
+    ineligible = fetch("stu.studentvote")
+    assert admin.get(f"/api/v1/people/{ineligible['id']}/author-periods").json() == []
+
+    # Re-import (upsert) with a blank answer keeps the stored flag rather
+    # than silently revoking (or granting) voting membership.
+    run(
+        [
+            [ts, None, "Val", None, "Validvote", "Xlsx Voting University", None,
+             "val.validvote@example.edu", None, "Faculty",
+             "Accelerator Physics", "10-24%"],
+        ]
+    )
+    assert fetch("val.validvote")["is_voting"] is True
+    # …and an explicit "non-voting" answer clears it.
+    run(
+        [
+            [ts, "Non-voting member", "Val", None, "Validvote", "Xlsx Voting University",
+             None, "val.validvote@example.edu", None, "Faculty",
+             "Accelerator Physics", "10-24%"],
+        ]
+    )
+    assert fetch("val.validvote")["is_voting"] is False
 
 
 # --- ORCID sign-in & registration approval (issue #50) -------------------------
