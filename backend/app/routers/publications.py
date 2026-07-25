@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
@@ -62,14 +63,20 @@ def _is_editor(db: Session, user: User, pub_id: int) -> bool:
 
 
 def _next_short_code(db: Session, pub_type: str) -> str:
+    # One past the highest existing suffix, not a row count: a count repeats
+    # numbers as soon as the sequence has gaps (deleted rows, concurrent
+    # creates), colliding with the unique constraint on short_code.
     year = datetime.now(UTC).year
     prefix = f"USMCC-{pub_type.upper().replace('_', '')[:4]}-{year}-"
-    count = db.execute(
-        select(func.count()).select_from(Publication).where(
-            Publication.short_code.like(f"{prefix}%")
-        )
-    ).scalar_one()
-    return f"{prefix}{count + 1:03d}"
+    codes = db.execute(
+        select(Publication.short_code).where(Publication.short_code.like(f"{prefix}%"))
+    ).scalars()
+    highest = 0
+    for code in codes:
+        suffix = code[len(prefix):]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return f"{prefix}{highest + 1:03d}"
 
 
 @router.get("/public")
@@ -124,9 +131,21 @@ def create_publication(
     if body.working_group_id is not None and db.get(WorkingGroup, body.working_group_id) is None:
         raise HTTPException(404, "working_group_id not found")
     pub = Publication(**body.model_dump())
-    pub.short_code = _next_short_code(db, body.pub_type.value)
-    db.add(pub)
-    db.flush()
+    # Two concurrent creates can compute the same code; the unique constraint
+    # rejects the loser at flush — retry with a freshly computed code instead
+    # of surfacing a 500.
+    for _ in range(3):
+        pub.short_code = _next_short_code(db, body.pub_type.value)
+        db.add(pub)
+        try:
+            db.flush()
+            break
+        except IntegrityError as exc:
+            if "short_code" not in str(exc.orig):
+                raise
+            db.rollback()
+    else:
+        raise HTTPException(409, "Could not allocate a publication code; please retry")
     if user.person_id is not None:
         db.add(
             PublicationPerson(

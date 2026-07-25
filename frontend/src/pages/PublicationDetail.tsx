@@ -257,23 +257,30 @@ export default function PublicationDetailPage() {
           Author lists
         </Title>
         {lists.map((l) => (
-          <Group key={l.id} gap="md" mb={6}>
-            <Text size="sm">
-              cutoff {l.cutoff_date} — {l.snapshot.authors.length} authors,{' '}
-              {Object.keys(l.snapshot.institutions).length} institutions
-            </Text>
-            <Group gap={6}>
-              <Anchor size="sm" href={exportUrl(l.id, 'txt')}>
-                txt
-              </Anchor>
-              <Anchor size="sm" href={exportUrl(l.id, 'tex')}>
-                LaTeX
-              </Anchor>
-              <Anchor size="sm" href={exportUrl(l.id, 'xml')}>
-                authors.xml
-              </Anchor>
+          <div key={l.id}>
+            <Group gap="md" mb={6}>
+              <Text size="sm">
+                cutoff {l.cutoff_date} — {l.snapshot.authors.length} authors,{' '}
+                {Object.keys(l.snapshot.institutions).length} institutions
+              </Text>
+              <Group gap={6}>
+                <Anchor size="sm" href={exportUrl(l.id, 'txt')}>
+                  txt
+                </Anchor>
+                <Anchor size="sm" href={exportUrl(l.id, 'tex')}>
+                  LaTeX
+                </Anchor>
+                <Anchor size="sm" href={exportUrl(l.id, 'xml')}>
+                  authors.xml
+                </Anchor>
+              </Group>
             </Group>
-          </Group>
+            {(l.snapshot.warnings ?? []).map((w, i) => (
+              <Text key={i} size="xs" c="orange" mb={6}>
+                ⚠ {w}
+              </Text>
+            ))}
+          </div>
         ))}
         <Group mt="sm">
           <Select

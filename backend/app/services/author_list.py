@@ -27,8 +27,9 @@ def _sort_key(family: str, given: str) -> tuple[str, str]:
 
 
 def build_snapshot(db: Session, cutoff: date, person_ids: list[int] | None = None) -> dict:
-    """Return {"cutoff_date", "authors": [...], "institutions": {id: {...}}}
-    with authors ordered and institutions numbered by first appearance.
+    """Return {"cutoff_date", "authors": [...], "institutions": {id: {...}},
+    "warnings": [...]} with authors ordered, institutions numbered by first
+    appearance, and a warning per author lacking an affiliation at the cutoff.
 
     By default the list covers everyone with an active authorship period at
     the cutoff. With ``person_ids`` it is restricted to exactly those people
@@ -67,7 +68,12 @@ def build_snapshot(db: Session, cutoff: date, person_ids: list[int] | None = Non
 
     affils_by_person: dict[int, list[Institution]] = {}
     for person_id, inst in affil_rows:
-        affils_by_person.setdefault(person_id, []).append(inst)
+        insts = affils_by_person.setdefault(person_id, [])
+        # Overlapping affiliation rows at the same institution (office
+        # add_affiliation, importer re-runs) must not repeat the id — a
+        # duplicate would render as \author[1,1]{...} in the LaTeX export.
+        if all(i.id != inst.id for i in insts):
+            insts.append(inst)
 
     authors = []
     for person, signing_name in rows:
@@ -104,8 +110,18 @@ def build_snapshot(db: Session, cutoff: date, person_ids: list[int] | None = Non
                 }
         del a["_institutions"]
 
+    # An author with no affiliation on the cutoff date would silently get an
+    # empty affiliation in every export; flag them so the office can fix the
+    # gap before publishing.
+    warnings = [
+        f"{a['display_name']} has no affiliation on the cutoff date"
+        for a in authors
+        if not a["institution_ids"]
+    ]
+
     return {
         "cutoff_date": cutoff.isoformat(),
         "authors": authors,
         "institutions": institutions,
+        "warnings": warnings,
     }

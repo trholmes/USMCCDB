@@ -192,6 +192,57 @@ def test_author_list_generation(admin):
     assert "<collaborationauthorlist" in xml.text
 
 
+def test_author_list_dedup_and_missing_affiliation_warning(admin):
+    inst = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Dup University", "latex_address": "Dup University, USA"},
+    ).json()
+
+    # Two overlapping affiliation rows at the same institution (possible via
+    # office add_affiliation or importer re-runs) must yield one id, not two.
+    dup = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Dee", "family_name": "Dupe", "email": "dee.dupe@example.edu"},
+    ).json()
+    admin.post(f"/api/v1/people/{dup['id']}/status", json={"status": "active"})
+    r = admin.post(
+        f"/api/v1/people/{dup['id']}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2025-01-01"},
+    )
+    assert r.status_code == 201, r.text
+    r = admin.post(
+        f"/api/v1/people/{dup['id']}/affiliations",
+        json={
+            "institution_id": inst["id"],
+            "is_primary": False,
+            "start_date": "2025-06-01",
+            "end_date": "2027-01-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    admin.post(f"/api/v1/people/{dup['id']}/author-periods", json={"start_date": "2025-01-01"})
+
+    # An active author period but no affiliation on the cutoff date.
+    gap = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Gale", "family_name": "Gapp", "email": "gale.gapp@example.edu"},
+    ).json()
+    admin.post(f"/api/v1/people/{gap['id']}/status", json={"status": "active"})
+    admin.post(f"/api/v1/people/{gap['id']}/author-periods", json={"start_date": "2025-01-01"})
+
+    snap = admin.post(
+        "/api/v1/author-lists/preview", json={"cutoff_date": "2026-06-01"}
+    ).json()
+
+    dup_row = next(a for a in snap["authors"] if a["person_id"] == dup["id"])
+    assert dup_row["institution_ids"] == [inst["id"]]
+
+    gap_row = next(a for a in snap["authors"] if a["person_id"] == gap["id"])
+    assert gap_row["institution_ids"] == []
+    assert any("Gale Gapp" in w for w in snap["warnings"])
+    assert not any("Dee Dupe" in w for w in snap["warnings"])
+
+
 def test_member_cannot_do_office_things(admin):
     # Create a plain member account.
     r = admin.post(
@@ -2040,6 +2091,177 @@ def test_import_members_xlsx_voting_eligibility(admin, tmp_path):
         ]
     )
     assert fetch("val.validvote")["is_voting"] is False
+
+
+def test_import_members_warns_on_bad_start_date(admin, tmp_path, capsys):
+    # An unparseable start_date must not silently become today with no trace
+    # (issue #66): the row still imports, but with a per-row warning.
+    from app.cli import import_members
+
+    csv_file = tmp_path / "members.csv"
+    csv_file.write_text(
+        "given_name,family_name,email,orcid,institution_short_name,"
+        "career_stage,start_date,is_author\n"
+        "Dana,Dateson,dana.dateson@example.edu,,DateU,faculty,07/15/2024,false\n"
+    )
+    import_members(csv_path=csv_file, dry_run=False)
+    out = capsys.readouterr().out
+    assert "unparseable start_date '07/15/2024'" in out
+    assert len(admin.get("/api/v1/people", params={"q": "dana.dateson"}).json()) == 1
+
+
+def test_import_members_xlsx_warns_on_bad_timestamp(admin, tmp_path, capsys):
+    # A non-date Timestamp cell must not silently become today either
+    # (issue #66).
+    import openpyxl
+
+    from app.cli import import_members_xlsx
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Members"
+    ws.append(
+        ["Timestamp",
+         "According to this definition, are you registering to be a voting "
+         "or non-voting member of USMCC?",
+         "First Name", "Middle Name", "Last Name", "Primary Affiliation",
+         "Any additional affiliations", "Email", "ORCID ID (if available)",
+         "Position", "Area(s) of Expertise",
+         "What percent of your research time do you expect to spend on muon "
+         "colliders in the next few years?"]
+    )
+    ws.append(
+        ["07/15/2024", "Non-voting member", "Tim", None, "Stampson",
+         "Stamp University", None, "tim.stampson@example.edu", None,
+         "Faculty", "Accelerator Physics", "10-24%"]
+    )
+    path = tmp_path / "members.xlsx"
+    wb.save(path)
+    import_members_xlsx(
+        xlsx_path=path, sheet="Members", authors_from_voting=False, dry_run=False
+    )
+    out = capsys.readouterr().out
+    assert "Timestamp '07/15/2024' is not a date cell" in out
+    assert len(admin.get("/api/v1/people", params={"q": "tim.stampson"}).json()) == 1
+
+
+def test_percent_time_fraction_cells():
+    # Excel stores a cell *displayed* as "25%" as the float 0.25, which used
+    # to round to 0 and record 0% effort (issue #66); fractions in (0, 1]
+    # scale back to percent. Range strings and plain numbers are unchanged.
+    from app.cli import _percent_time
+
+    assert _percent_time(0.25) == 25
+    assert _percent_time(0.5) == 50
+    assert _percent_time(1) == 100  # a percent-formatted 100%
+    assert _percent_time(0) == 0
+    assert _percent_time(50) == 50
+    assert _percent_time("0-10%") == 5
+    assert _percent_time(150) is None
+    assert _percent_time(None) is None
+
+
+def test_import_members_infile_duplicate_rows(admin, tmp_path):
+    # The session is autoflush=False, so pending rows used to be invisible to
+    # the dedup SELECTs: the same email twice in one CSV produced a second
+    # activation event (double-counting growth stats), a second open primary
+    # affiliation, and a second author period — the latter two roll back the
+    # whole import on their constraints (issue #66).
+    from app.cli import import_members
+
+    csv_file = tmp_path / "members.csv"
+    row = "Dupla,Duplison,dupla.duplison@example.edu,,DupU,faculty,2024-02-01,true\n"
+    csv_file.write_text(
+        "given_name,family_name,email,orcid,institution_short_name,"
+        "career_stage,start_date,is_author\n" + row + row
+    )
+    import_members(csv_path=csv_file, dry_run=False)
+
+    pid = admin.get("/api/v1/people", params={"q": "dupla.duplison"}).json()[0]["id"]
+    events = admin.get(f"/api/v1/people/{pid}/events").json()
+    assert [e["to_status"] for e in events] == ["active"]
+    assert len(admin.get(f"/api/v1/people/{pid}/author-periods").json()) == 1
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert len([a for a in person["affiliations"] if a["end_date"] is None]) == 1
+
+
+def test_import_talks_xlsx_infile_duplicate_rows(admin, tmp_path):
+    # Same autoflush=False pitfall in the talks importer: the duplicate
+    # SELECT must see talks pending from earlier rows of the same file
+    # (issue #66).
+    from datetime import datetime
+
+    import openpyxl
+
+    from app.cli import import_talks_xlsx
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Assigned Talks"
+    ws.append(["Date", "Conference", "Topic", "Name", "Plenary/Parallel",
+               "Invited/Contributed", "URL", "Notes"])
+    row = [datetime(2025, 5, 6), "DupConf 2025", "Duplicated Topic", None,
+           "Plenary", "Invited", None, None]
+    ws.append(row)
+    ws.append(row)
+    path = tmp_path / "talks.xlsx"
+    wb.save(path)
+    import_talks_xlsx(xlsx_path=path, sheet="Assigned Talks", dry_run=False)
+
+    talks = admin.get("/api/v1/talks").json()
+    assert len([t for t in talks if t["title"] == "Duplicated Topic"]) == 1
+
+
+def test_publication_short_code_survives_gaps(admin):
+    # _next_short_code must allocate one past the highest existing suffix; a
+    # row count re-issues an existing code once the sequence has gaps and the
+    # unique constraint turns the next create into a 500 (issue #66).
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    first = admin.post(
+        "/api/v1/publications", json={"title": "Gap One", "pub_type": "proceedings"}
+    ).json()
+    second = admin.post(
+        "/api/v1/publications", json={"title": "Gap Two", "pub_type": "proceedings"}
+    ).json()
+    assert second["short_code"] > first["short_code"]
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM publications WHERE id = :id"), {"id": first["id"]})
+
+    r = admin.post(
+        "/api/v1/publications", json={"title": "Gap Three", "pub_type": "proceedings"}
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["short_code"] > second["short_code"]
+
+
+def test_publication_short_code_collision_retries(admin, monkeypatch):
+    # Two concurrent creates can compute the same code; the loser must retry
+    # with a fresh code instead of surfacing the IntegrityError as a 500
+    # (issue #66).
+    import app.routers.publications as pubs_router
+
+    first = admin.post(
+        "/api/v1/publications", json={"title": "Race One", "pub_type": "note"}
+    ).json()
+
+    real = pubs_router._next_short_code
+    calls = []
+
+    def collide_once(db, pub_type):
+        calls.append(pub_type)
+        if len(calls) == 1:
+            return first["short_code"]
+        return real(db, pub_type)
+
+    monkeypatch.setattr(pubs_router, "_next_short_code", collide_once)
+    r = admin.post("/api/v1/publications", json={"title": "Race Two", "pub_type": "note"})
+    assert r.status_code == 201, r.text
+    assert r.json()["short_code"] != first["short_code"]
+    assert len(calls) == 2
 
 
 # --- ORCID sign-in & registration approval (issue #50) -------------------------
