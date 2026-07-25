@@ -146,14 +146,18 @@ Both commands skip people who already have a photo unless you pass
 | `./scripts/stop.sh` | Stop everything (data is kept) |
 | `./scripts/backup.sh` | Take a database dump right now |
 | `./scripts/list-backups.sh` | List all dumps (daily/weekly/monthly rotation) |
-| `./scripts/restore.sh daily/usmccdb-2026-07-19.dump` | Restore a dump (stops the backend during restore) |
+| `./scripts/restore.sh daily/usmccdb-2026-07-19.dump` | Restore a dump and its photo snapshot (stops the backend during restore) |
 | `./scripts/reset.sh` | **Wipe the database** and start fresh (offers a final backup first) |
 | `./scripts/logs.sh [service]` | Tail logs |
 
 Backups run automatically every night at `BACKUP_HOUR` (UTC) into the
 `backups` volume, rotated as 14 daily / 8 weekly / 12 monthly dumps; member
-photos are snapshotted alongside as `photos-<date>.tar.gz`. Copy everything
-off-site with e.g. `docker compose cp backup:/backups ./offsite/`.
+photos are snapshotted alongside as `photos-<date>.tar.gz`. Restoring a dump
+also restores the photo snapshot from the same day when one exists (weekly
+and monthly dumps have no snapshot of their own — pass a daily
+`photos-*.tar.gz` as a second argument to `restore.sh` to restore photos
+with them). Copy everything off-site with e.g.
+`docker compose cp backup:/backups ./offsite/`.
 
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,

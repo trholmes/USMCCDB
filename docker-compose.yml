@@ -94,7 +94,9 @@ services:
       KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
     volumes:
       - backups:/backups
-      - photos:/photos:ro
+      # Writable so /restore.sh can put photo snapshots back; backup.sh
+      # itself only reads from it.
+      - photos:/photos
     depends_on:
       db:
         condition: service_healthy
