@@ -19,6 +19,7 @@ import { api, exportUrl } from '../api/client'
 import type { AuthorList, PersonSummary, Publication } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { today } from '../dates'
 
 const STATUSES = ['in_progress', 'collab_review', 'submitted', 'published']
 const MEMBER_ROLES = [
@@ -118,7 +119,9 @@ export default function PublicationDetailPage() {
 
   const generate = async () => {
     try {
-      const cutoffDate = cutoff || new Date().toISOString().slice(0, 10)
+      // Local date, not UTC — author periods are inclusive on both ends, so
+      // a UTC off-by-one would wrongly include/exclude boundary authors.
+      const cutoffDate = cutoff || today()
       await api.post(`/publications/${pub.id}/author-list`, {
         cutoff_date: cutoffDate,
         scope: scope ?? 'involved',

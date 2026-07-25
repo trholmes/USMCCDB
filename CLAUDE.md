@@ -82,8 +82,9 @@ itself, so the database just has to exist.
   changes, update the other.
 - Date ranges (affiliations, author periods) are **inclusive on both ends** —
   author-list generation depends on this. An institution move closes the old
-  affiliation the day *before* the move date; a same-day move deletes the
-  superseded row (see `_close_primary` in `app/routers/people.py`).
+  affiliation *on* the move date (the person carries both affiliations on the
+  transition day); a same-day move deletes the superseded row (see
+  `_close_primary` in `app/routers/people.py`).
 - At most one open primary affiliation per person (partial unique index);
   author periods must not overlap (EXCLUDE constraint, needs `btree_gist`).
 - Roles: `admin` / `office` / `member`. Members may edit only the

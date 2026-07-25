@@ -56,6 +56,11 @@ export interface CollabRoleDef {
   needsDetail?: boolean
   needsWG?: boolean
   needsInstitution?: boolean
+  // Valid backend value the collaboration doesn't currently assign: kept here
+  // so existing rows label and sort correctly, but left out of the add-role
+  // picker. Never delete/comment out an entry while the backend enum keeps
+  // the value — rows would display as raw enum values and sort last.
+  hidden?: boolean
 }
 
 export const COLLAB_ROLES: CollabRoleDef[] = [
@@ -73,26 +78,39 @@ export const COLLAB_ROLES: CollabRoleDef[] = [
     template: 'Deputy {detail} Representative',
     needsDetail: true,
   },
-  // {
-  //   value: 'coordinator',
-  //   label: 'Coordinator',
-  //   template: '{detail} Coordinator',
-  //   needsDetail: true,
-  // },
-  // {
-  //   value: 'deputy_coordinator',
-  //   label: 'Deputy Coordinator',
-  //   template: 'Deputy {detail} Coordinator',
-  //   needsDetail: true,
-  // },
-  //{ value: 'area_lead', label: 'Focus Area Lead', template: '{detail} Lead', needsDetail: true },
+  {
+    value: 'coordinator',
+    label: 'Coordinator',
+    template: '{detail} Coordinator',
+    needsDetail: true,
+    hidden: true,
+  },
+  {
+    value: 'deputy_coordinator',
+    label: 'Deputy Coordinator',
+    template: 'Deputy {detail} Coordinator',
+    needsDetail: true,
+    hidden: true,
+  },
+  {
+    value: 'area_lead',
+    label: 'Focus Area Lead',
+    template: '{detail} Lead',
+    needsDetail: true,
+    hidden: true,
+  },
   { value: 'lsg_member', label: 'Leadership Strategy Group' },
-  //{ value: 'ib_rep', label: 'Institutional Board Representative', needsInstitution: true },
+  {
+    value: 'ib_rep',
+    label: 'Institutional Board Representative',
+    needsInstitution: true,
+    hidden: true,
+  },
   { value: 'admin_contact', label: 'Administrative Institutional Contact', needsInstitution: true },
   { value: 'convener', label: 'Working Group Convener', needsWG: true },
   { value: 'speakers_comm', label: 'Speakers Committee' },
-  //{ value: 'pub_chair', label: 'Publications Committee Chair' },
-  //{ value: 'secretary', label: 'Secretary' },
+  { value: 'pub_chair', label: 'Publications Committee Chair', hidden: true },
+  { value: 'secretary', label: 'Secretary', hidden: true },
   { value: 'other', label: 'Other (free-form title)', template: '{detail}', needsDetail: true },
 ]
 

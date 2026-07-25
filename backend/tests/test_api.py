@@ -343,17 +343,24 @@ def test_member_self_institution_move_keeps_history(admin):
     person = member.get(f"/api/v1/people/{pid}").json()
     affils = sorted(person["affiliations"], key=lambda x: x["start_date"])
     assert [x["institution"]["name"] for x in affils] == ["Alpha University", "Beta Institute"]
-    # Old affiliation ends the day BEFORE the move — sharing the boundary date
-    # would double-list the person on an author list cut on the move date.
-    assert affils[0]["end_date"] == "2026-05-31"
+    # The old affiliation ends ON the move date (issue #67) — ranges are
+    # inclusive on both ends, so the person carries both affiliations on the
+    # transition day.
+    assert affils[0]["end_date"] == "2026-06-01"
     assert affils[1]["end_date"] is None  # new one is open
 
-    # An author list cut exactly on the move date shows only the new institution.
+    # An author list cut exactly on the move date shows both institutions;
+    # cut the day after, only the new one.
     for inst_id in (a["id"], b["id"]):
         admin.patch(f"/api/v1/institutions/{inst_id}", json={"latex_address": "addr"})
     admin.post(f"/api/v1/people/{pid}/author-periods", json={"start_date": "2025-01-01"})
     snap = admin.post(
         "/api/v1/author-lists/preview", json={"cutoff_date": "2026-06-01"}
+    ).json()
+    row = next(x for x in snap["authors"] if x["person_id"] == pid)
+    assert row["institution_ids"] == [a["id"], b["id"]]
+    snap = admin.post(
+        "/api/v1/author-lists/preview", json={"cutoff_date": "2026-06-02"}
     ).json()
     row = next(x for x in snap["authors"] if x["person_id"] == pid)
     assert row["institution_ids"] == [b["id"]]
@@ -375,8 +382,8 @@ def test_member_self_institution_move_keeps_history(admin):
             json={"institution_id": a["id"], "start_date": "2026-01-01"},
         ).status_code == 403
 
-    # A same-day move is a correction: the superseded zero-length row is
-    # dropped rather than left as a one-day affiliation.
+    # A same-day move is a correction: the superseded row is dropped rather
+    # than left as a one-day affiliation.
     assert member.post(
         f"/api/v1/people/{pid}/institution",
         json={"institution_id": a["id"], "start_date": "2026-06-01"},
@@ -1822,11 +1829,11 @@ def test_import_members_institution_move(admin, tmp_path):
     person = admin.get(f"/api/v1/people/{pid}").json()
     affils = sorted(person["affiliations"], key=lambda x: x["start_date"])
     assert [a["institution"]["short_name"] for a in affils] == ["MovA", "MovB"]
-    # Ranges are inclusive on both ends: the old row ends the day BEFORE the move.
-    assert affils[0]["end_date"] == "2025-02-28"
+    # The old row ends ON the move date (inclusive on both ends, issue #67).
+    assert affils[0]["end_date"] == "2025-03-01"
     assert affils[1]["end_date"] is None
 
-    # A same-day move is a correction: the superseded zero-length row is deleted.
+    # A same-day move is a correction: the superseded row is deleted.
     run("MovC", "2025-03-01")
     person = admin.get(f"/api/v1/people/{pid}").json()
     open_affils = [x for x in person["affiliations"] if x["end_date"] is None]
@@ -1897,7 +1904,7 @@ def test_import_members_xlsx_institution_move(admin, tmp_path):
         "Xlsx Institute A",
         "Xlsx Institute B",
     ]
-    assert affils[0]["end_date"] == "2025-09-01"
+    assert affils[0]["end_date"] == "2025-09-02"
     assert affils[1]["end_date"] is None
 
 

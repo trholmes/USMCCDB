@@ -20,6 +20,7 @@ import type { EventItem, PersonSummary, Talk } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 import { TALK_TYPES } from '../constants'
+import { today } from '../dates'
 
 const emptyForm = {
   title: '',
@@ -102,7 +103,7 @@ export default function TalksPage() {
     // passed, assigned otherwise. Without a speaker it stays open for
     // nominations.
     const status = speakerId
-      ? form.date && form.date <= new Date().toISOString().slice(0, 10)
+      ? form.date && form.date <= today()
         ? 'given'
         : 'assigned'
       : 'open'
@@ -124,11 +125,19 @@ export default function TalksPage() {
     }
   }
 
+  // The nominee pick belongs to the open detail modal — clear it whenever the
+  // modal closes, so it can't carry over and nominate the wrong person for
+  // the next talk opened.
+  const closeDetail = () => {
+    setDetail(null)
+    setNominee(null)
+  }
+
   const deleteTalk = async (talk: Talk) => {
     if (!window.confirm(`Delete "${talk.title}"?`)) return
     try {
       await api.delete(`/talks/${talk.id}`)
-      setDetail(null)
+      closeDetail()
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -140,7 +149,7 @@ export default function TalksPage() {
       await api.post(`/talks/${talk.id}/nominations`, { person_id: personId })
       notifications.show({ message: 'Nomination submitted' })
       load()
-      setDetail(null)
+      closeDetail()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
     }
@@ -150,7 +159,7 @@ export default function TalksPage() {
     try {
       await api.patch(`/nominations/${nomId}`, { status })
       load()
-      setDetail(null)
+      closeDetail()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
     }
@@ -256,7 +265,7 @@ export default function TalksPage() {
 
       <Modal
         opened={detail !== null}
-        onClose={() => setDetail(null)}
+        onClose={closeDetail}
         title={detail?.title}
         size="lg"
       >

@@ -32,14 +32,7 @@ import {
   splitList,
   STUDENT_STAGES,
 } from '../constants'
-
-// Local calendar date (toISOString would give the UTC date, off by one for
-// users east or west of UTC around midnight).
-const today = () => {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
+import { today } from '../dates'
 
 export default function PersonPage() {
   const { id } = useParams()
@@ -778,7 +771,10 @@ export default function PersonPage() {
                 <Select
                   label="Role"
                   placeholder="Select role…"
-                  data={COLLAB_ROLES.map((r) => ({ value: r.value, label: r.label }))}
+                  data={COLLAB_ROLES.filter((r) => !r.hidden).map((r) => ({
+                    value: r.value,
+                    label: r.label,
+                  }))}
                   value={roleType}
                   onChange={setRoleType}
                   searchable

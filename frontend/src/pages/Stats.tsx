@@ -278,10 +278,10 @@ function MembershipStats() {
 
 // --- Talks / speaker fair-share -------------------------------------------------
 
-type TotalRow = [string, { id: number; talks: number; invited: number }]
+type TotalRow = [number, { label: string; talks: number; invited: number }]
 
 const ACCESSORS: Accessors<TotalRow> = {
-  key: (r) => r[0],
+  key: (r) => r[1].label,
   talks: (r) => r[1].talks,
   invited: (r) => r[1].invited,
 }
@@ -295,12 +295,18 @@ function TalkStats() {
     api.get<TalkStatRow[]>(`/stats/talks?by=${by}`).then(setRows).catch(() => setRows([]))
   }, [by])
 
-  // Aggregate per key across years for the table; per-year totals for the chart.
+  // Aggregate across years for the table; per-year totals for the chart.
+  // Keyed on key_id (the backend groups by id too) — keying on the display
+  // name would merge distinct people who share a full name.
   const totals = useMemo(() => {
-    const m = new Map<string, { id: number; talks: number; invited: number }>()
+    const m = new Map<number, { label: string; talks: number; invited: number }>()
     rows.forEach((r) => {
-      const cur = m.get(r.key) ?? { id: r.key_id, talks: 0, invited: 0 }
-      m.set(r.key, { id: r.key_id, talks: cur.talks + r.talks, invited: cur.invited + r.invited })
+      const cur = m.get(r.key_id) ?? { label: r.key, talks: 0, invited: 0 }
+      m.set(r.key_id, {
+        label: r.key,
+        talks: cur.talks + r.talks,
+        invited: cur.invited + r.invited,
+      })
     })
     return [...m.entries()].sort((a, b) => b[1].talks - a[1].talks) as TotalRow[]
   }, [rows])
@@ -378,15 +384,15 @@ function TalkStats() {
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {sorted.map(([key, v]) => (
+          {sorted.map(([id, v]) => (
             <Table.Tr
-              key={key}
+              key={id}
               style={{ cursor: 'pointer' }}
               onClick={() =>
-                navigate(by === 'person' ? `/people/${v.id}` : `/institutions/${v.id}`)
+                navigate(by === 'person' ? `/people/${id}` : `/institutions/${id}`)
               }
             >
-              <Table.Td>{key}</Table.Td>
+              <Table.Td>{v.label}</Table.Td>
               <Table.Td>{v.talks}</Table.Td>
               <Table.Td>{v.invited}</Table.Td>
             </Table.Tr>

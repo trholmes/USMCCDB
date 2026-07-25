@@ -6,13 +6,7 @@ import type { CollabRole, Institution, PersonSummary } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { collabRoleLabel } from '../constants'
-
-// Local calendar date (see Person.tsx for why not toISOString).
-const today = () => {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
+import { today } from '../dates'
 
 const ACCESSORS: Accessors<PersonSummary> = {
   name: (p) => `${p.family_name} ${p.given_name}`,

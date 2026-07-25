@@ -197,10 +197,11 @@ def _open_primary(db: Session, person_id: int) -> Affiliation | None:
 
 def _close_primary(db: Session, affil: Affiliation, move_date: date) -> None:
     """Close an open primary affiliation so a new one starting on move_date
-    can be opened. The old affiliation ends the day BEFORE the move
-    (author-list date ranges are inclusive on both ends, so sharing the
-    boundary date would double-list the person); a same-day move deletes the
-    superseded zero-length row instead — a correction, not a move."""
+    can be opened. The old affiliation ends ON the move date (issue #67):
+    date ranges are inclusive on both ends, so the person carries both
+    affiliations on the transition day and an author list cut exactly on the
+    move date shows both institutions. A same-day move deletes the superseded
+    row instead — a correction, not a move."""
     if move_date < affil.start_date:
         raise HTTPException(
             400,
@@ -214,7 +215,7 @@ def _close_primary(db: Session, affil: Affiliation, move_date: date) -> None:
         # uq_one_open_primary_affiliation index while this row still exists.
         db.flush()
     else:
-        affil.end_date = move_date - timedelta(days=1)
+        affil.end_date = move_date
 
 
 def _registration_ack() -> RegistrationAck:
@@ -717,8 +718,8 @@ def change_institution(
     user: User = Depends(get_current_user),
 ) -> AffiliationOut:
     """Move a person to a new primary institution as of a date, preserving
-    history: the current open primary affiliation is closed the day before
-    that date and a new open primary is opened. Optionally updates the
+    history: the current open primary affiliation is closed on that date and
+    a new open primary is opened. Optionally updates the
     person's career stage along with the move; either way the stage taken up
     at the new institution is stamped on the new affiliation. Available to
     the person themselves or office."""

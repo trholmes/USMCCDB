@@ -6,13 +6,7 @@ import type { CollabRole } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import { useSession } from '../auth/SessionContext'
 import { COLLAB_ROLES, collabRoleLabel } from '../constants'
-
-// Local calendar date (see Person.tsx for why not toISOString).
-const today = () => {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
+import { today } from '../dates'
 
 // Sort in organigram order (COLLAB_ROLES order, then qualifier, then name).
 const roleOrder = (r: CollabRole) => {
@@ -81,9 +75,14 @@ export default function LeadershipPage() {
   }, [])
 
   // Date ranges are inclusive on both ends, so a role ending today is current.
+  // A role must also have started to be current (a pre-recorded future role is
+  // neither current nor former) — same check as the backend and
+  // InstitutionDetail.tsx.
   const { current, former } = useMemo(() => {
     const t = today()
-    const current = roles.filter((r) => !r.end_date || r.end_date >= t).sort(byOrgChart)
+    const current = roles
+      .filter((r) => r.start_date <= t && (!r.end_date || r.end_date >= t))
+      .sort(byOrgChart)
     const former = roles
       .filter((r) => r.end_date && r.end_date < t)
       .sort((a, b) => (b.end_date ?? '').localeCompare(a.end_date ?? '') || byOrgChart(a, b))
@@ -95,9 +94,6 @@ export default function LeadershipPage() {
       <Title order={3} mb="xs">
         Leadership
       </Title>
-      {/* <Text size="sm" c="dimmed" mb="md">
-        Collaboration roles
-      </Text> */}
 
       {current.length === 0 ? (
         <Text size="sm" c="dimmed">
