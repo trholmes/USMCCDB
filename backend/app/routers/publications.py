@@ -215,12 +215,18 @@ def change_status(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not is_office(user):
-        # Editors and WG conveners may request collaboration review; everything
-        # else (submitted, published, moving backwards) stays with the office.
-        allowed = (
-            (_is_editor(db, user, pub_id) or is_convener_of(db, user, pub.working_group_id))
-            and pub.status == PublicationStatus.in_progress
-            and body.status == PublicationStatus.collab_review
+        # Editors and WG conveners may request collaboration review and revoke
+        # that request; everything else (submitted, published, other backwards
+        # moves) stays with the office.
+        allowed = (_is_editor(db, user, pub_id) or is_convener_of(db, user, pub.working_group_id)) and (
+            (
+                pub.status == PublicationStatus.in_progress
+                and body.status == PublicationStatus.collab_review
+            )
+            or (
+                pub.status == PublicationStatus.collab_review
+                and body.status == PublicationStatus.in_progress
+            )
         )
         if not allowed:
             raise HTTPException(403, "Only the office can make this transition")
