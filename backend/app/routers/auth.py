@@ -12,7 +12,14 @@ from app.config import get_settings
 from app.db import get_db
 from app.models import MembershipEvent, MemberStatus, Person, User, UserRole
 from app.ratelimit import enforce, login_limiter
-from app.schemas.auth import LoginRequest, MeOut, UserCreate, UserOut, UserUpdate
+from app.schemas.auth import (
+    LoginRequest,
+    MeOut,
+    PasswordChange,
+    UserCreate,
+    UserOut,
+    UserUpdate,
+)
 from app.security import (
     check_login_password,
     clear_session_cookie,
@@ -95,6 +102,22 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) ->
     )
 
 
+@router.post("/me/password")
+def change_my_password(
+    body: PasswordChange,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Self-service password change for local accounts (issue #98)."""
+    if not user.username or not user.password_hash:
+        raise HTTPException(400, "This account signs in with ORCID and has no password")
+    if not check_login_password(user, body.current_password):
+        raise HTTPException(403, "Current password is incorrect")
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    return {"detail": "Password changed"}
+
+
 @router.get("/config")
 def auth_config() -> dict:
     """Unauthenticated: what login methods are available."""
@@ -162,6 +185,53 @@ def update_user(
     return UserOut.model_validate(user)
 
 
+_ROLE_RANK = {UserRole.member: 0, UserRole.office: 1, UserRole.admin: 2}
+
+
+@router.post("/users/{keep_id}/merge/{other_id}")
+def merge_users(
+    keep_id: int,
+    other_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> UserOut:
+    """Merge two accounts belonging to the same human — typically a local
+    username account and an ORCID account (issue #97). The kept account
+    absorbs the other's credentials (username/password, ORCID iD), person
+    link, and the more privileged role; the other account is deleted."""
+    if keep_id == other_id:
+        raise HTTPException(400, "Pick two different accounts")
+    if other_id == actor.id:
+        raise HTTPException(400, "You cannot merge away the account you are signed in with")
+    keep = db.get(User, keep_id)
+    other = db.get(User, other_id)
+    if keep is None or other is None:
+        raise HTTPException(404, "User not found")
+    if keep.username and other.username:
+        raise HTTPException(409, "Both accounts have usernames — these are two local accounts")
+    if keep.orcid and other.orcid:
+        raise HTTPException(409, "Both accounts have ORCID iDs — these are two ORCID accounts")
+    if keep.person_id and other.person_id and keep.person_id != other.person_id:
+        raise HTTPException(
+            409, "Accounts are linked to different people — fix the person links first"
+        )
+    username = keep.username or other.username
+    password_hash = keep.password_hash or other.password_hash
+    orcid = keep.orcid or other.orcid
+    person_id = keep.person_id or other.person_id
+    role = keep.role if _ROLE_RANK[keep.role] >= _ROLE_RANK[other.role] else other.role
+    db.delete(other)
+    db.flush()  # release the unique username/orcid/person_id before reassigning
+    keep.username = username
+    keep.password_hash = password_hash
+    keep.orcid = orcid
+    keep.person_id = person_id
+    keep.role = role
+    db.commit()
+    db.refresh(keep)
+    return UserOut.model_validate(keep)
+
+
 # --- ORCID OAuth --------------------------------------------------------------
 
 
@@ -226,15 +296,29 @@ async def orcid_callback(
     user = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
 
     if user is None:
-        # 2. Imported/approved member without a login yet: link automatically.
+        # 2. Directory member with this ORCID iD: link automatically. If the
+        # person already signs in with a local account, attach the ORCID to
+        # that account instead of creating a parallel login — the OAuth
+        # round trip just proved ownership of the id (issue #97).
         person = db.execute(
             select(Person).where(Person.orcid == orcid_id)
         ).scalar_one_or_none()
         if person is not None:
-            user = User(orcid=orcid_id, person_id=person.id, role=UserRole.member)
-            db.add(user)
-            db.commit()
-            db.refresh(user)
+            existing = db.execute(
+                select(User).where(User.person_id == person.id)
+            ).scalar_one_or_none()
+            if existing is None:
+                user = User(orcid=orcid_id, person_id=person.id, role=UserRole.member)
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            elif existing.orcid is None:
+                existing.orcid = orcid_id
+                user = existing
+                db.commit()
+            # else: the person's account already carries a *different* ORCID
+            # iD — ambiguous records; fall through to the unknown-ORCID path
+            # so the office sorts it out instead of guessing here.
 
     if user is None:
         # 3. Unknown ORCID: create a pending person + login, send to the

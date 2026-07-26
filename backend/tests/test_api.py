@@ -2786,3 +2786,131 @@ def test_register_free_text_links_existing_institution(admin, monkeypatch):
     assert r.status_code == 201, r.text
     person = admin.get(f"/api/v1/people/{r.json()['id']}").json()
     assert person["affiliations"][0]["institution"]["id"] == inst["id"]
+
+
+# --- Account settings & account merge (issues #98/#97) ---------------------------
+
+
+def test_change_own_password(admin):
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "pw.user", "password": "first-password", "role": "member"},
+    )
+    assert r.status_code == 201, r.text
+
+    c = TestClient(app)
+    assert (
+        c.post(
+            "/api/v1/auth/login", json={"username": "pw.user", "password": "first-password"}
+        ).status_code
+        == 200
+    )
+    # Wrong current password is refused; the stored password is unchanged.
+    r = c.post(
+        "/api/v1/auth/me/password",
+        json={"current_password": "not-it", "new_password": "second-password"},
+    )
+    assert r.status_code == 403
+    r = c.post(
+        "/api/v1/auth/me/password",
+        json={"current_password": "first-password", "new_password": "second-password"},
+    )
+    assert r.status_code == 200, r.text
+    fresh = TestClient(app)
+    assert (
+        fresh.post(
+            "/api/v1/auth/login", json={"username": "pw.user", "password": "first-password"}
+        ).status_code
+        == 401
+    )
+    assert (
+        fresh.post(
+            "/api/v1/auth/login", json={"username": "pw.user", "password": "second-password"}
+        ).status_code
+        == 200
+    )
+
+
+def test_orcid_signin_attaches_to_existing_local_account(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+    orcid = "0000-0002-9079-5930"
+    # An approved member with a local account and an ORCID on their profile.
+    pid = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Local",
+            "family_name": "Orcidholder",
+            "email": "local.orcidholder@example.edu",
+            "orcid": orcid,
+            "institution_name": "Attach University",
+            "institution_is_us": True,
+        },
+    ).json()["id"]
+    admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"})
+    uid = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": "local.orcidholder",
+            "password": "long-password",
+            "role": "member",
+            "person_id": pid,
+        },
+    ).json()["id"]
+
+    users_before = len(admin.get("/api/v1/auth/users").json())
+    c, r = _orcid_signin(monkeypatch, orcid, "Local Orcidholder")
+    assert r.status_code == 307, r.text
+    assert r.headers["location"] == "/"
+    # No parallel account: the ORCID attached to the existing local login.
+    users = admin.get("/api/v1/auth/users").json()
+    assert len(users) == users_before
+    merged = next(u for u in users if u["id"] == uid)
+    assert merged["orcid"] == orcid
+    assert merged["username"] == "local.orcidholder"
+    # And the session belongs to that account.
+    me = c.get("/api/v1/auth/me").json()
+    assert me["user"]["id"] == uid
+
+
+def test_admin_merges_local_and_orcid_accounts(admin, monkeypatch):
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+    # An ORCID sign-in that created its own account (stranger flow)...
+    _, r = _orcid_signin(monkeypatch, "0000-0001-5109-3700", "Merge Target")
+    assert r.status_code == 307
+    users = admin.get("/api/v1/auth/users").json()
+    orcid_user = next(u for u in users if u["orcid"] == "0000-0001-5109-3700")
+    # ...and a separate local account for the same human.
+    local = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "merge.local", "password": "long-password", "role": "office"},
+    ).json()
+
+    r = admin.post(f"/api/v1/auth/users/{local['id']}/merge/{orcid_user['id']}")
+    assert r.status_code == 200, r.text
+    merged = r.json()
+    assert merged["username"] == "merge.local"
+    assert merged["orcid"] == "0000-0001-5109-3700"
+    assert merged["role"] == "office"  # keeps the more privileged role
+    assert merged["person_id"] == orcid_user["person_id"]
+    ids = [u["id"] for u in admin.get("/api/v1/auth/users").json()]
+    assert orcid_user["id"] not in ids
+    # Both sign-in methods still work... (local login)
+    c = TestClient(app)
+    assert (
+        c.post(
+            "/api/v1/auth/login", json={"username": "merge.local", "password": "long-password"}
+        ).status_code
+        == 200
+    )
+
+    # Merging two local accounts is refused.
+    other = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "merge.other", "password": "long-password", "role": "member"},
+    ).json()
+    r = admin.post(f"/api/v1/auth/users/{local['id']}/merge/{other['id']}")
+    assert r.status_code == 409

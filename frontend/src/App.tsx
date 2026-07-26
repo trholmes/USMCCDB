@@ -14,6 +14,7 @@ import {
 import { useDisclosure } from '@mantine/hooks'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useSession } from './auth/SessionContext'
+import AccountPage from './pages/Account'
 import AdminPage from './pages/Admin'
 import RegisterPage from './pages/Register'
 import DirectoryPage from './pages/Directory'
@@ -113,24 +114,27 @@ export default function App() {
           </Group>
           <Group gap="xs">
             <ColorSchemeToggle />
-            {me.person_id ? (
-              <Text
-                component={Link}
-                to={`/people/${me.person_id}`}
-                size="sm"
-                c="indigo"
-                style={{ cursor: 'pointer' }}
-                title="View / edit your profile"
-              >
-                {me.display_name || me.user.username || me.user.orcid}
-                {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
-              </Text>
-            ) : (
-              <Text size="sm" c="dimmed">
-                {me.display_name || me.user.username || me.user.orcid}
-                {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
-              </Text>
-            )}
+            <ActionIcon
+              component={Link}
+              to="/account"
+              variant="subtle"
+              color="gray"
+              aria-label="Account settings"
+              title="Account settings"
+            >
+              ⚙
+            </ActionIcon>
+            <Text
+              component={Link}
+              to={me.person_id ? `/people/${me.person_id}` : '/account'}
+              size="sm"
+              c="indigo"
+              style={{ cursor: 'pointer' }}
+              title={me.person_id ? 'View / edit your profile' : 'Account settings'}
+            >
+              {me.display_name || me.user.username || me.user.orcid}
+              {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
+            </Text>
             <Text
               size="sm"
               c="indigo"
@@ -186,6 +190,7 @@ export default function App() {
           <Route path="/publications" element={<PublicationsPage />} />
           <Route path="/publications/:id" element={<PublicationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />
+          <Route path="/account" element={<AccountPage />} />
           {isAdmin && <Route path="/admin" element={<AdminPage />} />}
           <Route path="*" element={<Navigate to="/directory" replace />} />
         </Routes>
