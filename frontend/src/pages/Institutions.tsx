@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution } from '../api/types'
+import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 
@@ -39,6 +40,7 @@ export default function InstitutionsPage() {
     )
   }, [rows, q])
   const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
+  const { paged, page, setPage, total, count } = usePagination(sorted)
 
   const load = useCallback(() => {
     api.get<Institution[]>('/institutions').then(setRows).catch(() => setRows([]))
@@ -102,6 +104,7 @@ export default function InstitutionsPage() {
           {isOffice && <Button onClick={() => open('new')}>Add institution</Button>}
         </Group>
       </Group>
+      <PageCount shown={paged.length} count={count} noun="institutions" />
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -114,7 +117,7 @@ export default function InstitutionsPage() {
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {sorted.map((i) => (
+          {paged.map((i) => (
             <Table.Tr
               key={i.id}
               style={{ cursor: 'pointer' }}
@@ -142,6 +145,7 @@ export default function InstitutionsPage() {
           ))}
         </Table.Tbody>
       </Table>
+      <PaginationBar page={page} total={total} setPage={setPage} />
 
       <Modal
         opened={modal !== null}

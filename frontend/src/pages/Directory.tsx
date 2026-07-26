@@ -1,10 +1,21 @@
-import { Anchor, Badge, Group, Select, Table, Text, TextInput, Title } from '@mantine/core'
+import {
+  Anchor,
+  Badge,
+  Group,
+  MultiSelect,
+  Select,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
+import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { CAREER_STAGES, RESEARCH_AREAS, splitList } from '../constants'
 import { useSession } from '../auth/SessionContext'
@@ -22,18 +33,18 @@ const ACCESSORS: Accessors<PersonSummary> = {
 export default function DirectoryPage() {
   const [people, setPeople] = useState<PersonSummary[]>([])
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState<string | null>('active')
-  const [stage, setStage] = useState<string | null>(null)
-  const [institution, setInstitution] = useState<string | null>(null)
-  const [area, setArea] = useState<string | null>(null)
+  // Multi-select filters: OR within a filter, AND across filters (issue #114).
+  const [statuses, setStatuses] = useState<string[]>(['active'])
+  const [stages, setStages] = useState<string[]>([])
+  const [institutions, setInstitutions] = useState<string[]>([])
+  const [areas, setAreas] = useState<string[]>([])
   const [voting, setVoting] = useState<string | null>(null)
   const navigate = useNavigate()
   const { isOffice } = useSession()
 
   useEffect(() => {
-    const query = status ? `?status=${status}` : ''
-    api.get<PersonSummary[]>(`/people${query}`).then(setPeople).catch(() => setPeople([]))
-  }, [status])
+    api.get<PersonSummary[]>('/people').then(setPeople).catch(() => setPeople([]))
+  }, [])
 
   const institutionOptions = useMemo(() => {
     const seen = new Map<string, string>()
@@ -57,13 +68,17 @@ export default function DirectoryPage() {
         (!needle ||
           `${p.given_name} ${p.family_name}`.toLowerCase().includes(needle) ||
           p.email.toLowerCase().includes(needle)) &&
-        (!stage || p.career_stage === stage) &&
-        (!institution || String(p.primary_institution?.id) === institution) &&
-        (!area || splitList(p.research_areas).includes(area)) &&
+        (statuses.length === 0 || statuses.includes(p.status)) &&
+        (stages.length === 0 || stages.includes(p.career_stage)) &&
+        (institutions.length === 0 ||
+          institutions.includes(String(p.primary_institution?.id))) &&
+        (areas.length === 0 ||
+          splitList(p.research_areas).some((a) => areas.includes(a))) &&
         (!voting || p.is_voting === (voting === 'voting')),
     )
-  }, [people, q, stage, institution, area, voting])
+  }, [people, q, statuses, stages, institutions, areas, voting])
   const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
+  const { paged, page, setPage, total, count } = usePagination(sorted)
 
   return (
     <>
@@ -76,44 +91,45 @@ export default function DirectoryPage() {
           w={240}
         />
       </Group>
-      <Group mb="md" gap="xs">
-        <Select
+      <Group mb="md" gap="xs" align="flex-start">
+        <MultiSelect
           data={[
             { value: 'active', label: 'Active' },
             { value: 'pending', label: 'Pending' },
             { value: 'inactive', label: 'Inactive' },
             { value: 'alumni', label: 'Alumni' },
           ]}
-          value={status}
-          onChange={setStatus}
+          value={statuses}
+          onChange={setStatuses}
           clearable
-          placeholder="All statuses"
-          w={150}
+          placeholder={statuses.length ? undefined : 'All statuses'}
+          w={190}
         />
-        <Select
+        <MultiSelect
           data={CAREER_STAGES}
-          value={stage}
-          onChange={setStage}
-          clearable
-          placeholder="All positions"
-          w={180}
-        />
-        <Select
-          data={institutionOptions}
-          value={institution}
-          onChange={setInstitution}
+          value={stages}
+          onChange={setStages}
           clearable
           searchable
-          placeholder="All institutions"
-          w={200}
+          placeholder={stages.length ? undefined : 'All positions'}
+          w={210}
         />
-        <Select
-          data={RESEARCH_AREAS}
-          value={area}
-          onChange={setArea}
+        <MultiSelect
+          data={institutionOptions}
+          value={institutions}
+          onChange={setInstitutions}
           clearable
-          placeholder="All research areas"
-          w={220}
+          searchable
+          placeholder={institutions.length ? undefined : 'All institutions'}
+          w={230}
+        />
+        <MultiSelect
+          data={RESEARCH_AREAS}
+          value={areas}
+          onChange={setAreas}
+          clearable
+          placeholder={areas.length ? undefined : 'All research areas'}
+          w={240}
         />
         <Select
           data={[
@@ -128,9 +144,7 @@ export default function DirectoryPage() {
         />
       </Group>
 
-      <Text size="sm" c="dimmed" mb="xs">
-        {filtered.length} people
-      </Text>
+      <PageCount shown={paged.length} count={count} noun="people" />
       <Table striped highlightOnHover stickyHeader>
         <Table.Thead>
           <Table.Tr>
@@ -144,7 +158,7 @@ export default function DirectoryPage() {
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {sorted.map((p) => (
+          {paged.map((p) => (
             <Table.Tr
               key={p.id}
               style={{ cursor: 'pointer' }}
@@ -205,6 +219,7 @@ export default function DirectoryPage() {
           ))}
         </Table.Tbody>
       </Table>
+      <PaginationBar page={page} total={total} setPage={setPage} />
     </>
   )
 }

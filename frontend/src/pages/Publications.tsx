@@ -2,10 +2,10 @@ import {
   Button,
   Group,
   Modal,
+  MultiSelect,
   Select,
   Stack,
   Table,
-  Text,
   Textarea,
   TextInput,
   Title,
@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Publication, WorkingGroup } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
+import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 
 const ACCESSORS: Accessors<Publication> = {
@@ -38,9 +39,10 @@ export default function PublicationsPage() {
     abstract: '',
   })
   const [q, setQ] = useState('')
-  const [typeFilter, setTypeFilter] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
-  const [wgFilter, setWgFilter] = useState<string | null>(null)
+  // Multi-select filters: OR within a filter, AND across filters (issue #114).
+  const [typeFilter, setTypeFilter] = useState<string[]>([])
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
+  const [wgFilter, setWgFilter] = useState<string[]>([])
   const navigate = useNavigate()
 
   const filtered = useMemo(() => {
@@ -52,12 +54,13 @@ export default function PublicationsPage() {
           (p.short_code ?? '').toLowerCase().includes(needle) ||
           (p.arxiv_id ?? '').toLowerCase().includes(needle) ||
           (p.journal ?? '').toLowerCase().includes(needle)) &&
-        (!typeFilter || p.pub_type === typeFilter) &&
-        (!statusFilter || p.status === statusFilter) &&
-        (!wgFilter || String(p.working_group_id) === wgFilter),
+        (typeFilter.length === 0 || typeFilter.includes(p.pub_type)) &&
+        (statusFilter.length === 0 || statusFilter.includes(p.status)) &&
+        (wgFilter.length === 0 || wgFilter.includes(String(p.working_group_id))),
     )
   }, [pubs, q, typeFilter, statusFilter, wgFilter])
   const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
+  const { paged, page, setPage, total, count } = usePagination(sorted)
 
   const load = useCallback(() => {
     api.get<Publication[]>('/publications').then(setPubs).catch(() => setPubs([]))
@@ -94,7 +97,7 @@ export default function PublicationsPage() {
           onChange={(e) => setQ(e.currentTarget.value)}
           w={280}
         />
-        <Select
+        <MultiSelect
           data={[
             { value: 'paper', label: 'Paper' },
             { value: 'proceedings', label: 'Proceedings' },
@@ -104,10 +107,10 @@ export default function PublicationsPage() {
           value={typeFilter}
           onChange={setTypeFilter}
           clearable
-          placeholder="All types"
-          w={150}
+          placeholder={typeFilter.length ? undefined : 'All types'}
+          w={190}
         />
-        <Select
+        <MultiSelect
           data={[
             { value: 'in_progress', label: 'In progress' },
             { value: 'collab_review', label: 'Collab review' },
@@ -117,22 +120,20 @@ export default function PublicationsPage() {
           value={statusFilter}
           onChange={setStatusFilter}
           clearable
-          placeholder="All statuses"
-          w={160}
+          placeholder={statusFilter.length ? undefined : 'All statuses'}
+          w={200}
         />
-        <Select
+        <MultiSelect
           data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
           value={wgFilter}
           onChange={setWgFilter}
           clearable
           searchable
-          placeholder="All working groups"
-          w={200}
+          placeholder={wgFilter.length ? undefined : 'All working groups'}
+          w={230}
         />
       </Group>
-      <Text size="sm" c="dimmed" mb="xs">
-        {filtered.length} publications
-      </Text>
+      <PageCount shown={paged.length} count={count} noun="publications" />
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -144,7 +145,7 @@ export default function PublicationsPage() {
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {sorted.map((p) => (
+          {paged.map((p) => (
             <Table.Tr
               key={p.id}
               style={{ cursor: 'pointer' }}
@@ -161,6 +162,7 @@ export default function PublicationsPage() {
           ))}
         </Table.Tbody>
       </Table>
+      <PaginationBar page={page} total={total} setPage={setPage} />
 
       <Modal opened={modal} onClose={() => setModal(false)} title="Add a publication">
         <Stack gap="sm">

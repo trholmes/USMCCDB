@@ -4,6 +4,7 @@ import {
   Card,
   Group,
   Modal,
+  MultiSelect,
   Select,
   Stack,
   Table,
@@ -15,6 +16,7 @@ import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import type { EventItem, PersonSummary, Talk } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
@@ -41,9 +43,10 @@ export default function TalksPage() {
   const [form, setForm] = useState(emptyForm)
   const [nominee, setNominee] = useState<string | null>(null)
   const [q, setQ] = useState('')
-  const [eventFilter, setEventFilter] = useState<string | null>(null)
-  const [typeFilter, setTypeFilter] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  // Multi-select filters: OR within a filter, AND across filters (issue #114).
+  const [eventFilter, setEventFilter] = useState<string[]>([])
+  const [typeFilter, setTypeFilter] = useState<string[]>([])
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
   const { me, isOffice } = useSession()
   const navigate = useNavigate()
 
@@ -79,13 +82,16 @@ export default function TalksPage() {
           whereGiven(t).toLowerCase().includes(needle) ||
           (t.speaker &&
             `${t.speaker.given_name} ${t.speaker.family_name}`.toLowerCase().includes(needle))) &&
-        (!eventFilter ||
-          (eventFilter === 'none' ? t.event_id === null : String(t.event_id) === eventFilter)) &&
-        (!typeFilter || t.talk_type === typeFilter) &&
-        (!statusFilter || t.status === statusFilter),
+        (eventFilter.length === 0 ||
+          eventFilter.some((f) =>
+            f === 'none' ? t.event_id === null : String(t.event_id) === f,
+          )) &&
+        (typeFilter.length === 0 || typeFilter.includes(t.talk_type)) &&
+        (statusFilter.length === 0 || statusFilter.includes(t.status)),
     )
   }, [talks, events, q, eventFilter, typeFilter, statusFilter])
   const { sorted, sort, toggle } = useSortable(filtered, accessors)
+  const { paged, page, setPage, total, count } = usePagination(sorted)
 
   const openCreate = () => {
     // Members most often record their own seminars/colloquia — default the
@@ -179,7 +185,7 @@ export default function TalksPage() {
           onChange={(e) => setQ(e.currentTarget.value)}
           w={260}
         />
-        <Select
+        <MultiSelect
           data={[
             { value: 'none', label: 'No conference (seminars & colloquia)' },
             ...events.map((e) => ({ value: String(e.id), label: e.name })),
@@ -188,30 +194,28 @@ export default function TalksPage() {
           onChange={setEventFilter}
           clearable
           searchable
-          placeholder="All conferences"
-          w={200}
+          placeholder={eventFilter.length ? undefined : 'All conferences'}
+          w={230}
         />
-        <Select
+        <MultiSelect
           data={TALK_TYPES}
           value={typeFilter}
           onChange={setTypeFilter}
           clearable
-          placeholder="All types"
-          w={140}
+          placeholder={typeFilter.length ? undefined : 'All types'}
+          w={180}
         />
-        <Select
+        <MultiSelect
           data={['open', 'nominations', 'assigned', 'given', 'cancelled']}
           value={statusFilter}
           onChange={setStatusFilter}
           clearable
-          placeholder="All statuses"
-          w={150}
+          placeholder={statusFilter.length ? undefined : 'All statuses'}
+          w={190}
         />
       </Group>
 
-      <Text size="sm" c="dimmed" mb="xs">
-        {filtered.length} talks
-      </Text>
+      <PageCount shown={paged.length} count={count} noun="talks" />
       <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -224,7 +228,7 @@ export default function TalksPage() {
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {sorted.map((t) => (
+          {paged.map((t) => (
             <Table.Tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => setDetail(t)}>
               <Table.Td>{t.date}</Table.Td>
               <Table.Td>{whereGiven(t)}</Table.Td>
@@ -262,6 +266,7 @@ export default function TalksPage() {
           ))}
         </Table.Tbody>
       </Table>
+      <PaginationBar page={page} total={total} setPage={setPage} />
 
       <Modal
         opened={detail !== null}
