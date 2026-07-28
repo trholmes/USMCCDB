@@ -25,6 +25,13 @@ class Settings(BaseSettings):
 
     photos_dir: str = "/photos"
 
+    # Backups volume shared with the backup container (see docker-compose.yml).
+    # Manual backups are requested by dropping a file in <backups_dir>/requests;
+    # the backup container's scheduler picks it up within a few seconds.
+    backups_dir: str = "/backups"
+    backup_hour: str = "02"  # informational, shown in the admin panel
+    backup_trigger_timeout_seconds: int = 120
+
     orcid_client_id: str = ""
     orcid_client_secret: str = ""
     orcid_host: str = "orcid.org"

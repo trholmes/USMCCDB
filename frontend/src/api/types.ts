@@ -219,6 +219,19 @@ export interface AuthorListSnapshot {
   warnings?: string[]
 }
 
+export interface BackupSnapshot {
+  category: 'daily' | 'weekly' | 'monthly'
+  filename: string
+  size_bytes: number
+  modified_at: string
+}
+
+export interface BackupStatus {
+  snapshots: BackupSnapshot[]
+  last_backup_at: string | null
+  backup_hour_utc: string
+}
+
 export interface AuthorList {
   id: number
   publication_id: number | null
