@@ -49,6 +49,9 @@ export const api = {
 export const exportUrl = (listId: number, format: string) =>
   `${BASE}/author-lists/${listId}/export?format=${format}`
 
+export const backupDownloadUrl = (category: string, filename: string) =>
+  `${BASE}/backups/download/${category}/${encodeURIComponent(filename)}`
+
 // photo_file in the URL busts caches when the photo is replaced.
 export const photoUrl = (personId: number, photoFile: string) =>
   `${BASE}/people/${personId}/photo?v=${encodeURIComponent(photoFile)}`

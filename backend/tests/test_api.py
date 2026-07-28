@@ -2914,3 +2914,143 @@ def test_admin_merges_local_and_orcid_accounts(admin, monkeypatch):
     ).json()
     r = admin.post(f"/api/v1/auth/users/{local['id']}/merge/{other['id']}")
     assert r.status_code == 409
+
+
+# --- Backups (issue #109) ------------------------------------------------------
+
+
+def _backups_env(tmp_path_factory, timeout="5"):
+    """Point the app at a throwaway backups dir; caller must cache_clear after."""
+    from app.config import get_settings
+
+    root = tmp_path_factory.mktemp("backups")
+    os.environ["BACKUPS_DIR"] = str(root)
+    os.environ["BACKUP_TRIGGER_TIMEOUT_SECONDS"] = timeout
+    get_settings.cache_clear()
+    return root, get_settings
+
+
+def test_backups_admin_only(admin):
+    admin.post(
+        "/api/v1/auth/users",
+        json={"username": "backup.office", "password": "office-pw-123", "role": "office"},
+    )
+    office = TestClient(app)
+    assert (
+        office.post(
+            "/api/v1/auth/login",
+            json={"username": "backup.office", "password": "office-pw-123"},
+        ).status_code
+        == 200
+    )
+    # A snapshot is the whole database: even the office role is turned away.
+    assert office.get("/api/v1/backups").status_code == 403
+    assert office.post("/api/v1/backups/run").status_code == 403
+    assert office.get("/api/v1/backups/download/daily/x.dump").status_code == 403
+    assert TestClient(app).get("/api/v1/backups").status_code == 401
+
+
+def test_backup_list_and_download(admin, tmp_path_factory):
+    root, get_settings = _backups_env(tmp_path_factory)
+    try:
+        (root / "daily").mkdir()
+        (root / "weekly").mkdir()
+        (root / "daily" / "usmccdb-2026-07-27.dump").write_bytes(b"PGDMP-fake")
+        (root / "daily" / "photos-2026-07-27.tar.gz").write_bytes(b"tarball")
+        (root / "weekly" / "usmccdb-2026-07-26.dump").write_bytes(b"PGDMP-older")
+        # Not snapshots: dotfiles and the request-handshake dir stay hidden.
+        (root / "daily" / ".partial").write_bytes(b"x")
+        (root / "requests").mkdir()
+        (root / "requests" / "abc.request").write_text("pending")
+
+        status = admin.get("/api/v1/backups")
+        assert status.status_code == 200, status.text
+        body = status.json()
+        names = {(s["category"], s["filename"]) for s in body["snapshots"]}
+        assert names == {
+            ("daily", "usmccdb-2026-07-27.dump"),
+            ("daily", "photos-2026-07-27.tar.gz"),
+            ("weekly", "usmccdb-2026-07-26.dump"),
+        }
+        assert body["last_backup_at"] is not None
+        assert body["backup_hour_utc"]
+        sizes = {s["filename"]: s["size_bytes"] for s in body["snapshots"]}
+        assert sizes["usmccdb-2026-07-27.dump"] == len(b"PGDMP-fake")
+
+        r = admin.get("/api/v1/backups/download/daily/usmccdb-2026-07-27.dump")
+        assert r.status_code == 200
+        assert r.content == b"PGDMP-fake"
+        assert "attachment" in r.headers["content-disposition"]
+
+        # Traversal / oddball names never reach the filesystem.
+        assert admin.get("/api/v1/backups/download/daily/.partial").status_code == 404
+        assert (
+            admin.get("/api/v1/backups/download/daily/%2e%2e%2fsecret").status_code == 404
+        )
+        assert (
+            admin.get("/api/v1/backups/download/requests/abc.request").status_code == 404
+        )
+        assert admin.get("/api/v1/backups/download/daily/nope.dump").status_code == 404
+    finally:
+        os.environ.pop("BACKUPS_DIR", None)
+        os.environ.pop("BACKUP_TRIGGER_TIMEOUT_SECONDS", None)
+        get_settings.cache_clear()
+
+
+def _backup_container_sim(root, outcome, dump_name=None):
+    """Play the backup container: watch requests/, 'take a dump', mark done."""
+    import threading
+    import time as _time
+
+    def responder():
+        deadline = _time.time() + 10
+        requests_dir = root / "requests"
+        while _time.time() < deadline:
+            reqs = sorted(requests_dir.glob("*.request")) if requests_dir.is_dir() else []
+            if reqs:
+                if dump_name:
+                    (root / "daily").mkdir(exist_ok=True)
+                    (root / "daily" / dump_name).write_bytes(b"PGDMP-manual")
+                reqs[0].rename(reqs[0].with_suffix(f".{outcome}"))
+                return
+            _time.sleep(0.05)
+
+    t = threading.Thread(target=responder, daemon=True)
+    t.start()
+    return t
+
+
+def test_backup_manual_trigger(admin, tmp_path_factory):
+    root, get_settings = _backups_env(tmp_path_factory)
+    try:
+        t = _backup_container_sim(root, "done", dump_name="usmccdb-2026-07-28.dump")
+        r = admin.post("/api/v1/backups/run")
+        t.join()
+        assert r.status_code == 200, r.text
+        assert any(
+            s["filename"] == "usmccdb-2026-07-28.dump" for s in r.json()["snapshots"]
+        )
+        # Handshake files are consumed.
+        assert list((root / "requests").iterdir()) == []
+
+        t = _backup_container_sim(root, "failed")
+        r = admin.post("/api/v1/backups/run")
+        t.join()
+        assert r.status_code == 502
+    finally:
+        os.environ.pop("BACKUPS_DIR", None)
+        os.environ.pop("BACKUP_TRIGGER_TIMEOUT_SECONDS", None)
+        get_settings.cache_clear()
+
+
+def test_backup_trigger_times_out_without_container(admin, tmp_path_factory):
+    root, get_settings = _backups_env(tmp_path_factory, timeout="1")
+    try:
+        r = admin.post("/api/v1/backups/run")
+        assert r.status_code == 504
+        # The withdrawn request must not fire later.
+        assert list((root / "requests").glob("*.request")) == []
+    finally:
+        os.environ.pop("BACKUPS_DIR", None)
+        os.environ.pop("BACKUP_TRIGGER_TIMEOUT_SECONDS", None)
+        get_settings.cache_clear()

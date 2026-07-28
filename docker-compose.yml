@@ -35,12 +35,18 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_TLS: ${SMTP_TLS:-starttls}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      # Shown in the admin Backups panel (the schedule itself lives in the
+      # backup container below).
+      BACKUP_HOUR: ${BACKUP_HOUR:-02}
     volumes:
       # Drop spreadsheets/CSVs here (gitignored) to import them, e.g.:
       #   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
       - ./data:/data:ro
       # Member photos (served at /api/v1/people/{id}/photo)
       - photos:/photos
+      # Backup snapshots, shared with the backup container: the admin Backups
+      # panel lists/downloads them and requests manual dumps via /backups/requests.
+      - backups:/backups
     depends_on:
       db:
         condition: service_healthy

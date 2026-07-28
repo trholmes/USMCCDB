@@ -10,6 +10,7 @@ import {
   Stack,
   Switch,
   Table,
+  Tabs,
   Text,
   TextInput,
   Title,
@@ -21,6 +22,7 @@ import { api } from '../api/client'
 import type { PersonSummary, User } from '../api/types'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+import AdminBackups from './AdminBackups'
 
 const ACCESSORS: Accessors<User> = {
   id: (u) => u.id,
@@ -114,7 +116,17 @@ export default function AdminPage() {
   }
 
   return (
-    <>
+    <Tabs defaultValue="accounts">
+      <Tabs.List mb="md">
+        <Tabs.Tab value="accounts">User accounts</Tabs.Tab>
+        <Tabs.Tab value="backups">Backups</Tabs.Tab>
+      </Tabs.List>
+
+      <Tabs.Panel value="backups">
+        <AdminBackups />
+      </Tabs.Panel>
+
+      <Tabs.Panel value="accounts">
       <Group justify="space-between" mb="md">
         <Title order={3}>Admin — user accounts</Title>
         <Button onClick={() => setModal(true)}>Create local account</Button>
@@ -271,6 +283,7 @@ export default function AdminPage() {
           <Button onClick={create}>Create</Button>
         </Stack>
       </Modal>
-    </>
+      </Tabs.Panel>
+    </Tabs>
   )
 }

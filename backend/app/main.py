@@ -6,7 +6,16 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import User, UserRole
-from app.routers import auth, author_lists, institutions, people, publications, talks, working_groups
+from app.routers import (
+    auth,
+    author_lists,
+    backups,
+    institutions,
+    people,
+    publications,
+    talks,
+    working_groups,
+)
 from app.security import hash_password
 
 
@@ -80,6 +89,7 @@ app.include_router(working_groups.router, prefix=prefix)
 app.include_router(talks.router, prefix=prefix)
 app.include_router(publications.router, prefix=prefix)
 app.include_router(author_lists.router, prefix=prefix)
+app.include_router(backups.router, prefix=prefix)
 
 
 @app.get("/api/v1/health")
