@@ -45,6 +45,11 @@ used by the LHC experiments, built as a self-hosted open-source stack:
   institution pages (with their member lists) → profiles → the person's talks
   and back; speaker and stats entries click through to people. Every listing
   table sorts by any column (click cycles ascending → descending → default).
+  Institutions also plot on a member-count-weighted **map**.
+- **Self-administering** — a web admin panel covers user accounts (roles,
+  merging, password resets), a site announcement banner, sign-in auditing,
+  system health, and backups: nightly dumps to host disk plus one-click
+  **backup and restore** with automatic pre-restore safety snapshots.
 
 ## Quick start
 
@@ -61,6 +66,18 @@ password** — log in at <http://localhost:8080>, then change it (Admin → user
 accounts). The stack is 5 containers: PostgreSQL, the FastAPI backend, nginx
 serving the web UI, Caddy (HTTPS, only when a domain is set), and a nightly
 backup sidecar.
+
+That is a complete working instance. To take it from "running" to "fully set
+up", work through the sections below in order:
+
+1. **[Domain + HTTPS](#going-live-at-dbmuoncolliderus)** — `SITE_DOMAIN` turns on the Caddy TLS container.
+2. **[ORCID sign-in](#orcid-sign-in)** — so members sign in with their ORCID iD instead of local accounts.
+3. **[Email notifications](#email-notifications)** — registration and publication-workflow mail.
+4. **[Import existing data](#importing-the-existing-spreadsheets)** and **[member photos](#member-photos)**.
+5. **[Institution map](#institution-map)** — add coordinates so the map view fills in.
+6. **[Admin panel](#the-admin-panel)** — banner/login message, accounts, backups & restore.
+
+Each step is optional and independent — skip what you don't need.
 
 ### Going live at db.muoncollider.us
 
@@ -86,14 +103,43 @@ Members whose ORCID iD is already in the database are linked automatically on
 first sign-in; unknown ORCIDs get a pending membership for the office to
 approve. Set `ORCID_HOST=sandbox.orcid.org` to test against the ORCID sandbox.
 
-### Email notifications (optional)
+### Email notifications
 
-Set `SMTP_HOST` (plus `SMTP_USERNAME`/`SMTP_PASSWORD` as needed — see
-`.env.example`) to enable publication-workflow email: the office
-(`CONTACT_EMAIL`) is notified when someone requests collaboration review,
-reviewers are notified when the office assigns them, and a paper's editors
-are notified of status changes. Leave `SMTP_HOST` empty to run without
-email — the workflow works the same, nothing is sent.
+Everything email-related is already built in — the only setup is pointing the
+backend at an SMTP server. When configured, the instance sends:
+
+- **Registration notifications** — when someone submits a membership
+  registration (via the form or ORCID sign-up), everyone who can approve it
+  is emailed: the office plus the Administrative Institutional Contacts of
+  the person's institution. Suspected duplicate registrations notify the
+  office too.
+- **Publication workflow** — the office (`CONTACT_EMAIL`) is notified when
+  someone requests collaboration review, reviewers are notified when the
+  office assigns them, and a paper's editors are notified of status changes.
+
+Configuration in `.env` (then re-run `./scripts/start.sh`):
+
+```
+SMTP_HOST=smtp.example.edu     # leave empty to disable email entirely
+SMTP_PORT=587
+SMTP_USERNAME=usmccdb-mailer   # if the server requires auth
+SMTP_PASSWORD=...
+SMTP_TLS=starttls              # starttls (587) | ssl (465) | none (trusted relay)
+EMAIL_FROM=noreply@example.edu # falls back to CONTACT_EMAIL when empty
+```
+
+**Where to get SMTP:** nobody needs to run a mail server for this. The two
+realistic options are (a) the **authenticated SMTP relay of the university or
+lab hosting the instance** — most institutions provide one for services, with
+the best deliverability at zero cost — or (b) a **hosted transactional-email
+provider** (AWS SES, Mailgun, …), a few dollars a month at this volume. Either
+way, ask whoever owns the `EMAIL_FROM` domain to have **SPF/DKIM** cover the
+sending server, or the mail lands in spam.
+
+**Testing it:** submit a test registration (or request collaboration review on
+a test paper) and watch `./scripts/logs.sh backend` — every send (or send
+failure) is logged. With `SMTP_HOST` empty, email is a logged no-op and every
+workflow still functions; nothing else in the app depends on it.
 
 ### Importing the existing spreadsheets
 
@@ -153,6 +199,35 @@ named like `IMG_1234 - Jane Doe.jpg`) and lists anything it couldn't match.
 Both commands skip people who already have a photo unless you pass
 `--overwrite`.
 
+### Institution map
+
+The Institutions page has a **List/Map toggle**; the map shows every
+institution with coordinates as a circle sized by its current member count.
+Nothing needs configuring — but institutions only appear once they have
+coordinates. The office fills them in each institution's edit form, either by
+hand or with the **"Fetch from ROR"** button (uses the institution's
+[ROR](https://ror.org) id; the lookup happens in the admin's browser, so the
+server needs no internet access). The basemap tiles come from CARTO's free
+OSM-based tile service — the one external runtime dependency of the app; only
+tile requests leave the site, never member data.
+
+### The admin panel
+
+Everything else is configured while the instance runs, in **Admin** (visible
+to admin accounts):
+
+- **User accounts** — create local username/password accounts, set roles
+  (`admin` / `office` / `member`), link logins to directory records, merge a
+  member's local + ORCID accounts, **reset a locked-out local account's
+  password** (shows a one-time temporary password), search, and delete logins.
+- **Site settings** — an **announcement banner** (info/warning/critical, shown
+  on the login page and above every page) and a **login-page message**; both
+  apply immediately, no restart.
+- **System** — database size, record counts, whether the database schema
+  matches the code's migrations, and an audit of recent sign-ins (successes
+  and failures, with IP).
+- **Backups** — see below.
+
 ## Day-to-day operation
 
 | Command | What it does |
@@ -191,6 +266,19 @@ still works from a host shell.
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,
 backup retention — see `.env.example` for the full annotated list).
+
+### Upgrading
+
+```bash
+git pull && ./scripts/start.sh
+```
+
+That rebuilds the images and restarts the stack; the backend applies any new
+database migrations automatically on startup (`alembic upgrade head` runs
+before the server). Admin → System shows whether the running database schema
+matches the code, in case something was missed. Nightly backups mean the
+night before any upgrade is already snapshotted — take an extra
+`./scripts/backup.sh` (or "Run backup now") first if you want a fresh one.
 
 ## Prebuilt images
 
