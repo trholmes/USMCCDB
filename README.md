@@ -73,7 +73,7 @@ up", work through the sections below in order:
 1. **[Domain + HTTPS](#going-live-at-dbmuoncolliderus)** — `SITE_DOMAIN` turns on the Caddy TLS container.
 2. **[ORCID sign-in](#orcid-sign-in)** — so members sign in with their ORCID iD instead of local accounts.
 3. **[Email notifications](#email-notifications)** — registration and publication-workflow mail.
-4. **[Import existing data](#importing-the-existing-spreadsheets)** and **[member photos](#member-photos)**.
+4. **[Import existing data](#initializing-a-new-instance-from-the-existing-spreadsheets)** and **[member photos](#member-photos)**.
 5. **[Institution map](#institution-map)** — add coordinates so the map view fills in.
 6. **[Admin panel](#the-admin-panel)** — banner/login message, accounts, backups & restore.
 
@@ -242,9 +242,12 @@ Both commands skip people who already have a photo unless you pass
 The Institutions page has a **List/Map toggle**; the map shows every
 institution with coordinates as a circle sized by its current member count.
 Nothing needs configuring — but institutions only appear once they have
-coordinates. The office fills them in each institution's edit form, either by
-hand or with the **"Fetch from ROR"** button (uses the institution's
-[ROR](https://ror.org) id; the lookup happens in the admin's browser, so the
+coordinates. The `seed-coordinates` CLI command fills them all at once from
+[ROR](https://ror.org) (step 3 of the
+[initialization walkthrough](#initializing-a-new-instance-from-the-existing-spreadsheets));
+the office fills in stragglers in each institution's edit form, either by
+hand or with the **"Fetch from ROR"** button (uses the institution's ROR id;
+the lookup happens in the admin's browser, so the
 server needs no internet access). The basemap tiles come from CARTO's free
 OSM-based tile service — the one external runtime dependency of the app; only
 tile requests leave the site, never member data.
