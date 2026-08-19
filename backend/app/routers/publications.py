@@ -404,4 +404,15 @@ def acknowledgment(
             " We are grateful to the collaboration's internal reviewers for "
             "their careful review of this manuscript."
         )
+    # Personal funding acknowledgements of the attached authors (issue #127),
+    # in a stable name order; identical texts (shared grants) appear once.
+    personal: list[str] = []
+    for pp in sorted(
+        pub.people, key=lambda pp: (pp.person.family_name, pp.person.given_name)
+    ):
+        ack = (pp.person.acknowledgement_text or "").strip()
+        if pp.role != PublicationPersonRole.reviewer and ack and ack not in personal:
+            personal.append(ack)
+    if personal:
+        text += " " + " ".join(personal)
     return PubAcknowledgment(text=text, reviewers=reviewers)

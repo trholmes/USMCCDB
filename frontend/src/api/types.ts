@@ -72,6 +72,8 @@ export interface Person extends PersonSummary {
   usmcc_percent: number | null
   expertise: string | null
   notes: string | null
+  grant_number: string | null
+  acknowledgement_text: string | null
   status_changed_at: string | null
   affiliations: Affiliation[]
   author_periods: AuthorPeriod[]

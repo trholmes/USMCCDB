@@ -261,6 +261,9 @@ class PersonUpdate(BaseModel):
     research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
+    # Personal funding acknowledgement (issue #127).
+    grant_number: str | None = Field(default=None, max_length=200)
+    acknowledgement_text: str | None = Field(default=None, max_length=2000)
 
     @field_validator("email")
     @classmethod
@@ -340,6 +343,8 @@ class PersonOut(PersonSummary):
     usmcc_percent: int | None = None
     expertise: str | None
     notes: str | None
+    grant_number: str | None = None
+    acknowledgement_text: str | None = None
     status_changed_at: datetime | None
     affiliations: list[AffiliationOut] = []
     author_periods: list[AuthorPeriodOut] = []
