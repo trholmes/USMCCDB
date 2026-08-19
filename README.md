@@ -141,37 +141,75 @@ a test paper) and watch `./scripts/logs.sh backend` — every send (or send
 failure) is logged. With `SMTP_HOST` empty, email is a logged no-op and every
 workflow still functions; nothing else in the app depends on it.
 
-### Importing the existing spreadsheets
+### Initializing a new instance from the existing spreadsheets
 
-Drop the exports in `data/` (gitignored — never commit member data) and run:
+A fresh database contains nothing but the bootstrap admin account. To go
+from there to a fully populated instance:
 
-```bash
-docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
-docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
-```
+1. **Seed the working groups** (idempotent):
 
-Both accept `--dry-run`. The member importer understands the USMCC registration
-form export (names, affiliations, ORCID, position, voting status, expertise)
-and opens an authorship period for each voting member (`--no-authors-from-voting`
-to disable). The talks importer creates conferences, matches speakers by name,
-and keeps unmatched names in the talk notes. There are also `import-members`
-(plain CSV), `create-admin`, `seed-wgs`, and `seed-demo` (fictional demo data)
-commands — see `python -m app.cli --help`.
+   ```bash
+   docker compose exec backend python -m app.cli seed-wgs
+   ```
 
-The importers don't set institution coordinates, so the map view starts
-empty. To fill it in one go from [ROR](https://ror.org):
+2. **Import the membership spreadsheet.** Drop the exports in `data/`
+   (gitignored — never commit member data), preview with `--dry-run`, then
+   run for real:
 
-```bash
-docker compose exec backend python -m app.cli seed-coordinates --dry-run
-docker compose exec backend python -m app.cli seed-coordinates
-```
+   ```bash
+   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx --dry-run
+   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
+   ```
 
-Institutions with a ROR id get the coordinates of their ROR record; the rest
-are matched by their author-list address (or name) via ROR's affiliation
-matcher, which also fills in the missing ROR id when the match is
-unambiguous. Anything unresolved is listed at the end — fill those in by hand
-in the institution edit form (which has its own per-institution
-"Fetch from ROR" button).
+   The importer understands the USMCC registration form export (names,
+   affiliations, ORCID, position, voting status, expertise) and opens an
+   authorship period for each voting member (`--no-authors-from-voting` to
+   disable). Institutions are created from the free-text "Primary
+   Affiliation" answers as minimal rows **held inactive for office review** —
+   they have a name but no short name, ROR id, author-list address, or
+   coordinates yet. The next two steps fill those in.
+
+3. **Seed institution coordinates and ROR ids from [ROR](https://ror.org)**
+   — without this the map view starts empty:
+
+   ```bash
+   docker compose exec backend python -m app.cli seed-coordinates --dry-run
+   docker compose exec backend python -m app.cli seed-coordinates
+   ```
+
+   Institutions with a ROR id get the coordinates of their ROR record; the
+   rest (including everything just created by the member import) are matched
+   by their author-list address or name via ROR's affiliation matcher, which
+   also fills in the missing ROR id when the match is unambiguous. Anything
+   unresolved is listed at the end for the next step. Already-set
+   coordinates are never touched, so re-running it later (e.g. after more
+   registrations) is safe.
+
+4. **Review the imported institutions** on the Institutions page: fix names,
+   add short names and author-list addresses (needed for author-list
+   generation), set the US flag (import-created rows default to US, and the
+   flag gates voting eligibility), merge any duplicates the free-text
+   affiliations produced, and activate each row. The edit form has a
+   per-institution "Fetch from ROR" button for anything step 3 couldn't
+   resolve.
+
+5. **Import the talks spreadsheet:**
+
+   ```bash
+   docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
+   ```
+
+   Also accepts `--dry-run`. It creates conferences, matches speakers by
+   name, and keeps unmatched names in the talk notes.
+
+6. **Import member photos** — see [Member photos](#member-photos) below.
+
+7. **Enable ORCID sign-in** (see above) — members whose ORCID iD came in
+   with the spreadsheet are linked to their record automatically on first
+   sign-in.
+
+There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
+(fictional demo data) commands — see `python -m app.cli --help`.
 
 ### Member photos
 
