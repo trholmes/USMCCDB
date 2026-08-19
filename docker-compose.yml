@@ -46,7 +46,9 @@ services:
       - photos:/photos
       # Backup snapshots, shared with the backup container: the admin Backups
       # panel lists/downloads them and requests manual dumps via /backups/requests.
-      - backups:/backups
+      # Bind-mounted to the host (issue #125) so dumps survive losing the
+      # docker volumes and can be copied off-site with plain filesystem tools.
+      - ${BACKUP_DIR:-./backups}:/backups
     depends_on:
       db:
         condition: service_healthy
@@ -86,7 +88,8 @@ services:
     restart: unless-stopped
 
   # Nightly pg_dump with daily/weekly/monthly rotation, plus on-demand dumps
-  # via scripts/backup.sh. Dumps land in the "backups" named volume.
+  # via scripts/backup.sh. Dumps land on the host in BACKUP_DIR (default
+  # ./backups next to this file).
   backup:
     build: ./docker/backup
     environment:
@@ -99,7 +102,7 @@ services:
       KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-8}
       KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
     volumes:
-      - backups:/backups
+      - ${BACKUP_DIR:-./backups}:/backups
       # Writable so /restore.sh can put photo snapshots back; backup.sh
       # itself only reads from it.
       - photos:/photos
@@ -110,7 +113,6 @@ services:
 
 volumes:
   pgdata: {}
-  backups: {}
   photos: {}
   caddy_data: {}
   caddy_config: {}

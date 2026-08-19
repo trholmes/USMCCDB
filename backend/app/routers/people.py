@@ -98,6 +98,8 @@ SELF_EDITABLE = {
     "research_areas",
     "expertise",
     "is_voting",
+    "grant_number",
+    "acknowledgement_text",
 }
 # Charter institutional info an Administrative Institutional Contact may keep
 # up to date for people currently at their institution.

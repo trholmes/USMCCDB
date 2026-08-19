@@ -1,9 +1,21 @@
-import { Badge, Button, Checkbox, Group, Modal, Stack, Table, TextInput, Title } from '@mantine/core'
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  SegmentedControl,
+  Stack,
+  Table,
+  TextInput,
+  Title,
+} from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution } from '../api/types'
+import InstitutionMap from '../components/InstitutionMap'
 import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
@@ -19,14 +31,18 @@ const ACCESSORS: Accessors<Institution> = {
 export default function InstitutionsPage() {
   const [rows, setRows] = useState<Institution[]>([])
   const [modal, setModal] = useState<Institution | 'new' | null>(null)
-  const [form, setForm] = useState({
+  const emptyForm = {
     name: '',
     short_name: '',
     ror_id: '',
     latex_address: '',
     is_us: true,
-  })
+    latitude: '',
+    longitude: '',
+  }
+  const [form, setForm] = useState(emptyForm)
   const [q, setQ] = useState('')
+  const [view, setView] = useState<'list' | 'map'>('list')
   const { isOffice } = useSession()
   const navigate = useNavigate()
 
@@ -50,16 +66,38 @@ export default function InstitutionsPage() {
   const open = (target: Institution | 'new') => {
     setForm(
       target === 'new'
-        ? { name: '', short_name: '', ror_id: '', latex_address: '', is_us: true }
+        ? emptyForm
         : {
             name: target.name,
             short_name: target.short_name ?? '',
             ror_id: target.ror_id ?? '',
             latex_address: target.latex_address ?? '',
             is_us: target.is_us,
+            latitude: target.latitude != null ? String(target.latitude) : '',
+            longitude: target.longitude != null ? String(target.longitude) : '',
           },
     )
     setModal(target)
+  }
+
+  // Pull coordinates from the public ROR record (issue #112) — fetched by the
+  // browser, so an air-gapped backend still works; entering them by hand does too.
+  const fetchRorCoordinates = async () => {
+    const m = form.ror_id.trim().toLowerCase().match(/(0[a-z0-9]{8})$/)
+    if (!m) {
+      notifications.show({ color: 'red', message: 'Enter a ROR id first' })
+      return
+    }
+    try {
+      const resp = await fetch(`https://api.ror.org/v2/organizations/${m[1]}`)
+      if (!resp.ok) throw new Error(`ROR lookup failed (${resp.status})`)
+      const rec = await resp.json()
+      const geo = rec.locations?.[0]?.geonames_details
+      if (geo?.lat == null || geo?.lng == null) throw new Error('ROR record has no coordinates')
+      setForm((f) => ({ ...f, latitude: String(geo.lat), longitude: String(geo.lng) }))
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
   }
 
   const save = async (allowSimilar = false) => {
@@ -69,6 +107,12 @@ export default function InstitutionsPage() {
       ror_id: form.ror_id || null,
       latex_address: form.latex_address || null,
       is_us: form.is_us,
+      latitude: form.latitude.trim() === '' ? null : Number(form.latitude),
+      longitude: form.longitude.trim() === '' ? null : Number(form.longitude),
+    }
+    if (Number.isNaN(body.latitude) || Number.isNaN(body.longitude)) {
+      notifications.show({ color: 'red', message: 'Coordinates must be decimal numbers' })
+      return
     }
     try {
       if (modal === 'new') await api.post('/institutions', { ...body, allow_similar: allowSimilar })
@@ -95,6 +139,15 @@ export default function InstitutionsPage() {
       <Group justify="space-between" mb="md">
         <Title order={3}>Institutions</Title>
         <Group>
+          <SegmentedControl
+            data={[
+              { value: 'list', label: 'List' },
+              { value: 'map', label: 'Map' },
+            ]}
+            value={view}
+            onChange={(v) => setView(v as 'list' | 'map')}
+            size="xs"
+          />
           <TextInput
             placeholder="Search name…"
             value={q}
@@ -104,6 +157,9 @@ export default function InstitutionsPage() {
           {isOffice && <Button onClick={() => open('new')}>Add institution</Button>}
         </Group>
       </Group>
+      {view === 'map' && <InstitutionMap institutions={filtered} />}
+      {view === 'list' && (
+        <>
       <PageCount shown={paged.length} count={count} noun="institutions" />
       <Table striped highlightOnHover>
         <Table.Thead>
@@ -146,6 +202,8 @@ export default function InstitutionsPage() {
         </Table.Tbody>
       </Table>
       <PaginationBar page={page} total={total} setPage={setPage} />
+        </>
+      )}
 
       <Modal
         opened={modal !== null}
@@ -176,6 +234,24 @@ export default function InstitutionsPage() {
             value={form.latex_address}
             onChange={(e) => setForm({ ...form, latex_address: e.currentTarget.value })}
           />
+          <Group grow align="flex-end">
+            <TextInput
+              label="Latitude"
+              description="For the institutions map."
+              placeholder="41.789"
+              value={form.latitude}
+              onChange={(e) => setForm({ ...form, latitude: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Longitude"
+              placeholder="-87.599"
+              value={form.longitude}
+              onChange={(e) => setForm({ ...form, longitude: e.currentTarget.value })}
+            />
+            <Button variant="light" onClick={fetchRorCoordinates} disabled={!form.ror_id.trim()}>
+              Fetch from ROR
+            </Button>
+          </Group>
           <Checkbox
             label="US institution"
             description="Only people currently at a US institution are eligible to vote; unchecking this clears the voting flag of everyone currently here."

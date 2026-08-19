@@ -79,6 +79,9 @@ class InstitutionBase(BaseModel):
     is_us: bool = True
     latex_address: str | None = None
     is_active: bool = True
+    # WGS84 coordinates for the institutions map (issue #112).
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
     @field_validator("ror_id")
     @classmethod
@@ -100,6 +103,8 @@ class InstitutionUpdate(BaseModel):
     is_us: bool | None = None
     latex_address: str | None = None
     is_active: bool | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
     @field_validator("ror_id")
     @classmethod
@@ -256,6 +261,9 @@ class PersonUpdate(BaseModel):
     research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
+    # Personal funding acknowledgement (issue #127).
+    grant_number: str | None = Field(default=None, max_length=200)
+    acknowledgement_text: str | None = Field(default=None, max_length=2000)
 
     @field_validator("email")
     @classmethod
@@ -335,6 +343,8 @@ class PersonOut(PersonSummary):
     usmcc_percent: int | None = None
     expertise: str | None
     notes: str | None
+    grant_number: str | None = None
+    acknowledgement_text: str | None = None
     status_changed_at: datetime | None
     affiliations: list[AffiliationOut] = []
     author_periods: list[AuthorPeriodOut] = []

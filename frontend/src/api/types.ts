@@ -28,6 +28,8 @@ export interface Institution {
   is_us: boolean
   latex_address: string | null
   is_active: boolean
+  latitude: number | null
+  longitude: number | null
   people_count: number
 }
 
@@ -70,6 +72,8 @@ export interface Person extends PersonSummary {
   usmcc_percent: number | null
   expertise: string | null
   notes: string | null
+  grant_number: string | null
+  acknowledgement_text: string | null
   status_changed_at: string | null
   affiliations: Affiliation[]
   author_periods: AuthorPeriod[]

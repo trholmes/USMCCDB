@@ -8,6 +8,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -129,6 +130,11 @@ class Person(TimestampedBase):
     research_areas: Mapped[str | None] = mapped_column(Text)
     # Free-form comma-separated topics the member is focused on.
     expertise: Mapped[str | None] = mapped_column(Text)
+    # Personal funding acknowledgement (issue #127): the grant number seeds a
+    # default text the member can then edit freely; the text is appended to
+    # the suggested acknowledgment of publications they are attached to.
+    grant_number: Mapped[str | None] = mapped_column(String(200))
+    acknowledgement_text: Mapped[str | None] = mapped_column(Text)
     # Filename (relative to the photos volume) of the member's photo.
     photo_file: Mapped[str | None] = mapped_column(String(120))
     notes: Mapped[str | None] = mapped_column(Text)
@@ -171,6 +177,10 @@ class Institution(TimestampedBase):
     is_us: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     latex_address: Mapped[str | None] = mapped_column(Text)  # as printed on author lists
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # WGS84 coordinates for the institutions map (issue #112); typically
+    # filled from the ROR record.
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
 
     affiliations = relationship("Affiliation", back_populates="institution")
 

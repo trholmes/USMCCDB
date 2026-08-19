@@ -12,6 +12,7 @@ import {
   Stack,
   Table,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -44,6 +45,21 @@ import {
   STUDENT_STAGES,
 } from '../constants'
 import { today } from '../dates'
+
+// Default funding acknowledgement seeded from the grant number (issue #127);
+// the funder is guessed from the number's shape and the text stays freely
+// editable — only the final text is stored and used.
+function defaultAckText(person: Person, grant: string): string {
+  const g = grant.trim()
+  const name = `${person.given_name} ${person.family_name}`
+  if (/^de[- ]/i.test(g)) {
+    return `The work of ${name} was supported by the U.S. Department of Energy under Grant No. ${g}.`
+  }
+  if (/^(nsf[- ]?)?(phy|oac|mps)[- ]?\d/i.test(g)) {
+    return `The work of ${name} was supported by the National Science Foundation under Grant No. ${g}.`
+  }
+  return `The work of ${name} was supported under Grant No. ${g}.`
+}
 
 export default function PersonPage() {
   const { id } = useParams()
@@ -190,6 +206,8 @@ export default function PersonPage() {
       career_stage: person.career_stage,
       professional_title: person.professional_title ?? '',
       department: person.department ?? '',
+      grant_number: person.grant_number ?? '',
+      acknowledgement_text: person.acknowledgement_text ?? '',
     })
     setUsmccPercent(person.usmcc_percent ?? '')
     setResearchAreas(splitList(person.research_areas))
@@ -240,6 +258,12 @@ export default function PersonPage() {
       joinList(splitList(person.research_areas)),
     )
     changed('is_voting', voting, person.is_voting)
+    changed('grant_number', form.grant_number || null, person.grant_number)
+    changed(
+      'acknowledgement_text',
+      form.acknowledgement_text.trim() || null,
+      person.acknowledgement_text,
+    )
     if (Object.keys(payload).length === 0) {
       setEditing(false)
       return
@@ -633,6 +657,39 @@ export default function PersonPage() {
                   : undefined
               }
             />
+            <Group align="flex-end" gap="xs">
+              <TextInput
+                label="Grant number"
+                description="Seeds a default funding acknowledgement below."
+                placeholder="DE-SC0012345"
+                value={form.grant_number}
+                disabled={!canEditFull}
+                onChange={(e) => setForm({ ...form, grant_number: e.currentTarget.value })}
+                style={{ flex: 1 }}
+              />
+              <Button
+                variant="light"
+                disabled={!canEditFull || !form.grant_number.trim()}
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    acknowledgement_text: defaultAckText(person, form.grant_number),
+                  })
+                }
+              >
+                Generate text
+              </Button>
+            </Group>
+            <Textarea
+              label="Funding acknowledgement"
+              description="Appended to the suggested acknowledgment text of every publication you are attached to. Edit freely."
+              autosize
+              minRows={2}
+              maxLength={2000}
+              value={form.acknowledgement_text}
+              disabled={!canEditFull}
+              onChange={(e) => setForm({ ...form, acknowledgement_text: e.currentTarget.value })}
+            />
             <Group>
               <Button onClick={save}>Save</Button>
               <Button variant="subtle" onClick={() => setEditing(false)}>
@@ -665,6 +722,11 @@ export default function PersonPage() {
             {person.usmcc_percent != null && (
               <Text size="sm">
                 <b>Research time on USMCC:</b> {person.usmcc_percent}%
+              </Text>
+            )}
+            {person.acknowledgement_text && (
+              <Text size="sm">
+                <b>Funding acknowledgement:</b> {person.acknowledgement_text}
               </Text>
             )}
             {person.research_areas && (
@@ -1055,53 +1117,59 @@ export default function PersonPage() {
         </Table>
       )}
 
-      <Title order={5}>Authorship periods</Title>
-      {person.author_periods.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          Not currently on the author list.
-        </Text>
-      ) : (
-        <Table maw={720}>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>From</Table.Th>
-              <Table.Th>To</Table.Th>
-              <Table.Th>Signing name</Table.Th>
-              {isOffice && <Table.Th />}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {person.author_periods.map((p) => (
-              <Table.Tr key={p.id}>
-                <Table.Td>{p.start_date}</Table.Td>
-                <Table.Td>{p.end_date ?? 'present'}</Table.Td>
-                <Table.Td>{p.signing_name ?? '—'}</Table.Td>
-                {isOffice && (
-                  <Table.Td>
-                    <Group gap={4} justify="flex-end" wrap="nowrap">
-                      <Button size="compact-xs" variant="subtle" onClick={() => openApEdit(p)}>
-                        Edit
-                      </Button>
-                      <Button
-                        size="compact-xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={() => deleteAp(p)}
-                      >
-                        Delete
-                      </Button>
-                    </Group>
-                  </Table.Td>
-                )}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
+      {/* Office-only: authorship periods drive collaboration-wide author-list
+          generation and only confuse members on their own profile (issue #123). */}
       {isOffice && (
-        <Button size="xs" variant="light" w="fit-content" onClick={() => openApEdit('new')}>
-          Add authorship period
-        </Button>
+        <>
+          <Title order={5}>Collaboration author list periods</Title>
+          <Text size="sm" c="dimmed">
+            Date ranges during which this person is included in generated
+            collaboration author lists. Managed by the office.
+          </Text>
+          {person.author_periods.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              Not currently on the author list.
+            </Text>
+          ) : (
+            <Table maw={720}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>From</Table.Th>
+                  <Table.Th>To</Table.Th>
+                  <Table.Th>Signing name</Table.Th>
+                  <Table.Th />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {person.author_periods.map((p) => (
+                  <Table.Tr key={p.id}>
+                    <Table.Td>{p.start_date}</Table.Td>
+                    <Table.Td>{p.end_date ?? 'present'}</Table.Td>
+                    <Table.Td>{p.signing_name ?? '—'}</Table.Td>
+                    <Table.Td>
+                      <Group gap={4} justify="flex-end" wrap="nowrap">
+                        <Button size="compact-xs" variant="subtle" onClick={() => openApEdit(p)}>
+                          Edit
+                        </Button>
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="red"
+                          onClick={() => deleteAp(p)}
+                        >
+                          Delete
+                        </Button>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+          <Button size="xs" variant="light" w="fit-content" onClick={() => openApEdit('new')}>
+            Add authorship period
+          </Button>
+        </>
       )}
 
       <Modal

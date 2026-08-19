@@ -3054,3 +3054,174 @@ def test_backup_trigger_times_out_without_container(admin, tmp_path_factory):
         os.environ.pop("BACKUPS_DIR", None)
         os.environ.pop("BACKUP_TRIGGER_TIMEOUT_SECONDS", None)
         get_settings.cache_clear()
+
+
+# --- Issues #89+ wave: bulk author add, institution coordinates, talk edits ------
+
+
+def test_bulk_add_publication_people(admin):
+    pub = admin.post("/api/v1/publications", json={"title": "Bulk-author test paper"}).json()
+    pids = []
+    for name in ("Ada", "Ben", "Cyd"):
+        p = admin.post(
+            "/api/v1/people/register",
+            json={
+                "given_name": name,
+                "family_name": "Bulk",
+                "email": f"{name.lower()}.bulk@example.edu",
+            },
+        ).json()
+        admin.post(f"/api/v1/people/{p['id']}/status", json={"status": "active"})
+        pids.append(p["id"])
+
+    # Add two at once (duplicates within the request are collapsed).
+    r = admin.post(
+        f"/api/v1/publications/{pub['id']}/people/bulk",
+        json={"person_ids": [pids[0], pids[1], pids[0]], "role": "contributor"},
+    )
+    assert r.status_code == 201, r.text
+    assert sorted(pp["person"]["id"] for pp in r.json()) == sorted(pids[:2])
+
+    # Re-adding an overlapping set skips the ones already attached.
+    r = admin.post(
+        f"/api/v1/publications/{pub['id']}/people/bulk",
+        json={"person_ids": pids, "role": "contributor"},
+    )
+    assert r.status_code == 201, r.text
+    assert [pp["person"]["id"] for pp in r.json()] == [pids[2]]
+    attached = admin.get(f"/api/v1/publications/{pub['id']}").json()["people"]
+    assert sorted(pp["person"]["id"] for pp in attached) == sorted(pids)
+
+    # Unknown person fails the whole request.
+    r = admin.post(
+        f"/api/v1/publications/{pub['id']}/people/bulk",
+        json={"person_ids": [999999], "role": "contributor"},
+    )
+    assert r.status_code == 404
+
+    # A member who is neither editor, convener, nor office cannot bulk-add…
+    member, mid = _linked_member(
+        admin, given="Nadia", family="Nonauthor", email="nadia.nonauthor@example.edu"
+    )
+    r = member.post(
+        f"/api/v1/publications/{pub['id']}/people/bulk",
+        json={"person_ids": [mid], "role": "contributor"},
+    )
+    assert r.status_code == 403
+    # …and even an editor cannot bulk-assign reviewers (office only).
+    admin.post(
+        f"/api/v1/publications/{pub['id']}/people",
+        json={"person_id": mid, "role": "editor"},
+    )
+    r = member.post(
+        f"/api/v1/publications/{pub['id']}/people/bulk",
+        json={"person_ids": [pids[0]], "role": "reviewer"},
+    )
+    assert r.status_code == 403
+
+
+def test_institution_coordinates(admin):
+    inst = admin.post(
+        "/api/v1/institutions",
+        json={"name": "Mapped University", "latitude": 41.79, "longitude": -87.6},
+    ).json()
+    assert inst["latitude"] == 41.79 and inst["longitude"] == -87.6
+
+    r = admin.patch(
+        f"/api/v1/institutions/{inst['id']}", json={"latitude": 42.0, "longitude": -71.1}
+    )
+    assert r.status_code == 200
+    assert r.json()["latitude"] == 42.0
+
+    # Out-of-range coordinates are rejected.
+    assert admin.patch(
+        f"/api/v1/institutions/{inst['id']}", json={"latitude": 91}
+    ).status_code == 422
+    assert admin.patch(
+        f"/api/v1/institutions/{inst['id']}", json={"longitude": -200}
+    ).status_code == 422
+
+    # Coordinates can be cleared again.
+    r = admin.patch(
+        f"/api/v1/institutions/{inst['id']}", json={"latitude": None, "longitude": None}
+    )
+    assert r.status_code == 200
+    assert r.json()["latitude"] is None
+
+
+def test_office_can_edit_member_talk(admin):
+    """Office/admin may edit any talk, including member-added ones (issue #119)."""
+    member, pid = _linked_member(
+        admin, given="Tessa", family="Talker", email="tessa.talker@example.edu"
+    )
+    talk = member.post(
+        "/api/v1/talks",
+        json={"title": "My seminar", "venue": "Somewhere U", "speaker_person_id": pid},
+    ).json()
+    r = admin.patch(
+        f"/api/v1/talks/{talk['id']}",
+        json={"title": "My seminar (corrected)", "status": "given", "is_invited": True},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["title"] == "My seminar (corrected)"
+    assert r.json()["status"] == "given"
+    assert r.json()["is_invited"] is True
+
+
+def test_personal_acknowledgement_text(admin):
+    """Members set a grant/acknowledgement on their profile; the text is
+    appended to the suggested acknowledgment of publications they are
+    attached to (issue #127)."""
+    member, pid = _linked_member(
+        admin, given="Greta", family="Grant", email="greta.grant@example.edu"
+    )
+    # Self-editable: the member sets grant number + text on their own profile.
+    r = member.patch(
+        f"/api/v1/people/{pid}",
+        json={
+            "grant_number": "DE-SC0099999",
+            "acknowledgement_text": (
+                "The work of Greta Grant was supported by the U.S. Department "
+                "of Energy under Grant No. DE-SC0099999."
+            ),
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["grant_number"] == "DE-SC0099999"
+
+    # A second person shares the same grant text — it must appear only once.
+    twin = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Gustav", "family_name": "Grant", "email": "g.grant2@example.edu"},
+    ).json()
+    admin.post(f"/api/v1/people/{twin['id']}/status", json={"status": "active"})
+    admin.patch(
+        f"/api/v1/people/{twin['id']}",
+        json={"acknowledgement_text": r.json()["acknowledgement_text"]},
+    )
+    # A reviewer's own acknowledgement must not leak into the text.
+    reviewer = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Rea", "family_name": "Viewer", "email": "rea.viewer@example.edu"},
+    ).json()
+    admin.post(f"/api/v1/people/{reviewer['id']}/status", json={"status": "active"})
+    admin.patch(
+        f"/api/v1/people/{reviewer['id']}",
+        json={"acknowledgement_text": "Reviewer funding that must not appear."},
+    )
+
+    pub = admin.post("/api/v1/publications", json={"title": "Acknowledgement test"}).json()
+    admin.post(
+        f"/api/v1/publications/{pub['id']}/people/bulk",
+        json={"person_ids": [pid, twin["id"]], "role": "contributor"},
+    )
+    admin.post(
+        f"/api/v1/publications/{pub['id']}/people",
+        json={"person_id": reviewer["id"], "role": "reviewer"},
+    )
+
+    ack = admin.get(f"/api/v1/publications/{pub['id']}/acknowledgment").json()["text"]
+    assert ack.count("Grant No. DE-SC0099999") == 1
+    assert "must not appear" not in ack
+    # The collaboration boilerplate still leads the text.
+    assert ack.startswith("We thank our colleagues")

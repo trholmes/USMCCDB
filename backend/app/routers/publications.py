@@ -22,6 +22,7 @@ from app.schemas.publications import (
     PublicationOut,
     PublicationPublic,
     PublicationUpdate,
+    PubPeopleAdd,
     PubPersonAdd,
     PubPersonOut,
     PubStatusChange,
@@ -303,6 +304,58 @@ def add_person(
     return PubPersonOut.model_validate(pp)
 
 
+@router.post("/{pub_id}/people/bulk", status_code=201)
+def add_people(
+    pub_id: int,
+    body: PubPeopleAdd,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[PubPersonOut]:
+    """Attach several people with the same role at once (issue #102). People
+    who already hold the role on this publication are skipped, not an error —
+    the natural bulk semantics ("add this whole group")."""
+    pub = db.get(Publication, pub_id)
+    if pub is None:
+        raise HTTPException(404, "Publication not found")
+    if not _can_manage_people(db, user, pub):
+        raise HTTPException(403, "Only editors, conveners, or the office can add people")
+    if body.role == PublicationPersonRole.reviewer and not is_office(user):
+        raise HTTPException(403, "Only the office can assign reviewers")
+    person_ids = list(dict.fromkeys(body.person_ids))  # dedupe, keep order
+    people = {
+        p.id: p
+        for p in db.execute(select(Person).where(Person.id.in_(person_ids))).scalars()
+    }
+    missing = [pid for pid in person_ids if pid not in people]
+    if missing:
+        raise HTTPException(404, f"Person not found: {missing[0]}")
+    existing = set(
+        db.execute(
+            select(PublicationPerson.person_id).where(
+                PublicationPerson.publication_id == pub_id,
+                PublicationPerson.person_id.in_(person_ids),
+                PublicationPerson.role == body.role,
+            )
+        ).scalars()
+    )
+    added = []
+    for pid in person_ids:
+        if pid in existing:
+            continue
+        pp = PublicationPerson(publication_id=pub_id, person_id=pid, role=body.role)
+        db.add(pp)
+        added.append(pp)
+    db.commit()
+    for pp in added:
+        db.refresh(pp)
+        if body.role == PublicationPersonRole.reviewer:
+            msg = notifications.reviewer_assigned(db, pub, people[pp.person_id], user)
+            if msg is not None:
+                background.add_task(send_email, *msg)
+    return [PubPersonOut.model_validate(pp) for pp in added]
+
+
 @router.delete("/{pub_id}/people/{pp_id}", status_code=204)
 def remove_person(
     pub_id: int,
@@ -351,4 +404,15 @@ def acknowledgment(
             " We are grateful to the collaboration's internal reviewers for "
             "their careful review of this manuscript."
         )
+    # Personal funding acknowledgements of the attached authors (issue #127),
+    # in a stable name order; identical texts (shared grants) appear once.
+    personal: list[str] = []
+    for pp in sorted(
+        pub.people, key=lambda pp: (pp.person.family_name, pp.person.given_name)
+    ):
+        ack = (pp.person.acknowledgement_text or "").strip()
+        if pp.role != PublicationPersonRole.reviewer and ack and ack not in personal:
+            personal.append(ack)
+    if personal:
+        text += " " + " ".join(personal)
     return PubAcknowledgment(text=text, reviewers=reviewers)

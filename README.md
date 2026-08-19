@@ -150,14 +150,20 @@ Both commands skip people who already have a photo unless you pass
 | `./scripts/reset.sh` | **Wipe the database** and start fresh (offers a final backup first) |
 | `./scripts/logs.sh [service]` | Tail logs |
 
-Backups run automatically every night at `BACKUP_HOUR` (UTC) into the
-`backups` volume, rotated as 14 daily / 8 weekly / 12 monthly dumps; member
-photos are snapshotted alongside as `photos-<date>.tar.gz`. Restoring a dump
-also restores the photo snapshot from the same day when one exists (weekly
-and monthly dumps have no snapshot of their own — pass a daily
+Backups run automatically every night at `BACKUP_HOUR` (UTC) into a host
+directory (`BACKUP_DIR` in `.env`, default `./backups` next to
+`docker-compose.yml`), rotated as 14 daily / 8 weekly / 12 monthly dumps;
+member photos are snapshotted alongside as `photos-<date>.tar.gz`. Restoring
+a dump also restores the photo snapshot from the same day when one exists
+(weekly and monthly dumps have no snapshot of their own — pass a daily
 `photos-*.tar.gz` as a second argument to `restore.sh` to restore photos
-with them). Copy everything off-site with e.g.
-`docker compose cp backup:/backups ./offsite/`.
+with them). Because the dumps live directly on the host disk, off-site
+copies are a plain `rsync`/`cp` of that directory.
+
+> **Upgrading from a version that kept backups in a docker volume:** copy the
+> old dumps into the new directory once before restarting the stack:
+> `docker run --rm -v usmccdb_backups:/from -v "$PWD/backups":/to alpine cp -a /from/. /to/`
+> (adjust the `usmccdb_` prefix to your compose project name).
 
 Admins also get a **Backups** tab in the web admin panel showing every
 snapshot (with size and age), a "Run backup now" button, and per-snapshot
