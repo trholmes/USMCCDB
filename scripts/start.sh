@@ -5,6 +5,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ ! -f .env ]; then
+    # Volumes are namespaced by the compose project name, which defaults to
+    # this DIRECTORY's name — so a fresh checkout in a same-named directory
+    # would silently attach to an existing instance's database volume, and
+    # postgres only applies the freshly generated password to an EMPTY
+    # volume: the backend would crash-loop against the old password (502)
+    # and the other checkout's containers would be taken over. Refuse.
+    project=${COMPOSE_PROJECT_NAME:-$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')}
+    if docker volume inspect "${project}_pgdata" >/dev/null 2>&1; then
+        echo "ERROR: no .env here, but the Docker volume '${project}_pgdata' already exists —"
+        echo "another checkout has already deployed under the compose project name"
+        echo "'${project}' (it defaults to the directory name). Starting now would reuse"
+        echo "that database with freshly generated credentials that don't match it, and"
+        echo "would take over the other checkout's containers."
+        echo
+        echo "  * To manage the existing instance, run this script from its original"
+        echo "    checkout (or copy that checkout's .env into this directory first)."
+        echo "  * To run a separate (test) instance beside it, give this one its own"
+        echo "    project name and port on the first run:"
+        echo "        COMPOSE_PROJECT_NAME=usmccdb-test HTTP_PORT=8081 ./scripts/start.sh"
+        echo "    (both are then persisted into the generated .env). Cloning into a"
+        echo "    differently-named directory works too."
+        exit 1
+    fi
     echo "No .env found — creating one from .env.example with random secrets."
     cp .env.example .env
     secret=$(openssl rand -hex 32)
@@ -14,7 +37,12 @@ if [ ! -f .env ]; then
     sed -e "s|^SECRET_KEY=.*|SECRET_KEY=${secret}|" \
         -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${dbpass}|" \
         -e "s|^BOOTSTRAP_ADMIN_PASSWORD=.*|BOOTSTRAP_ADMIN_PASSWORD=${adminpass}|" \
+        -e "s|^HTTP_PORT=.*|HTTP_PORT=${HTTP_PORT:-8080}|" \
         .env > "$tmp" && mv "$tmp" .env
+    if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then
+        printf '\n# Compose project name (set at first start for a side-by-side instance).\nCOMPOSE_PROJECT_NAME=%s\n' \
+            "${COMPOSE_PROJECT_NAME}" >> .env
+    fi
     echo
     echo "  Generated SECRET_KEY and POSTGRES_PASSWORD."
     echo "  BOOTSTRAP ADMIN LOGIN:  username: admin   password: ${adminpass}"

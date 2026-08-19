@@ -73,7 +73,7 @@ up", work through the sections below in order:
 1. **[Domain + HTTPS](#going-live-at-dbmuoncolliderus)** — `SITE_DOMAIN` turns on the Caddy TLS container.
 2. **[ORCID sign-in](#orcid-sign-in)** — so members sign in with their ORCID iD instead of local accounts.
 3. **[Email notifications](#email-notifications)** — registration and publication-workflow mail.
-4. **[Import existing data](#importing-the-existing-spreadsheets)** and **[member photos](#member-photos)**.
+4. **[Import existing data](#initializing-a-new-instance-from-the-existing-spreadsheets)** and **[member photos](#member-photos)**.
 5. **[Institution map](#institution-map)** — add coordinates so the map view fills in.
 6. **[Admin panel](#the-admin-panel)** — banner/login message, accounts, backups & restore.
 
@@ -141,37 +141,75 @@ a test paper) and watch `./scripts/logs.sh backend` — every send (or send
 failure) is logged. With `SMTP_HOST` empty, email is a logged no-op and every
 workflow still functions; nothing else in the app depends on it.
 
-### Importing the existing spreadsheets
+### Initializing a new instance from the existing spreadsheets
 
-Drop the exports in `data/` (gitignored — never commit member data) and run:
+A fresh database contains nothing but the bootstrap admin account. To go
+from there to a fully populated instance:
 
-```bash
-docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
-docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
-```
+1. **Seed the working groups** (idempotent):
 
-Both accept `--dry-run`. The member importer understands the USMCC registration
-form export (names, affiliations, ORCID, position, voting status, expertise)
-and opens an authorship period for each voting member (`--no-authors-from-voting`
-to disable). The talks importer creates conferences, matches speakers by name,
-and keeps unmatched names in the talk notes. There are also `import-members`
-(plain CSV), `create-admin`, `seed-wgs`, and `seed-demo` (fictional demo data)
-commands — see `python -m app.cli --help`.
+   ```bash
+   docker compose exec backend python -m app.cli seed-wgs
+   ```
 
-The importers don't set institution coordinates, so the map view starts
-empty. To fill it in one go from [ROR](https://ror.org):
+2. **Import the membership spreadsheet.** Drop the exports in `data/`
+   (gitignored — never commit member data), preview with `--dry-run`, then
+   run for real:
 
-```bash
-docker compose exec backend python -m app.cli seed-coordinates --dry-run
-docker compose exec backend python -m app.cli seed-coordinates
-```
+   ```bash
+   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx --dry-run
+   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
+   ```
 
-Institutions with a ROR id get the coordinates of their ROR record; the rest
-are matched by their author-list address (or name) via ROR's affiliation
-matcher, which also fills in the missing ROR id when the match is
-unambiguous. Anything unresolved is listed at the end — fill those in by hand
-in the institution edit form (which has its own per-institution
-"Fetch from ROR" button).
+   The importer understands the USMCC registration form export (names,
+   affiliations, ORCID, position, voting status, expertise) and opens an
+   authorship period for each voting member (`--no-authors-from-voting` to
+   disable). Institutions are created from the free-text "Primary
+   Affiliation" answers as minimal rows **held inactive for office review** —
+   they have a name but no short name, ROR id, author-list address, or
+   coordinates yet. The next two steps fill those in.
+
+3. **Seed institution coordinates and ROR ids from [ROR](https://ror.org)**
+   — without this the map view starts empty:
+
+   ```bash
+   docker compose exec backend python -m app.cli seed-coordinates --dry-run
+   docker compose exec backend python -m app.cli seed-coordinates
+   ```
+
+   Institutions with a ROR id get the coordinates of their ROR record; the
+   rest (including everything just created by the member import) are matched
+   by their author-list address or name via ROR's affiliation matcher, which
+   also fills in the missing ROR id when the match is unambiguous. Anything
+   unresolved is listed at the end for the next step. Already-set
+   coordinates are never touched, so re-running it later (e.g. after more
+   registrations) is safe.
+
+4. **Review the imported institutions** on the Institutions page: fix names,
+   add short names and author-list addresses (needed for author-list
+   generation), set the US flag (import-created rows default to US, and the
+   flag gates voting eligibility), merge any duplicates the free-text
+   affiliations produced, and activate each row. The edit form has a
+   per-institution "Fetch from ROR" button for anything step 3 couldn't
+   resolve.
+
+5. **Import the talks spreadsheet:**
+
+   ```bash
+   docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
+   ```
+
+   Also accepts `--dry-run`. It creates conferences, matches speakers by
+   name, and keeps unmatched names in the talk notes.
+
+6. **Import member photos** — see [Member photos](#member-photos) below.
+
+7. **Enable ORCID sign-in** (see above) — members whose ORCID iD came in
+   with the spreadsheet are linked to their record automatically on first
+   sign-in.
+
+There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
+(fictional demo data) commands — see `python -m app.cli --help`.
 
 ### Member photos
 
@@ -204,9 +242,12 @@ Both commands skip people who already have a photo unless you pass
 The Institutions page has a **List/Map toggle**; the map shows every
 institution with coordinates as a circle sized by its current member count.
 Nothing needs configuring — but institutions only appear once they have
-coordinates. The office fills them in each institution's edit form, either by
-hand or with the **"Fetch from ROR"** button (uses the institution's
-[ROR](https://ror.org) id; the lookup happens in the admin's browser, so the
+coordinates. The `seed-coordinates` CLI command fills them all at once from
+[ROR](https://ror.org) (step 3 of the
+[initialization walkthrough](#initializing-a-new-instance-from-the-existing-spreadsheets));
+the office fills in stragglers in each institution's edit form, either by
+hand or with the **"Fetch from ROR"** button (uses the institution's ROR id;
+the lookup happens in the admin's browser, so the
 server needs no internet access). The basemap tiles come from CARTO's free
 OSM-based tile service — the one external runtime dependency of the app; only
 tile requests leave the site, never member data.
@@ -266,6 +307,34 @@ still works from a host shell.
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,
 backup retention — see `.env.example` for the full annotated list).
+
+### Running a second (test) instance
+
+Containers, volumes, and networks are namespaced by the Docker Compose
+**project name**, which defaults to the checkout *directory's* name. Two
+checkouts in same-named directories are therefore the *same* project: the
+second `start.sh` would silently reuse the first instance's database volume
+with freshly generated credentials that don't match it — the backend
+crash-loops and the site answers 502. `start.sh` detects this (an existing
+`<project>_pgdata` volume but no `.env`) and refuses with instructions
+instead.
+
+To run an isolated test instance next to a real one, give it its own project
+name and port on its first start:
+
+```bash
+git clone https://github.com/trholmes/USMCCDB.git USMCCDB-test
+cd USMCCDB-test
+COMPOSE_PROJECT_NAME=usmccdb-test HTTP_PORT=8081 ./scripts/start.sh
+```
+
+Both values are persisted into the generated `.env`, so later `start.sh` /
+`reset.sh` runs need no special invocation. The test instance gets its own
+database and photo volumes and its own `./backups` directory, and
+`./scripts/reset.sh` in a checkout only ever wipes that checkout's own
+database volume. When you're done with it:
+`docker compose --profile tls down -v` in the test checkout removes its
+containers *and* volumes.
 
 ### Upgrading
 
