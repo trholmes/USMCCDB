@@ -265,13 +265,14 @@ def import_members(
 
 # --- Demo data -------------------------------------------------------------------
 
+# (name, short name, author-list address, latitude, longitude)
 DEMO_INSTITUTIONS = [
-    ("University of Springfield", "USpring", "University of Springfield, Springfield, IL 62901, USA"),
-    ("Lakeview National Laboratory", "LNL", "Lakeview National Laboratory, Lakeview, IL 60510, USA"),
-    ("Coastal State University", "CSU", "Coastal State University, Santa Rosa, CA 95401, USA"),
-    ("Midwest Institute of Technology", "MIT-W", "Midwest Institute of Technology, Des Moines, IA 50309, USA"),
-    ("Bayside University", "Bayside", "Bayside University, Gulfport, MS 39501, USA"),
-    ("Northern Plains University", "NPU", "Northern Plains University, Fargo, ND 58102, USA"),
+    ("University of Springfield", "USpring", "University of Springfield, Springfield, IL 62901, USA", 39.78, -89.65),
+    ("Lakeview National Laboratory", "LNL", "Lakeview National Laboratory, Lakeview, IL 60510, USA", 41.84, -88.28),
+    ("Coastal State University", "CSU", "Coastal State University, Santa Rosa, CA 95401, USA", 38.44, -122.71),
+    ("Midwest Institute of Technology", "MIT-W", "Midwest Institute of Technology, Des Moines, IA 50309, USA", 41.59, -93.62),
+    ("Bayside University", "Bayside", "Bayside University, Gulfport, MS 39501, USA", 30.37, -89.09),
+    ("Northern Plains University", "NPU", "Northern Plains University, Fargo, ND 58102, USA", 46.88, -96.79),
 ]
 
 # (given, family, stage, voting, institution index, orcid)
@@ -342,8 +343,10 @@ def seed_demo():
             raise typer.Exit(1)
 
         insts = []
-        for name, short, address in DEMO_INSTITUTIONS:
-            inst = Institution(name=name, short_name=short, latex_address=address)
+        for name, short, address, lat, lon in DEMO_INSTITUTIONS:
+            inst = Institution(
+                name=name, short_name=short, latex_address=address, latitude=lat, longitude=lon
+            )
             db.add(inst)
             insts.append(inst)
         db.flush()

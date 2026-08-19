@@ -42,6 +42,13 @@ class PubPersonAdd(BaseModel):
     role: PublicationPersonRole
 
 
+class PubPeopleAdd(BaseModel):
+    """Bulk form: attach several people with the same role at once (issue #102)."""
+
+    person_ids: list[int] = Field(min_length=1, max_length=500)
+    role: PublicationPersonRole
+
+
 class PubPersonOut(ORMModel):
     id: int
     person: PersonSummary

@@ -9,6 +9,7 @@ import {
   Stack,
   Table,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -32,7 +33,11 @@ const emptyForm = {
   date: '',
   is_invited: 'false',
   speaker_person_id: '',
+  status: 'open',
+  notes: '',
 }
+
+const TALK_STATUSES = ['open', 'nominations', 'assigned', 'given', 'cancelled']
 
 export default function TalksPage() {
   const [talks, setTalks] = useState<Talk[]>([])
@@ -40,6 +45,9 @@ export default function TalksPage() {
   const [people, setPeople] = useState<PersonSummary[]>([])
   const [detail, setDetail] = useState<Talk | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  // Talk being edited in the shared create/edit modal (office may edit any
+  // talk, members the ones they added — matching the backend rule, issue #119).
+  const [editing, setEditing] = useState<Talk | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [nominee, setNominee] = useState<string | null>(null)
   const [q, setQ] = useState('')
@@ -100,7 +108,47 @@ export default function TalksPage() {
       ...emptyForm,
       speaker_person_id: !isOffice && me?.person_id ? String(me.person_id) : '',
     })
+    setEditing(null)
     setCreateOpen(true)
+  }
+
+  const openEdit = (talk: Talk) => {
+    setForm({
+      title: talk.title,
+      event_id: talk.event_id ? String(talk.event_id) : '',
+      venue: talk.venue ?? '',
+      talk_type: talk.talk_type,
+      date: talk.date ?? '',
+      is_invited: String(talk.is_invited),
+      speaker_person_id: talk.speaker_person_id ? String(talk.speaker_person_id) : '',
+      status: talk.status,
+      notes: talk.notes ?? '',
+    })
+    setEditing(talk)
+    setDetail(null)
+    setCreateOpen(true)
+  }
+
+  const saveEdit = async () => {
+    if (!editing) return
+    try {
+      await api.patch(`/talks/${editing.id}`, {
+        title: form.title,
+        event_id: form.event_id ? Number(form.event_id) : null,
+        venue: form.venue || null,
+        talk_type: form.talk_type,
+        date: form.date || null,
+        is_invited: form.is_invited === 'true',
+        speaker_person_id: form.speaker_person_id ? Number(form.speaker_person_id) : null,
+        status: form.status,
+        notes: form.notes || null,
+      })
+      setCreateOpen(false)
+      setEditing(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
   }
 
   const createTalk = async () => {
@@ -284,14 +332,19 @@ export default function TalksPage() {
                 </Text>
               </Group>
               {(isOffice || me?.user.id === detail.created_by_user_id) && (
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="red"
-                  onClick={() => deleteTalk(detail)}
-                >
-                  Delete
-                </Button>
+                <Group gap={4}>
+                  <Button size="compact-xs" variant="subtle" onClick={() => openEdit(detail)}>
+                    Edit
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="red"
+                    onClick={() => deleteTalk(detail)}
+                  >
+                    Delete
+                  </Button>
+                </Group>
               )}
             </Group>
             {detail.notes && <Text size="sm">{detail.notes}</Text>}
@@ -369,7 +422,14 @@ export default function TalksPage() {
         )}
       </Modal>
 
-      <Modal opened={createOpen} onClose={() => setCreateOpen(false)} title="Add talk">
+      <Modal
+        opened={createOpen}
+        onClose={() => {
+          setCreateOpen(false)
+          setEditing(null)
+        }}
+        title={editing ? 'Edit talk' : 'Add talk'}
+      >
         <Stack gap="sm">
           <TextInput
             label="Title / topic"
@@ -428,7 +488,26 @@ export default function TalksPage() {
             value={form.date}
             onChange={(e) => setForm({ ...form, date: e.currentTarget.value })}
           />
-          <Button onClick={createTalk}>Save</Button>
+          {editing && (
+            <>
+              <Select
+                label="Status"
+                data={TALK_STATUSES}
+                value={form.status}
+                onChange={(v) => setForm({ ...form, status: v ?? form.status })}
+              />
+              <Textarea
+                label="Notes"
+                autosize
+                minRows={2}
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.currentTarget.value })}
+              />
+            </>
+          )}
+          <Button onClick={editing ? saveEdit : createTalk} disabled={!form.title.trim()}>
+            Save
+          </Button>
         </Stack>
       </Modal>
     </>

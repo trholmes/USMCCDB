@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 project=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
 
 echo "This will DELETE the entire database (volume ${project}_pgdata)."
-echo "The backups volume and TLS certificates are kept."
+echo "The backups directory and TLS certificates are kept."
 printf "Type 'yes' to continue: "
 read -r confirm
 [ "$confirm" = "yes" ] || { echo "Aborted."; exit 1; }

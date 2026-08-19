@@ -1055,53 +1055,59 @@ export default function PersonPage() {
         </Table>
       )}
 
-      <Title order={5}>Authorship periods</Title>
-      {person.author_periods.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          Not currently on the author list.
-        </Text>
-      ) : (
-        <Table maw={720}>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>From</Table.Th>
-              <Table.Th>To</Table.Th>
-              <Table.Th>Signing name</Table.Th>
-              {isOffice && <Table.Th />}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {person.author_periods.map((p) => (
-              <Table.Tr key={p.id}>
-                <Table.Td>{p.start_date}</Table.Td>
-                <Table.Td>{p.end_date ?? 'present'}</Table.Td>
-                <Table.Td>{p.signing_name ?? '—'}</Table.Td>
-                {isOffice && (
-                  <Table.Td>
-                    <Group gap={4} justify="flex-end" wrap="nowrap">
-                      <Button size="compact-xs" variant="subtle" onClick={() => openApEdit(p)}>
-                        Edit
-                      </Button>
-                      <Button
-                        size="compact-xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={() => deleteAp(p)}
-                      >
-                        Delete
-                      </Button>
-                    </Group>
-                  </Table.Td>
-                )}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      )}
+      {/* Office-only: authorship periods drive collaboration-wide author-list
+          generation and only confuse members on their own profile (issue #123). */}
       {isOffice && (
-        <Button size="xs" variant="light" w="fit-content" onClick={() => openApEdit('new')}>
-          Add authorship period
-        </Button>
+        <>
+          <Title order={5}>Collaboration author list periods</Title>
+          <Text size="sm" c="dimmed">
+            Date ranges during which this person is included in generated
+            collaboration author lists. Managed by the office.
+          </Text>
+          {person.author_periods.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              Not currently on the author list.
+            </Text>
+          ) : (
+            <Table maw={720}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>From</Table.Th>
+                  <Table.Th>To</Table.Th>
+                  <Table.Th>Signing name</Table.Th>
+                  <Table.Th />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {person.author_periods.map((p) => (
+                  <Table.Tr key={p.id}>
+                    <Table.Td>{p.start_date}</Table.Td>
+                    <Table.Td>{p.end_date ?? 'present'}</Table.Td>
+                    <Table.Td>{p.signing_name ?? '—'}</Table.Td>
+                    <Table.Td>
+                      <Group gap={4} justify="flex-end" wrap="nowrap">
+                        <Button size="compact-xs" variant="subtle" onClick={() => openApEdit(p)}>
+                          Edit
+                        </Button>
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="red"
+                          onClick={() => deleteAp(p)}
+                        >
+                          Delete
+                        </Button>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          )}
+          <Button size="xs" variant="light" w="fit-content" onClick={() => openApEdit('new')}>
+            Add authorship period
+          </Button>
+        </>
       )}
 
       <Modal

@@ -8,6 +8,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -171,6 +172,10 @@ class Institution(TimestampedBase):
     is_us: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     latex_address: Mapped[str | None] = mapped_column(Text)  # as printed on author lists
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # WGS84 coordinates for the institutions map (issue #112); typically
+    # filled from the ROR record.
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
 
     affiliations = relationship("Affiliation", back_populates="institution")
 

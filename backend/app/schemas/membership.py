@@ -79,6 +79,9 @@ class InstitutionBase(BaseModel):
     is_us: bool = True
     latex_address: str | None = None
     is_active: bool = True
+    # WGS84 coordinates for the institutions map (issue #112).
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
     @field_validator("ror_id")
     @classmethod
@@ -100,6 +103,8 @@ class InstitutionUpdate(BaseModel):
     is_us: bool | None = None
     latex_address: str | None = None
     is_active: bool | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
 
     @field_validator("ror_id")
     @classmethod

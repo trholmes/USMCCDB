@@ -28,6 +28,8 @@ export interface Institution {
   is_us: boolean
   latex_address: string | null
   is_active: boolean
+  latitude: number | null
+  longitude: number | null
   people_count: number
 }
 

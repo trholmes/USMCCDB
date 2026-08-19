@@ -6,6 +6,7 @@ import {
   CopyButton,
   Group,
   Modal,
+  MultiSelect,
   Select,
   Stack,
   Table,
@@ -39,7 +40,8 @@ export default function PublicationDetailPage() {
   const [people, setPeople] = useState<PersonSummary[]>([])
   const [cutoff, setCutoff] = useState('')
   const [scope, setScope] = useState<string | null>('involved')
-  const [personPick, setPersonPick] = useState<string | null>(null)
+  // Several people can be picked and attached in one go (issue #102).
+  const [personPicks, setPersonPicks] = useState<string[]>([])
   const [rolePick, setRolePick] = useState<string | null>('contributor')
   const [ack, setAck] = useState<string | null>(null)
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
@@ -160,14 +162,14 @@ export default function PublicationDetailPage() {
     }
   }
 
-  const addPerson = async () => {
-    if (!personPick || !rolePick) return
+  const addPeople = async () => {
+    if (personPicks.length === 0 || !rolePick) return
     try {
-      await api.post(`/publications/${pub.id}/people`, {
-        person_id: Number(personPick),
+      await api.post(`/publications/${pub.id}/people/bulk`, {
+        person_ids: personPicks.map(Number),
         role: rolePick,
       })
-      setPersonPick(null)
+      setPersonPicks([])
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -283,17 +285,18 @@ export default function PublicationDetailPage() {
           </Table.Tbody>
         </Table>
         {canManage && (
-          <Group mt="sm">
-            <Select
-              placeholder="Add person from directory…"
+          <Group mt="sm" align="flex-start">
+            <MultiSelect
+              placeholder={personPicks.length ? undefined : 'Add people from directory…'}
               searchable
+              clearable
               data={people.map((p) => ({
                 value: String(p.id),
                 label: `${p.family_name}, ${p.given_name}`,
               }))}
-              value={personPick}
-              onChange={setPersonPick}
-              w={260}
+              value={personPicks}
+              onChange={setPersonPicks}
+              w={340}
             />
             <Select
               data={isOffice ? OFFICE_ROLES : MEMBER_ROLES}
@@ -301,8 +304,8 @@ export default function PublicationDetailPage() {
               onChange={setRolePick}
               w={170}
             />
-            <Button size="xs" onClick={addPerson} disabled={!personPick || !rolePick}>
-              Add
+            <Button size="xs" onClick={addPeople} disabled={personPicks.length === 0 || !rolePick}>
+              Add{personPicks.length > 1 ? ` ${personPicks.length}` : ''}
             </Button>
           </Group>
         )}
