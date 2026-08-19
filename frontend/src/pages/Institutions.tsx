@@ -80,6 +80,19 @@ export default function InstitutionsPage() {
     setModal(target)
   }
 
+  // Copy the ROR id and coordinates out of a ROR v2 record into the form.
+  const applyRorRecord = (rec: any) => {
+    const geo = rec.locations?.[0]?.geonames_details
+    if (geo?.lat == null || geo?.lng == null) throw new Error('ROR record has no coordinates')
+    const id = String(rec.id).match(/(0[a-z0-9]{8})$/)?.[1]
+    setForm((f) => ({
+      ...f,
+      ror_id: id ?? f.ror_id,
+      latitude: String(geo.lat),
+      longitude: String(geo.lng),
+    }))
+  }
+
   // Pull coordinates from the public ROR record (issue #112) — fetched by the
   // browser, so an air-gapped backend still works; entering them by hand does too.
   const fetchRorCoordinates = async () => {
@@ -91,10 +104,39 @@ export default function InstitutionsPage() {
     try {
       const resp = await fetch(`https://api.ror.org/v2/organizations/${m[1]}`)
       if (!resp.ok) throw new Error(`ROR lookup failed (${resp.status})`)
-      const rec = await resp.json()
-      const geo = rec.locations?.[0]?.geonames_details
-      if (geo?.lat == null || geo?.lng == null) throw new Error('ROR record has no coordinates')
-      setForm((f) => ({ ...f, latitude: String(geo.lat), longitude: String(geo.lng) }))
+      applyRorRecord(await resp.json())
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  // Search ROR by institution name and, after the user confirms the best
+  // match, fill in the ROR id and coordinates from it.
+  const lookupRorByName = async () => {
+    const name = form.name.trim()
+    if (!name) {
+      notifications.show({ color: 'red', message: 'Enter the institution name first' })
+      return
+    }
+    try {
+      const resp = await fetch(
+        `https://api.ror.org/v2/organizations?query=${encodeURIComponent(name)}`,
+      )
+      if (!resp.ok) throw new Error(`ROR search failed (${resp.status})`)
+      const rec = (await resp.json()).items?.[0]
+      if (!rec) throw new Error(`No ROR match for “${name}”`)
+      const recName =
+        rec.names?.find((n: any) => n.types?.includes('ror_display'))?.value ??
+        rec.names?.[0]?.value ??
+        '(unnamed)'
+      const country = rec.locations?.[0]?.geonames_details?.country_name
+      if (
+        !window.confirm(
+          `Best ROR match for “${name}”:\n\n${recName}${country ? `, ${country}` : ''}\n${rec.id}\n\nUse it?`,
+        )
+      )
+        return
+      applyRorRecord(rec)
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
     }
@@ -222,13 +264,19 @@ export default function InstitutionsPage() {
             value={form.short_name}
             onChange={(e) => setForm({ ...form, short_name: e.currentTarget.value })}
           />
-          <TextInput
-            label="ROR id"
-            description="Stable identifier from ror.org, e.g. 05gvnxz63 — used to detect duplicates."
-            placeholder="05gvnxz63"
-            value={form.ror_id}
-            onChange={(e) => setForm({ ...form, ror_id: e.currentTarget.value })}
-          />
+          <Group align="flex-end" gap="xs">
+            <TextInput
+              label="ROR id"
+              description="Stable identifier from ror.org, e.g. 05gvnxz63 — used to detect duplicates."
+              placeholder="05gvnxz63"
+              value={form.ror_id}
+              onChange={(e) => setForm({ ...form, ror_id: e.currentTarget.value })}
+              style={{ flex: 1 }}
+            />
+            <Button variant="light" onClick={lookupRorByName} disabled={!form.name.trim()}>
+              Look up by name
+            </Button>
+          </Group>
           <TextInput
             label="Author-list address (as printed on papers)"
             value={form.latex_address}
