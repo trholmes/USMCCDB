@@ -3225,3 +3225,109 @@ def test_personal_acknowledgement_text(admin):
     assert "must not appear" not in ack
     # The collaboration boilerplate still leads the text.
     assert ack.startswith("We thank our colleagues")
+
+
+# --- Admin panel upgrades: site settings, login audit, reset/delete ------------
+
+
+def test_site_settings_banner(admin):
+    # Defaults: nothing set, unauthenticated read works (login page needs it).
+    fresh = TestClient(app)
+    r = fresh.get("/api/v1/site/settings")
+    assert r.status_code == 200
+    assert r.json() == {"banner_message": None, "banner_level": "info", "login_message": None}
+
+    # Admin sets a banner + login message.
+    r = admin.patch(
+        "/api/v1/site/settings",
+        json={
+            "banner_message": "Maintenance tonight 22:00 UTC",
+            "banner_level": "warning",
+            "login_message": "Contact the office for accounts.",
+        },
+    )
+    assert r.status_code == 200, r.text
+    pub = fresh.get("/api/v1/site/settings").json()
+    assert pub["banner_message"] == "Maintenance tonight 22:00 UTC"
+    assert pub["banner_level"] == "warning"
+    assert pub["login_message"] == "Contact the office for accounts."
+
+    # Members cannot write settings.
+    member, _pid = _linked_member(
+        admin, given="Seta", family="Settings", email="seta.settings@example.edu"
+    )
+    assert member.patch(
+        "/api/v1/site/settings", json={"banner_message": "hax"}
+    ).status_code == 403
+
+    # Clearing the message takes the banner down; the level needn't be reset.
+    admin.patch("/api/v1/site/settings", json={"banner_message": ""})
+    assert fresh.get("/api/v1/site/settings").json()["banner_message"] is None
+
+    # Unknown levels are rejected by the schema.
+    assert admin.patch(
+        "/api/v1/site/settings", json={"banner_level": "sparkly"}
+    ).status_code == 422
+
+
+def test_admin_password_reset_and_delete(admin):
+    u = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "lockedout", "password": "forgotten-pw", "role": "member"},
+    ).json()
+
+    r = admin.post(f"/api/v1/auth/users/{u['id']}/reset-password")
+    assert r.status_code == 200, r.text
+    temp = r.json()["temporary_password"]
+    assert len(temp) >= 8
+
+    # Old password is dead, the temporary one signs in.
+    fresh = TestClient(app)
+    assert fresh.post(
+        "/api/v1/auth/login", json={"username": "lockedout", "password": "forgotten-pw"}
+    ).status_code == 401
+    assert fresh.post(
+        "/api/v1/auth/login", json={"username": "lockedout", "password": temp}
+    ).status_code == 200
+
+    # Deleting the login removes the account (and self-delete is refused).
+    me_id = admin.get("/api/v1/auth/me").json()["user"]["id"]
+    assert admin.delete(f"/api/v1/auth/users/{me_id}").status_code == 400
+    assert admin.delete(f"/api/v1/auth/users/{u['id']}").status_code == 204
+    assert fresh.post(
+        "/api/v1/auth/login", json={"username": "lockedout", "password": temp}
+    ).status_code == 401
+
+
+def test_login_events_audit(admin):
+    # A failed then successful local sign-in both land in the audit.
+    admin.post(
+        "/api/v1/auth/users",
+        json={"username": "audited", "password": "audited-pw-1", "role": "member"},
+    )
+    fresh = TestClient(app)
+    fresh.post("/api/v1/auth/login", json={"username": "audited", "password": "wrong"})
+    fresh.post("/api/v1/auth/login", json={"username": "audited", "password": "audited-pw-1"})
+
+    events = admin.get("/api/v1/auth/login-events?limit=10").json()
+    ours = [e for e in events if e["login"] == "audited" or e["username_attempted"] == "audited"]
+    assert any(e["success"] for e in ours)
+    assert any(not e["success"] for e in ours)
+    # Newest first.
+    assert events[0]["id"] >= events[-1]["id"]
+
+    # Members cannot read the audit.
+    assert fresh.get("/api/v1/auth/login-events").status_code == 403
+
+
+def test_system_status(admin):
+    r = admin.get("/api/v1/site/system")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["db_size_bytes"] > 0
+    assert body["counts"]["users"] >= 1
+    # Test databases get their schema from create_all, so there is no
+    # alembic_version row — that must read as "not pending", not an error.
+    assert body["db_revision"] is None
+    assert body["migrations_pending"] is False
+    assert body["code_revision"]  # the alembic head shipped with the code

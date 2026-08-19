@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import MembershipEvent, MemberStatus, Person, User, UserRole
+from app.models import LoginEvent, MembershipEvent, MemberStatus, Person, User, UserRole
 from app.ratelimit import enforce, login_limiter
 from app.schemas.auth import (
     LoginRequest,
@@ -20,6 +20,7 @@ from app.schemas.auth import (
     UserOut,
     UserUpdate,
 )
+from app.schemas.site import LoginEventOut
 from app.security import (
     check_login_password,
     clear_session_cookie,
@@ -45,6 +46,35 @@ def _state_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_settings().secret_key, salt="orcid-state")
 
 
+def _client_ip(request: Request) -> str | None:
+    """Best-effort client address for the login audit — the reverse proxy
+    sets X-Real-IP; direct connections fall back to the socket peer."""
+    ip = request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+    return ip[:64] if ip else None
+
+
+def _log_login(
+    db: Session,
+    request: Request,
+    *,
+    method: str,
+    success: bool,
+    user: User | None = None,
+    username: str | None = None,
+) -> None:
+    """Append to the sign-in audit (admin panel login history). The caller
+    commits — on failures we commit here since the request ends in a raise."""
+    db.add(
+        LoginEvent(
+            user_id=user.id if user else None,
+            method=method,
+            success=success,
+            username_attempted=None if success else (username or None),
+            ip=_client_ip(request),
+        )
+    )
+
+
 def _redirect_uri(request: Request) -> str:
     settings = get_settings()
     if settings.site_url:
@@ -67,11 +97,14 @@ def login(
     # (issue #62). check_login_password burns a bcrypt verification even for
     # unknown usernames so timing gives the same nothing away.
     if not check_login_password(user, body.password) or not user.is_active:
+        _log_login(db, request, method="local", success=False, user=user, username=body.username)
+        db.commit()
         raise HTTPException(401, "Invalid username or password")
     reason = membership_block_reason(db, user)
     if reason:
         raise HTTPException(403, reason)
     user.last_login_at = datetime.now(UTC)
+    _log_login(db, request, method="local", success=True, user=user)
     db.commit()
     set_session_cookie(response, request, create_access_token(user))
     return UserOut.model_validate(user)
@@ -232,6 +265,64 @@ def merge_users(
     return UserOut.model_validate(keep)
 
 
+@router.post("/users/{user_id}/reset-password")
+def reset_password(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _actor: User = Depends(require_admin),
+) -> dict:
+    """Admin resets a local account's password to a one-time temporary value,
+    shown once in the response — for locked-out users (there is no email
+    self-reset for local accounts)."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    if not user.username:
+        raise HTTPException(400, "This account signs in with ORCID and has no password")
+    temporary = secrets.token_urlsafe(9)  # 12 chars, > the 8-char minimum
+    user.password_hash = hash_password(temporary)
+    db.commit()
+    return {"temporary_password": temporary}
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> None:
+    """Delete a login. The linked person record and everything referencing
+    the account (talks added, nominations, history) stay — those foreign
+    keys are all SET NULL."""
+    if user_id == actor.id:
+        raise HTTPException(400, "You cannot delete the account you are signed in with")
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    db.delete(user)
+    db.commit()
+
+
+@router.get("/login-events", dependencies=[Depends(require_admin)])
+def list_login_events(
+    db: Session = Depends(get_db), limit: int = 100
+) -> list[LoginEventOut]:
+    """Most recent sign-in attempts (successes and failures), newest first."""
+    limit = max(1, min(limit, 500))
+    rows = db.execute(
+        select(LoginEvent, User)
+        .outerjoin(User, User.id == LoginEvent.user_id)
+        .order_by(LoginEvent.id.desc())
+        .limit(limit)
+    ).all()
+    out = []
+    for event, user in rows:
+        item = LoginEventOut.model_validate(event)
+        item.login = (user.username or user.orcid) if user else None
+        out.append(item)
+    return out
+
+
 # --- ORCID OAuth --------------------------------------------------------------
 
 
@@ -362,6 +453,7 @@ async def orcid_callback(
             return bounce("/login?error=membership_rejected")
 
     user.last_login_at = datetime.now(UTC)
+    _log_login(db, request, method="orcid", success=True, user=user)
     db.commit()
 
     dest = "/register?welcome=orcid" if needs_registration else "/"

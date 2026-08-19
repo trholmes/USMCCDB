@@ -19,6 +19,32 @@ export interface Me {
   contact_email: string
 }
 
+export interface SiteSettings {
+  banner_message: string | null
+  banner_level: 'info' | 'warning' | 'critical'
+  login_message: string | null
+}
+
+export interface SystemStatus {
+  db_size_bytes: number
+  counts: Record<string, number>
+  code_revision: string | null
+  db_revision: string | null
+  migrations_pending: boolean
+  backup_hour_utc: string | null
+}
+
+export interface LoginEvent {
+  id: number
+  user_id: number | null
+  method: string
+  success: boolean
+  username_attempted: string | null
+  ip: string | null
+  created_at: string
+  login: string | null
+}
+
 export interface Institution {
   id: number
   name: string
