@@ -308,6 +308,34 @@ All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,
 backup retention — see `.env.example` for the full annotated list).
 
+### Running a second (test) instance
+
+Containers, volumes, and networks are namespaced by the Docker Compose
+**project name**, which defaults to the checkout *directory's* name. Two
+checkouts in same-named directories are therefore the *same* project: the
+second `start.sh` would silently reuse the first instance's database volume
+with freshly generated credentials that don't match it — the backend
+crash-loops and the site answers 502. `start.sh` detects this (an existing
+`<project>_pgdata` volume but no `.env`) and refuses with instructions
+instead.
+
+To run an isolated test instance next to a real one, give it its own project
+name and port on its first start:
+
+```bash
+git clone https://github.com/trholmes/USMCCDB.git USMCCDB-test
+cd USMCCDB-test
+COMPOSE_PROJECT_NAME=usmccdb-test HTTP_PORT=8081 ./scripts/start.sh
+```
+
+Both values are persisted into the generated `.env`, so later `start.sh` /
+`reset.sh` runs need no special invocation. The test instance gets its own
+database and photo volumes and its own `./backups` directory, and
+`./scripts/reset.sh` in a checkout only ever wipes that checkout's own
+database volume. When you're done with it:
+`docker compose --profile tls down -v` in the test checkout removes its
+containers *and* volumes.
+
 ### Upgrading
 
 ```bash

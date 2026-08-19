@@ -4,7 +4,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-project=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
+# Same resolution docker compose uses: an explicit COMPOSE_PROJECT_NAME (from
+# .env — set there by start.sh for side-by-side instances) wins over the
+# directory name. Keep - and _ , which are valid in project names.
+project=$(grep -E '^COMPOSE_PROJECT_NAME=' .env 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)
+if [ -z "$project" ]; then
+    project=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+fi
 
 echo "This will DELETE the entire database (volume ${project}_pgdata)."
 echo "The backups directory and TLS certificates are kept."
