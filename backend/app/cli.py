@@ -263,6 +263,113 @@ def import_members(
             typer.echo(f"Imported: {created} created, {updated} updated, {skipped} skipped")
 
 
+@cli.command()
+def seed_coordinates(
+    dry_run: bool = typer.Option(False, help="Report what would change, write nothing"),
+    match_missing: bool = typer.Option(
+        True,
+        help="For institutions without a ROR id, look one up by author-list "
+        "address (or name) and store it when the match is unambiguous",
+    ),
+):
+    """Fill missing institution coordinates from ror.org (for the map view).
+
+    Institutions with a ROR id get coordinates straight from their ROR
+    record; the rest go through ROR's affiliation matcher, and only an
+    unambiguous ("chosen") match is used. Everything unresolved is listed at
+    the end for the office to fix in the institution edit form. Already-set
+    coordinates are never touched.
+    """
+    import httpx
+
+    from app.services import ror
+
+    filled = matched = unresolved = 0
+    problems: list[str] = []
+    with SessionLocal() as db, httpx.Client(
+        timeout=30, headers={"User-Agent": ror.USER_AGENT}
+    ) as client:
+        institutions = (
+            db.execute(
+                select(Institution)
+                .where(Institution.latitude.is_(None) | Institution.longitude.is_(None))
+                .order_by(Institution.id)
+            )
+            .scalars()
+            .all()
+        )
+        if not institutions:
+            typer.echo("All institutions already have coordinates.")
+            return
+        taken_ror_ids = set(
+            db.execute(
+                select(Institution.ror_id).where(Institution.ror_id.is_not(None))
+            ).scalars()
+        )
+        for inst in institutions:
+            label = inst.short_name or inst.name
+            try:
+                if inst.ror_id:
+                    coords = ror.parse_coordinates(ror.fetch_record(client, inst.ror_id))
+                    if coords is None:
+                        problems.append(f"{label}: ROR record {inst.ror_id} has no coordinates")
+                        unresolved += 1
+                        continue
+                    inst.latitude, inst.longitude = coords
+                    filled += 1
+                    typer.echo(f"{label}: {coords[0]:.4f}, {coords[1]:.4f} (ROR {inst.ror_id})")
+                elif match_missing:
+                    match = ror.fetch_affiliation_match(
+                        client, inst.latex_address or inst.name
+                    )
+                    if match is None:
+                        problems.append(f"{label}: no unambiguous ROR match")
+                        unresolved += 1
+                    elif match.ror_id in taken_ror_ids:
+                        # ror_id is unique — two of our rows matching the same
+                        # ROR record means they are duplicates to merge by hand.
+                        problems.append(
+                            f"{label}: matched {match.name} ({match.ror_id}), but that "
+                            "ROR id already belongs to another institution"
+                        )
+                        unresolved += 1
+                    elif match.latitude is None or match.longitude is None:
+                        problems.append(
+                            f"{label}: matched {match.name} ({match.ror_id}), "
+                            "which has no coordinates"
+                        )
+                        unresolved += 1
+                    else:
+                        inst.ror_id = match.ror_id
+                        taken_ror_ids.add(match.ror_id)
+                        inst.latitude, inst.longitude = match.latitude, match.longitude
+                        matched += 1
+                        typer.echo(
+                            f"{label}: {match.latitude:.4f}, {match.longitude:.4f} "
+                            f"(matched '{match.name}', new ROR id {match.ror_id})"
+                        )
+                else:
+                    problems.append(f"{label}: no ROR id")
+                    unresolved += 1
+            except httpx.HTTPError as exc:
+                problems.append(f"{label}: {exc}")
+                unresolved += 1
+        summary = (
+            f"{filled + matched} institution(s) "
+            f"({matched} via a newly matched ROR id); {unresolved} unresolved"
+        )
+        if dry_run:
+            db.rollback()
+            typer.echo(f"DRY RUN — would fill {summary}")
+        else:
+            db.commit()
+            typer.echo(f"Filled {summary}")
+    if problems:
+        typer.echo("\nUnresolved (fill these in the institution edit form):")
+        for p in problems:
+            typer.echo(f"  - {p}")
+
+
 # --- Demo data -------------------------------------------------------------------
 
 # (name, short name, author-list address, latitude, longitude)
