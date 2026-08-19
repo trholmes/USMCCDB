@@ -112,6 +112,21 @@ and keeps unmatched names in the talk notes. There are also `import-members`
 (plain CSV), `create-admin`, `seed-wgs`, and `seed-demo` (fictional demo data)
 commands — see `python -m app.cli --help`.
 
+The importers don't set institution coordinates, so the map view starts
+empty. To fill it in one go from [ROR](https://ror.org):
+
+```bash
+docker compose exec backend python -m app.cli seed-coordinates --dry-run
+docker compose exec backend python -m app.cli seed-coordinates
+```
+
+Institutions with a ROR id get the coordinates of their ROR record; the rest
+are matched by their author-list address (or name) via ROR's affiliation
+matcher, which also fills in the missing ROR id when the match is
+unambiguous. Anything unresolved is listed at the end — fill those in by hand
+in the institution edit form (which has its own per-institution
+"Fetch from ROR" button).
+
 ### Member photos
 
 Photos live in a dedicated `photos` volume, are served (to signed-in members
