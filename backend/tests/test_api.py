@@ -1,8 +1,15 @@
-"""API tests against a real PostgreSQL (needs TEST_DATABASE_URL, e.g. the
-compose db). Skipped automatically when no test database is configured.
+"""API tests against a real PostgreSQL (needs TEST_DATABASE_URL pointing at a
+dedicated, disposable database — the suite DROPS ALL TABLES in it). Skipped
+automatically when no test database is configured.
 
-Run inside the stack:
-    docker compose exec backend sh -c 'TEST_DATABASE_URL=$DATABASE_URL pytest -q'
+Run inside the stack, against a separate test database on the compose db:
+    docker compose exec db psql -U usmccdb -c "CREATE DATABASE usmccdb_test"
+    docker compose exec backend sh -c \
+        'TEST_DATABASE_URL=$(echo $DATABASE_URL | sed "s|/[^/]*$|/usmccdb_test|") pytest -q'
+
+Never point TEST_DATABASE_URL at the live database; the fixture below refuses
+to run against a database that carries an alembic stamp for exactly that
+reason.
 """
 
 import os
@@ -39,8 +46,23 @@ if TEST_DB:
 
 @pytest.fixture(scope="module")
 def client():
-    from sqlalchemy import text
+    from sqlalchemy import inspect, text
 
+    # This fixture wipes every table in the target database. Deployed
+    # databases get their schema from `alembic upgrade` and therefore carry an
+    # alembic_version stamp; a test database created empty (schema comes from
+    # create_all below) never does. Refuse the stamped ones so a mistaken
+    # TEST_DATABASE_URL=$DATABASE_URL cannot destroy live data.
+    if inspect(engine).has_table("alembic_version"):
+        pytest.exit(
+            "TEST_DATABASE_URL points at a migrated (live?) database and the "
+            "test suite would drop all of its tables. Point it at a dedicated "
+            "empty database instead, e.g.:\n"
+            '  docker compose exec db psql -U usmccdb -c "CREATE DATABASE usmccdb_test"\n'
+            "  docker compose exec backend sh -c "
+            "'TEST_DATABASE_URL=$(echo $DATABASE_URL | sed \"s|/[^/]*$|/usmccdb_test|\") pytest -q'",
+            returncode=1,
+        )
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS btree_gist"))
         conn.commit()

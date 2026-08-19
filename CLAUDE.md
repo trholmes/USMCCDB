@@ -21,10 +21,14 @@ pushing:
 
 **Backend tests** — need a real PostgreSQL via `TEST_DATABASE_URL`; they skip
 silently without it (a "passing" run with everything skipped proves nothing).
-With the compose stack up:
+**The suite drops all tables in the database it is pointed at — NEVER set
+`TEST_DATABASE_URL=$DATABASE_URL`** (the fixture refuses migrated databases,
+but don't rely on it). With the compose stack up, use a dedicated test
+database on the same server:
 
 ```sh
-docker compose exec backend sh -c 'TEST_DATABASE_URL=$DATABASE_URL pytest -q'
+docker compose exec db psql -U usmccdb -c "CREATE DATABASE usmccdb_test"  # once; errors if it exists — fine
+docker compose exec backend sh -c 'TEST_DATABASE_URL=$(echo $DATABASE_URL | sed "s|/[^/]*$|/usmccdb_test|") pytest -q'
 ```
 
 **Frontend typecheck + build** (no separate lint or unit tests):
