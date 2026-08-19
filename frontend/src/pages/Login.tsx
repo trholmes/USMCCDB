@@ -15,7 +15,9 @@ import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import type { SiteSettings } from '../api/types'
 import { useSession } from '../auth/SessionContext'
+import SiteBanner from '../components/SiteBanner'
 
 interface AuthConfig {
   orcid_enabled: boolean
@@ -37,6 +39,7 @@ export default function LoginPage() {
   const [capsLock, setCapsLock] = useState(false)
   const [busy, setBusy] = useState(false)
   const [config, setConfig] = useState<AuthConfig | null>(null)
+  const [site, setSite] = useState<SiteSettings | null>(null)
   const { refresh } = useSession()
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -47,6 +50,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     api.get<AuthConfig>('/auth/config').then(setConfig).catch(() => setConfig(null))
+    api.get<SiteSettings>('/site/settings').then(setSite).catch(() => setSite(null))
     const error = params.get('error')
     if (error) {
       notifications.show({
@@ -72,7 +76,9 @@ export default function LoginPage() {
 
   return (
     <Center mih="100vh" p="md">
-      <Card withBorder shadow="sm" w={380} p="xl">
+      <Stack w={380}>
+        <SiteBanner />
+      <Card withBorder shadow="sm" p="xl">
         <Stack>
           <Center>
             <img src={logo} alt="USMCC logo" width={120} height={120} />
@@ -85,6 +91,8 @@ export default function LoginPage() {
               US Muon Collider Collaboration — muoncollider.us
             </Text>
           </div>
+
+          {site?.login_message && <Text size="sm">{site.login_message}</Text>}
 
           {config?.orcid_enabled && (
             <>
@@ -135,6 +143,7 @@ export default function LoginPage() {
           </Text>
         </Stack>
       </Card>
+      </Stack>
     </Center>
   )
 }

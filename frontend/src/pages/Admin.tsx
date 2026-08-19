@@ -2,6 +2,8 @@ import {
   Badge,
   Button,
   Card,
+  Code,
+  CopyButton,
   Divider,
   Group,
   Modal,
@@ -23,6 +25,8 @@ import type { PersonSummary, User } from '../api/types'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import AdminBackups from './AdminBackups'
+import AdminSite from './AdminSite'
+import AdminSystem from './AdminSystem'
 
 const ACCESSORS: Accessors<User> = {
   id: (u) => u.id,
@@ -44,8 +48,12 @@ export default function AdminPage() {
   const [manage, setManage] = useState<User | null>(null)
   const [personPick, setPersonPick] = useState<string | null>(null)
   const [mergePick, setMergePick] = useState<string | null>(null)
+  const [q, setQ] = useState('')
+  // One-time temporary password from an admin reset, shown in a modal.
+  const [tempPassword, setTempPassword] = useState<{ login: string; password: string } | null>(
+    null,
+  )
   const { me } = useSession()
-  const { sorted, sort, toggle } = useSortable(users, ACCESSORS)
 
   const load = useCallback(() => {
     api.get<User[]>('/auth/users').then(setUsers).catch(() => setUsers([]))
@@ -58,6 +66,18 @@ export default function AdminPage() {
     people.forEach((p) => m.set(p.id, `${p.family_name}, ${p.given_name}`))
     return m
   }, [people])
+
+  // Search matches the login (username/ORCID) and the linked person's name.
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return users
+    return users.filter(
+      (u) =>
+        loginLabel(u).toLowerCase().includes(needle) ||
+        (u.person_id && (personName.get(u.person_id) ?? '').toLowerCase().includes(needle)),
+    )
+  }, [users, q, personName])
+  const { sorted, sort, toggle } = useSortable(filtered, ACCESSORS)
 
   const create = async () => {
     try {
@@ -93,6 +113,37 @@ export default function AdminPage() {
     setManage(null)
   }
 
+  const resetPassword = async (u: User) => {
+    if (!window.confirm(`Reset the password of '${loginLabel(u)}' to a temporary one?`)) return
+    try {
+      const r = await api.post<{ temporary_password: string }>(
+        `/auth/users/${u.id}/reset-password`,
+      )
+      setManage(null)
+      setTempPassword({ login: loginLabel(u), password: r.temporary_password })
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const deleteAccount = async (u: User) => {
+    if (
+      !window.confirm(
+        `Delete the login '${loginLabel(u)}'?\n\nThe linked person record and all ` +
+          'history stay; only the sign-in is removed.',
+      )
+    )
+      return
+    try {
+      await api.delete(`/auth/users/${u.id}`)
+      notifications.show({ message: 'Account deleted' })
+      setManage(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
   const mergeAccounts = async () => {
     if (!manage || !mergePick) return
     const other = users.find((u) => u.id === Number(mergePick))
@@ -119,8 +170,18 @@ export default function AdminPage() {
     <Tabs defaultValue="accounts">
       <Tabs.List mb="md">
         <Tabs.Tab value="accounts">User accounts</Tabs.Tab>
+        <Tabs.Tab value="site">Site settings</Tabs.Tab>
+        <Tabs.Tab value="system">System</Tabs.Tab>
         <Tabs.Tab value="backups">Backups</Tabs.Tab>
       </Tabs.List>
+
+      <Tabs.Panel value="site">
+        <AdminSite />
+      </Tabs.Panel>
+
+      <Tabs.Panel value="system">
+        <AdminSystem />
+      </Tabs.Panel>
 
       <Tabs.Panel value="backups">
         <AdminBackups />
@@ -129,7 +190,15 @@ export default function AdminPage() {
       <Tabs.Panel value="accounts">
       <Group justify="space-between" mb="md">
         <Title order={3}>Admin — user accounts</Title>
-        <Button onClick={() => setModal(true)}>Create local account</Button>
+        <Group>
+          <TextInput
+            placeholder="Search login or person…"
+            value={q}
+            onChange={(e) => setQ(e.currentTarget.value)}
+            w={220}
+          />
+          <Button onClick={() => setModal(true)}>Create local account</Button>
+        </Group>
       </Group>
 
       <Card withBorder mb="md">
@@ -257,6 +326,54 @@ export default function AdminPage() {
           >
             Merge
           </Button>
+          <Divider label="Danger zone" />
+          <Group>
+            {manage?.username && (
+              <Button size="xs" variant="light" onClick={() => manage && resetPassword(manage)}>
+                Reset password
+              </Button>
+            )}
+            <Button
+              size="xs"
+              color="red"
+              variant="light"
+              disabled={manage?.id === me?.user.id}
+              onClick={() => manage && deleteAccount(manage)}
+            >
+              Delete account
+            </Button>
+          </Group>
+          {!manage?.username && (
+            <Text size="xs" c="dimmed">
+              ORCID accounts have no password to reset — sign-in happens at orcid.org.
+            </Text>
+          )}
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={tempPassword !== null}
+        onClose={() => setTempPassword(null)}
+        title="Temporary password"
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            The password of <b>{tempPassword?.login}</b> was reset. Share this temporary
+            password with them over a trusted channel — it is shown only once. They can
+            change it under Account settings after signing in.
+          </Text>
+          <Group>
+            <Code fz="md" p="xs">
+              {tempPassword?.password}
+            </Code>
+            <CopyButton value={tempPassword?.password ?? ''}>
+              {({ copied, copy }) => (
+                <Button size="xs" variant="light" onClick={copy}>
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              )}
+            </CopyButton>
+          </Group>
         </Stack>
       </Modal>
 

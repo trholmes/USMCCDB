@@ -1,5 +1,6 @@
-from app.models.auth import User, UserRole
+from app.models.auth import LoginEvent, User, UserRole
 from app.models.authorlist import AuthorList
+from app.models.site import SiteSetting
 from app.models.membership import (
     Affiliation,
     AuthorPeriod,
@@ -31,7 +32,7 @@ from app.models.speakers import (
 )
 
 __all__ = [
-    "User", "UserRole", "AuthorList",
+    "User", "UserRole", "AuthorList", "LoginEvent", "SiteSetting",
     "Person", "Institution", "Affiliation", "WorkingGroup", "WorkingGroupMember",
     "CollabRole", "CollabRoleType", "MembershipEvent", "AuthorPeriod",
     "CareerStage", "MemberStatus",

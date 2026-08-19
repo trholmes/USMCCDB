@@ -35,3 +35,19 @@ class User(TimestampedBase):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     person = relationship("Person", back_populates="user", foreign_keys=[person_id])
+
+
+class LoginEvent(TimestampedBase):
+    """Append-only sign-in audit shown in the admin panel's login history.
+    Failed local attempts keep the username tried (no user row to point at);
+    the user link survives account deletion as NULL."""
+
+    __tablename__ = "login_events"
+
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    method: Mapped[str] = mapped_column(String(20), nullable=False)  # local | orcid
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    username_attempted: Mapped[str | None] = mapped_column(String(80))
+    ip: Mapped[str | None] = mapped_column(String(64))

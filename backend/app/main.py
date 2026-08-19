@@ -13,6 +13,7 @@ from app.routers import (
     institutions,
     people,
     publications,
+    site,
     talks,
     working_groups,
 )
@@ -90,6 +91,7 @@ app.include_router(talks.router, prefix=prefix)
 app.include_router(publications.router, prefix=prefix)
 app.include_router(author_lists.router, prefix=prefix)
 app.include_router(backups.router, prefix=prefix)
+app.include_router(site.router, prefix=prefix)
 
 
 @app.get("/api/v1/health")

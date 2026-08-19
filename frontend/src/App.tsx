@@ -29,6 +29,7 @@ import PublicationDetailPage from './pages/PublicationDetail'
 import StatsPage from './pages/Stats'
 import TalksPage from './pages/Talks'
 import WorkingGroupsPage from './pages/WorkingGroups'
+import SiteBanner from './components/SiteBanner'
 
 const NAV = [
   { to: '/directory', label: 'Directory' },
@@ -175,6 +176,7 @@ export default function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        <SiteBanner />
         <Routes>
           <Route path="/" element={<Navigate to="/directory" replace />} />
           <Route path="/login" element={<Navigate to="/directory" replace />} />
