@@ -11,8 +11,19 @@ REQUEST_DIR=/backups/requests
 
 mkdir -p "$REQUEST_DIR"
 # Requests and markers from before a restart are stale: an old request must
-# not fire a surprise dump, and old markers would confuse the backend.
-rm -f "$REQUEST_DIR"/*.request "$REQUEST_DIR"/*.done "$REQUEST_DIR"/*.failed
+# not fire a surprise dump (or restore!), and old markers would confuse the
+# backend.
+rm -f "$REQUEST_DIR"/*.request "$REQUEST_DIR"/*.done "$REQUEST_DIR"/*.failed \
+      "$REQUEST_DIR"/*.restore
+# A restore interrupted by the restart would leave the status stuck on
+# "running" forever — mark it failed so the admin panel shows the truth.
+if [ -f /backups/restore-status ] && grep -Eq '^state=(queued|running)$' /backups/restore-status; then
+    {
+        echo "state=failed"
+        echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "detail=interrupted by a backup-container restart"
+    } > /backups/restore-status
+fi
 
 echo "[backup] scheduler started; nightly dump at ${BACKUP_HOUR}:00 UTC"
 echo "[backup] retention: daily=${KEEP_DAILY:-14} weekly=${KEEP_WEEKLY:-8} monthly=${KEEP_MONTHLY:-12}"
@@ -31,6 +42,16 @@ next_nightly() {
 
 target=$(next_nightly)
 while true; do
+    # Restore requests from the admin panel: a <id>.restore file whose first
+    # line is the dump path relative to /backups. Progress/result go through
+    # /backups/restore-status (written by /restore.sh), not rename markers.
+    for req in "$REQUEST_DIR"/*.restore; do
+        [ -e "$req" ] || continue
+        rel="$(head -n1 "$req")"
+        rm -f "$req"
+        echo "[backup] restore requested: $rel"
+        /restore.sh "$rel" || echo "[backup] restore FAILED"
+    done
     for req in "$REQUEST_DIR"/*.request; do
         [ -e "$req" ] || continue
         echo "[backup] manual backup requested: $(basename "$req")"

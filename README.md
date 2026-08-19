@@ -167,8 +167,11 @@ copies are a plain `rsync`/`cp` of that directory.
 
 Admins also get a **Backups** tab in the web admin panel showing every
 snapshot (with size and age), a "Run backup now" button, and per-snapshot
-downloads for manual offsite copies. Restores stay a host-shell operation
-(`scripts/restore.sh`).
+downloads for manual offsite copies. Restores work from there too: pick a
+snapshot (or upload a `.dump`), type RESTORE to confirm, and the backup
+container takes a fresh *pre-restore* safety dump before overwriting
+anything — so a mistaken restore can itself be undone. `scripts/restore.sh`
+still works from a host shell.
 
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,

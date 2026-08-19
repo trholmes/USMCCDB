@@ -11,6 +11,7 @@ import {
   Select,
   Stack,
   Table,
+  TagsInput,
   Text,
   Textarea,
   TextInput,
@@ -46,19 +47,35 @@ import {
 } from '../constants'
 import { today } from '../dates'
 
-// Default funding acknowledgement seeded from the grant number (issue #127);
-// the funder is guessed from the number's shape and the text stays freely
-// editable — only the final text is stored and used.
-function defaultAckText(person: Person, grant: string): string {
-  const g = grant.trim()
+// Oxford-comma list: "A", "A and B", "A, B, and C".
+function listJoin(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(', ')}, and ${items[items.length - 1]}`
+}
+
+// Default funding acknowledgement seeded from one or more grant numbers
+// (issue #127); each funder is guessed from its numbers' shape and grants
+// are grouped per funder. The text stays freely editable — only the final
+// text is stored and used.
+function defaultAckText(person: Person, grants: string[]): string {
   const name = `${person.given_name} ${person.family_name}`
-  if (/^de[- ]/i.test(g)) {
-    return `The work of ${name} was supported by the U.S. Department of Energy under Grant No. ${g}.`
+  const doe: string[] = []
+  const nsf: string[] = []
+  const other: string[] = []
+  for (const g of grants.map((g) => g.trim()).filter(Boolean)) {
+    if (/^de[- ]/i.test(g)) doe.push(g)
+    else if (/^(nsf[- ]?)?(phy|oac|mps)[- ]?\d/i.test(g)) nsf.push(g)
+    else other.push(g)
   }
-  if (/^(nsf[- ]?)?(phy|oac|mps)[- ]?\d/i.test(g)) {
-    return `The work of ${name} was supported by the National Science Foundation under Grant No. ${g}.`
-  }
-  return `The work of ${name} was supported under Grant No. ${g}.`
+  const grantNos = (nums: string[]) =>
+    `Grant ${nums.length > 1 ? 'Nos.' : 'No.'} ${listJoin(nums)}`
+  const clauses: string[] = []
+  if (doe.length) clauses.push(`by the U.S. Department of Energy under ${grantNos(doe)}`)
+  if (nsf.length) clauses.push(`by the National Science Foundation under ${grantNos(nsf)}`)
+  if (other.length) clauses.push(`under ${grantNos(other)}`)
+  if (clauses.length === 0) return ''
+  return `The work of ${name} was supported ${listJoin(clauses)}.`
 }
 
 export default function PersonPage() {
@@ -258,7 +275,12 @@ export default function PersonPage() {
       joinList(splitList(person.research_areas)),
     )
     changed('is_voting', voting, person.is_voting)
-    changed('grant_number', form.grant_number || null, person.grant_number)
+    // Canonical comma-separated form, like research_areas above.
+    changed(
+      'grant_number',
+      joinList(splitList(form.grant_number)),
+      joinList(splitList(person.grant_number)),
+    )
     changed(
       'acknowledgement_text',
       form.acknowledgement_text.trim() || null,
@@ -658,22 +680,22 @@ export default function PersonPage() {
               }
             />
             <Group align="flex-end" gap="xs">
-              <TextInput
-                label="Grant number"
-                description="Seeds a default funding acknowledgement below."
-                placeholder="DE-SC0012345"
-                value={form.grant_number}
+              <TagsInput
+                label="Grant numbers"
+                description="Add one or more grants (press Enter after each); they seed a default funding acknowledgement below."
+                placeholder={splitList(form.grant_number).length ? undefined : 'DE-SC0012345'}
+                value={splitList(form.grant_number)}
                 disabled={!canEditFull}
-                onChange={(e) => setForm({ ...form, grant_number: e.currentTarget.value })}
+                onChange={(v) => setForm({ ...form, grant_number: v.join(', ') })}
                 style={{ flex: 1 }}
               />
               <Button
                 variant="light"
-                disabled={!canEditFull || !form.grant_number.trim()}
+                disabled={!canEditFull || splitList(form.grant_number).length === 0}
                 onClick={() =>
                   setForm({
                     ...form,
-                    acknowledgement_text: defaultAckText(person, form.grant_number),
+                    acknowledgement_text: defaultAckText(person, splitList(form.grant_number)),
                   })
                 }
               >

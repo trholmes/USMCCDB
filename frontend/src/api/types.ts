@@ -250,7 +250,7 @@ export interface AuthorListSnapshot {
 }
 
 export interface BackupSnapshot {
-  category: 'daily' | 'weekly' | 'monthly'
+  category: 'daily' | 'weekly' | 'monthly' | 'pre-restore' | 'uploads'
   filename: string
   size_bytes: number
   modified_at: string
@@ -260,6 +260,13 @@ export interface BackupStatus {
   snapshots: BackupSnapshot[]
   last_backup_at: string | null
   backup_hour_utc: string
+}
+
+export interface RestoreStatus {
+  state: 'idle' | 'queued' | 'running' | 'success' | 'failed'
+  detail: string | null
+  backup: string | null
+  at: string | null
 }
 
 export interface AuthorList {

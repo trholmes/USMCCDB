@@ -3331,3 +3331,98 @@ def test_system_status(admin):
     assert body["db_revision"] is None
     assert body["migrations_pending"] is False
     assert body["code_revision"]  # the alembic head shipped with the code
+
+
+# --- Web-based restore + multiple grants --------------------------------------
+
+
+def test_restore_endpoint_validation_and_handshake(admin, tmp_path_factory):
+    root, get_settings = _backups_env(tmp_path_factory)
+    try:
+        (root / "daily").mkdir()
+        dump = root / "daily" / "usmccdb-2026-08-01.dump"
+        dump.write_bytes(b"PGDMP" + b"\x00" * 16)
+
+        # Idle before anything happened.
+        assert admin.get("/api/v1/backups/restore-status").json()["state"] == "idle"
+
+        # Confirmation word is required, verbatim.
+        r = admin.post(
+            "/api/v1/backups/restore",
+            data={"confirm": "yes", "path": "daily/usmccdb-2026-08-01.dump"},
+        )
+        assert r.status_code == 400
+
+        # Naming no target (or both kinds at once) is a 400.
+        assert admin.post(
+            "/api/v1/backups/restore", data={"confirm": "RESTORE"}
+        ).status_code == 400
+
+        # Path traversal / unknown files are 404s.
+        for bad in ("daily/../evil.dump", "nope/usmccdb-2026-08-01.dump", "daily/missing.dump"):
+            assert admin.post(
+                "/api/v1/backups/restore", data={"confirm": "RESTORE", "path": bad}
+            ).status_code == 404, bad
+
+        # A valid request stages the sentinel and reports queued.
+        r = admin.post(
+            "/api/v1/backups/restore",
+            data={"confirm": "RESTORE", "path": "daily/usmccdb-2026-08-01.dump"},
+        )
+        assert r.status_code == 202, r.text
+        assert r.json()["state"] == "queued"
+        assert r.json()["backup"] == "daily/usmccdb-2026-08-01.dump"
+        sentinels = list((root / "requests").glob("*.restore"))
+        assert len(sentinels) == 1
+        assert sentinels[0].read_text().strip() == "daily/usmccdb-2026-08-01.dump"
+
+        # While queued, a second restore is refused.
+        assert admin.post(
+            "/api/v1/backups/restore",
+            data={"confirm": "RESTORE", "path": "daily/usmccdb-2026-08-01.dump"},
+        ).status_code == 409
+
+        # Simulate the sidecar finishing; status parses through.
+        (root / "restore-status").write_text(
+            "state=success\nat=2026-08-19T16:00:00Z\n"
+            "backup=daily/usmccdb-2026-08-01.dump\ndetail=Restored.\n"
+        )
+        body = admin.get("/api/v1/backups/restore-status").json()
+        assert body["state"] == "success"
+        assert body["detail"] == "Restored."
+
+        # Uploads must be pg_dump archives (PGDMP magic); good ones land in
+        # uploads/ and show up in the snapshot list under that category.
+        r = admin.post(
+            "/api/v1/backups/restore",
+            data={"confirm": "RESTORE"},
+            files={"file": ("evil.dump", b"#!/bin/sh", "application/octet-stream")},
+        )
+        assert r.status_code == 400
+        r = admin.post(
+            "/api/v1/backups/restore",
+            data={"confirm": "RESTORE"},
+            files={"file": ("mine.dump", b"PGDMP" + b"\x01" * 8, "application/octet-stream")},
+        )
+        assert r.status_code == 202, r.text
+        assert r.json()["backup"].startswith("uploads/upload-")
+        cats = {s["category"] for s in admin.get("/api/v1/backups").json()["snapshots"]}
+        assert "uploads" in cats
+    finally:
+        os.environ.pop("BACKUPS_DIR", None)
+        os.environ.pop("BACKUP_TRIGGER_TIMEOUT_SECONDS", None)
+        get_settings.cache_clear()
+
+
+def test_multiple_grant_numbers(admin):
+    member, pid = _linked_member(
+        admin, given="Multi", family="Grant", email="multi.grant@example.edu"
+    )
+    grants = "DE-SC0011111, DE-SC0022222, PHY-2210533"
+    r = member.patch(f"/api/v1/people/{pid}", json={"grant_number": grants})
+    assert r.status_code == 200, r.text
+    assert r.json()["grant_number"] == grants
+    # More headroom than a single number: a long list still fits.
+    many = ", ".join(f"DE-SC00{i:05d}" for i in range(20))
+    assert len(many) < 500
+    assert member.patch(f"/api/v1/people/{pid}", json={"grant_number": many}).status_code == 200
