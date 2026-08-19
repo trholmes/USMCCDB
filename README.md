@@ -159,6 +159,11 @@ and monthly dumps have no snapshot of their own — pass a daily
 with them). Copy everything off-site with e.g.
 `docker compose cp backup:/backups ./offsite/`.
 
+Admins also get a **Backups** tab in the web admin panel showing every
+snapshot (with size and age), a "Run backup now" button, and per-snapshot
+downloads for manual offsite copies. Restores stay a host-shell operation
+(`scripts/restore.sh`).
+
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,
 backup retention — see `.env.example` for the full annotated list).
