@@ -261,8 +261,9 @@ class PersonUpdate(BaseModel):
     research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
-    # Personal funding acknowledgement (issue #127).
-    grant_number: str | None = Field(default=None, max_length=200)
+    # Personal funding acknowledgement (issue #127). grant_number holds one
+    # or more comma-separated grant numbers.
+    grant_number: str | None = Field(default=None, max_length=500)
     acknowledgement_text: str | None = Field(default=None, max_length=2000)
 
     @field_validator("email")

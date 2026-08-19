@@ -1,14 +1,34 @@
-import { Badge, Button, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  FileButton,
+  Group,
+  Loader,
+  Modal,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, backupDownloadUrl } from '../api/client'
-import type { BackupStatus } from '../api/types'
+import type { BackupStatus, RestoreStatus } from '../api/types'
 
 const CATEGORY_COLOR: Record<string, string> = {
   daily: 'blue',
   weekly: 'grape',
   monthly: 'teal',
+  'pre-restore': 'orange',
+  uploads: 'gray',
 }
+
+const CONFIRM_WORD = 'RESTORE'
+
+type RestoreTarget = { kind: 'path'; path: string } | { kind: 'upload'; file: File }
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -29,6 +49,17 @@ export default function AdminBackups() {
   const [failed, setFailed] = useState(false)
   const [running, setRunning] = useState(false)
 
+  // Restore flow: pick a target (snapshot row or uploaded .dump), type
+  // RESTORE to confirm, then poll the backup container's status file while
+  // it takes a pre-restore safety dump and runs pg_restore.
+  const [target, setTarget] = useState<RestoreTarget | null>(null)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [confirmText, setConfirmText] = useState('')
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const [restoreState, setRestoreState] = useState<RestoreStatus | null>(null)
+  const [tracking, setTracking] = useState(false)
+  const pollRef = useRef<number | null>(null)
+
   const load = useCallback(() => {
     api
       .get<BackupStatus>('/backups')
@@ -39,6 +70,85 @@ export default function AdminBackups() {
       .catch(() => setFailed(true))
   }, [])
   useEffect(load, [load])
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }, [])
+
+  const startPolling = useCallback(() => {
+    setTracking(true)
+    stopPolling()
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const s = await api.get<RestoreStatus>('/backups/restore-status')
+        setRestoreState(s)
+        if (s.state !== 'queued' && s.state !== 'running') {
+          stopPolling()
+          if (s.state === 'success') load()
+        }
+      } catch {
+        /* transient — the backend may drop connections mid-restore */
+      }
+    }, 2500)
+  }, [load, stopPolling])
+  useEffect(() => stopPolling, [stopPolling])
+
+  // A restore may already be running (another tab, or a page reload mid-way).
+  useEffect(() => {
+    api
+      .get<RestoreStatus>('/backups/restore-status')
+      .then((s) => {
+        if (s.state === 'queued' || s.state === 'running') {
+          setRestoreState(s)
+          startPolling()
+        }
+      })
+      .catch(() => undefined)
+  }, [startPolling])
+
+  const requestRestore = async () => {
+    if (!target) return
+    setRestoreBusy(true)
+    try {
+      const form = new FormData()
+      form.append('confirm', confirmText)
+      if (target.kind === 'path') form.append('path', target.path)
+      else form.append('file', target.file)
+      // Multipart upload — bypass the JSON api client.
+      const res = await fetch('/api/v1/backups/restore', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: form,
+      })
+      if (!res.ok) {
+        let detail = res.statusText
+        try {
+          const d = await res.json()
+          if (typeof d.detail === 'string') detail = d.detail
+        } catch {
+          /* keep statusText */
+        }
+        throw new Error(detail)
+      }
+      setRestoreState((await res.json()) as RestoreStatus)
+      setTarget(null)
+      setConfirmText('')
+      setUploadFile(null)
+      startPolling()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setRestoreBusy(false)
+    }
+  }
+
+  const openRestore = (tgt: RestoreTarget) => {
+    setConfirmText('')
+    setTarget(tgt)
+  }
 
   const run = async () => {
     setRunning(true)
@@ -94,8 +204,12 @@ export default function AdminBackups() {
             Automatic backups (database dump + member photos) run nightly at{' '}
             {status?.backup_hour_utc ?? '02'}:00 UTC with daily/weekly/monthly rotation.
             Download a snapshot now and then for offsite safekeeping — a snapshot is the
-            entire database, so store it carefully. Restoring is done on the server with{' '}
-            <code>scripts/restore.sh</code>.
+            entire database, so store it carefully. Restoring from here always takes a
+            fresh pre-restore safety dump first (kept under the{' '}
+            <Badge component="span" color="orange" variant="light" size="xs">
+              pre-restore
+            </Badge>{' '}
+            rotation), so a mistaken restore can be undone.
           </Text>
         </Stack>
       </Card>
@@ -104,6 +218,34 @@ export default function AdminBackups() {
         <Text c="red" size="sm">
           Could not load the backup list.
         </Text>
+      )}
+
+      {tracking && restoreState && restoreState.state !== 'idle' && (
+        <Alert
+          mb="md"
+          color={
+            restoreState.state === 'success'
+              ? 'green'
+              : restoreState.state === 'failed'
+                ? 'red'
+                : 'blue'
+          }
+          icon={
+            restoreState.state === 'queued' || restoreState.state === 'running' ? (
+              <Loader size={16} />
+            ) : undefined
+          }
+          title={`Restore ${restoreState.state}${restoreState.backup ? ` — ${restoreState.backup}` : ''}`}
+          withCloseButton={restoreState.state === 'success' || restoreState.state === 'failed'}
+          onClose={() => setTracking(false)}
+        >
+          <Text size="sm">{restoreState.detail}</Text>
+          {restoreState.state === 'success' && (
+            <Button size="xs" mt="xs" onClick={() => window.location.reload()}>
+              Reload the app
+            </Button>
+          )}
+        </Alert>
       )}
 
       <Table striped>
@@ -136,14 +278,26 @@ export default function AdminBackups() {
                 </Text>
               </Table.Td>
               <Table.Td>
-                <Button
-                  component="a"
-                  href={backupDownloadUrl(s.category, s.filename)}
-                  size="compact-xs"
-                  variant="light"
-                >
-                  Download
-                </Button>
+                <Group gap={4} wrap="nowrap">
+                  <Button
+                    component="a"
+                    href={backupDownloadUrl(s.category, s.filename)}
+                    size="compact-xs"
+                    variant="light"
+                  >
+                    Download
+                  </Button>
+                  {s.filename.endsWith('.dump') && (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => openRestore({ kind: 'path', path: `${s.category}/${s.filename}` })}
+                    >
+                      Restore
+                    </Button>
+                  )}
+                </Group>
               </Table.Td>
             </Table.Tr>
           ))}
@@ -159,6 +313,70 @@ export default function AdminBackups() {
           )}
         </Table.Tbody>
       </Table>
+
+      <Group mt="md" gap="sm">
+        <FileButton accept=".dump" onChange={setUploadFile}>
+          {(props) => (
+            <Button variant="default" size="xs" {...props}>
+              Choose a .dump file…
+            </Button>
+          )}
+        </FileButton>
+        {uploadFile && (
+          <Text size="sm" ff="monospace">
+            {uploadFile.name}
+          </Text>
+        )}
+        <Button
+          size="xs"
+          color="red"
+          variant="light"
+          disabled={!uploadFile}
+          onClick={() => uploadFile && openRestore({ kind: 'upload', file: uploadFile })}
+        >
+          Restore from uploaded file
+        </Button>
+      </Group>
+
+      <Modal opened={target !== null} onClose={() => setTarget(null)} title="Restore database">
+        <Stack gap="sm">
+          <Alert color="red">
+            This overwrites <b>all current data</b> (and member photos, when the backup
+            has a photo snapshot) with the contents of the backup.
+          </Alert>
+          <Text size="sm">
+            Restore from{' '}
+            <Text component="span" ff="monospace" size="sm">
+              {target?.kind === 'path' ? target.path : target?.file.name}
+            </Text>
+            ?
+          </Text>
+          <Text size="sm" c="dimmed">
+            A fresh pre-restore backup of the current state is taken first, so this can be
+            undone by restoring that snapshot.
+          </Text>
+          <TextInput
+            label={`Type ${CONFIRM_WORD} to confirm`}
+            placeholder={CONFIRM_WORD}
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.currentTarget.value)}
+            data-autofocus
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              loading={restoreBusy}
+              disabled={confirmText.trim().toUpperCase() !== CONFIRM_WORD}
+              onClick={requestRestore}
+            >
+              Restore
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </>
   )
 }
