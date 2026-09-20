@@ -23,6 +23,7 @@ export interface SiteSettings {
   banner_message: string | null
   banner_level: 'info' | 'warning' | 'critical'
   login_message: string | null
+  carto_api_key: string | null
 }
 
 export interface SystemStatus {

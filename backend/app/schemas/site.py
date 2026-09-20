@@ -15,6 +15,10 @@ class PublicSiteSettings(BaseModel):
     banner_message: str | None = None
     banner_level: BannerLevel = "info"
     login_message: str | None = None
+    # CARTO basemap API key (issue #138). Client-side by nature — it appears
+    # in every tile URL the browser requests — so serving it here is fine;
+    # restrict it by referrer in the CARTO dashboard.
+    carto_api_key: str | None = None
 
 
 class SiteSettingsUpdate(BaseModel):
@@ -22,6 +26,7 @@ class SiteSettingsUpdate(BaseModel):
     banner_message: str | None = Field(default=None, max_length=2000)
     banner_level: BannerLevel | None = None
     login_message: str | None = Field(default=None, max_length=4000)
+    carto_api_key: str | None = Field(default=None, max_length=200)
 
 
 class SystemStatus(BaseModel):

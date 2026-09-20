@@ -16,7 +16,7 @@ router = APIRouter(prefix="/site", tags=["site"])
 
 # The runtime-editable settings; anything else PATCHed is rejected by the
 # schema. Values live in site_settings as plain strings.
-SETTING_KEYS = ("banner_message", "banner_level", "login_message")
+SETTING_KEYS = ("banner_message", "banner_level", "login_message", "carto_api_key")
 
 
 def get_site_settings(db: Session) -> dict[str, str]:
@@ -30,6 +30,7 @@ def _public_out(values: dict[str, str]) -> PublicSiteSettings:
         banner_message=values.get("banner_message") or None,
         banner_level=level if level in ("info", "warning", "critical") else "info",
         login_message=values.get("login_message") or None,
+        carto_api_key=values.get("carto_api_key") or None,
     )
 
 

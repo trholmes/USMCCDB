@@ -3287,7 +3287,12 @@ def test_site_settings_banner(admin):
     fresh = TestClient(app)
     r = fresh.get("/api/v1/site/settings")
     assert r.status_code == 200
-    assert r.json() == {"banner_message": None, "banner_level": "info", "login_message": None}
+    assert r.json() == {
+        "banner_message": None,
+        "banner_level": "info",
+        "login_message": None,
+        "carto_api_key": None,
+    }
 
     # Admin sets a banner + login message.
     r = admin.patch(
@@ -3320,6 +3325,13 @@ def test_site_settings_banner(admin):
     assert admin.patch(
         "/api/v1/site/settings", json={"banner_level": "sparkly"}
     ).status_code == 422
+
+    # CARTO basemap key (issue #138): admin sets it, everyone reads it, and
+    # clearing it falls back to keyless tiles.
+    admin.patch("/api/v1/site/settings", json={"carto_api_key": "test-carto-key"})
+    assert fresh.get("/api/v1/site/settings").json()["carto_api_key"] == "test-carto-key"
+    admin.patch("/api/v1/site/settings", json={"carto_api_key": ""})
+    assert fresh.get("/api/v1/site/settings").json()["carto_api_key"] is None
 
 
 def test_admin_password_reset_and_delete(admin):
