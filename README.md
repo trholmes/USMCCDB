@@ -21,10 +21,12 @@ used by the LHC experiments, built as a self-hosted open-source stack:
 
 - **Membership** — people, institutions, dated affiliations, voting-member flag,
   career stage, working groups, leadership roles, member photos, and an
-  register → approve workflow with a full audit trail.
+  register → approve workflow with a full audit trail. The directory exports
+  its (filtered) email addresses as a single string, listserv ADD lines, or CSV.
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
-  seminar/outreach, invited vs. contributed), member nominations, office
-  assignment, and fair-share statistics per person and institution.
+  seminar/outreach, invited vs. contributed) with links to the talk page,
+  slides, and recording, member nominations, office assignment, and
+  fair-share statistics per person and institution.
 - **Publications** — paper/proceedings/note/white-paper registry any member
   can add to (the creator becomes an editor), with a status workflow
   (in progress → collaboration review → submitted → published). Editors
@@ -216,8 +218,12 @@ There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
 Photos live in a dedicated `photos` volume, are served (to signed-in members
 only) at `/api/v1/people/{id}/photo`, appear as avatars in the directory and
 profiles, and are included in the nightly backups. Members and the office can
-also upload/replace a photo by clicking the avatar on a profile page. To import
-the photos linked in the registration spreadsheet:
+also upload/replace a photo by clicking the avatar on a profile page. Every
+photo is normalized on the way in — re-encoded to WebP with the longest edge
+capped at 1024 px and all metadata (including EXIF GPS) stripped — so files
+stay small and uniform whatever people upload
+(`python -m app.cli optimize-photos` re-encodes photos stored before this
+feature existed). To import the photos linked in the registration spreadsheet:
 
 ```bash
 docker compose exec backend python -m app.cli import-photos-xlsx /data/USMCC_Membership.xlsx
@@ -248,9 +254,14 @@ coordinates. The `seed-coordinates` CLI command fills them all at once from
 the office fills in stragglers in each institution's edit form, either by
 hand or with the **"Fetch from ROR"** button (uses the institution's ROR id;
 the lookup happens in the admin's browser, so the
-server needs no internet access). The basemap tiles come from CARTO's free
+server needs no internet access). The basemap tiles come from CARTO's
 OSM-based tile service — the one external runtime dependency of the app; only
-tile requests leave the site, never member data.
+tile requests leave the site, never member data. CARTO now requires a (free)
+API key for unwatermarked tiles: get one at
+[carto.com/basemaps/apikey](https://carto.com/basemaps/apikey/), restrict it
+to your site's domain in the CARTO dashboard (it is visible in the tile URLs
+by design), and paste it in **Admin → Site settings → Map tiles (CARTO)** —
+no rebuild needed.
 
 ### The admin panel
 
@@ -262,8 +273,9 @@ to admin accounts):
   member's local + ORCID accounts, **reset a locked-out local account's
   password** (shows a one-time temporary password), search, and delete logins.
 - **Site settings** — an **announcement banner** (info/warning/critical, shown
-  on the login page and above every page) and a **login-page message**; both
-  apply immediately, no restart.
+  on the login page and above every page), a **login-page message**, and the
+  **CARTO API key** for the institution map's basemap tiles; all apply
+  immediately, no restart.
 - **System** — database size, record counts, whether the database schema
   matches the code's migrations, and an audit of recent sign-ins (successes
   and failures, with IP).
@@ -411,4 +423,7 @@ images to GHCR.
 ## License / contact
 
 Built by and for the US Muon Collider Collaboration. Questions → the USMCC
-web/database team (see `CONTACT_EMAIL` on your instance's login page).
+web/database team (see `CONTACT_EMAIL` on your instance's login page). Bug
+reports and suggestions →
+[GitHub issues](https://github.com/trholmes/USMCCDB/issues), also linked in
+the footer of every page.
