@@ -1,4 +1,15 @@
-import { Button, Card, Group, Select, Stack, Text, Textarea, Title } from '@mantine/core'
+import {
+  Anchor,
+  Button,
+  Card,
+  Group,
+  Select,
+  Stack,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+} from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
@@ -11,6 +22,7 @@ export default function AdminSite() {
     banner_message: '',
     banner_level: 'info',
     login_message: '',
+    carto_api_key: '',
   })
   const [loaded, setLoaded] = useState(false)
 
@@ -22,6 +34,7 @@ export default function AdminSite() {
           banner_message: s.banner_message ?? '',
           banner_level: s.banner_level,
           login_message: s.login_message ?? '',
+          carto_api_key: s.carto_api_key ?? '',
         }),
       )
       .catch(() => undefined)
@@ -83,6 +96,27 @@ export default function AdminSite() {
             maxLength={4000}
             value={form.login_message}
             onChange={(e) => setForm({ ...form, login_message: e.currentTarget.value })}
+          />
+        </Stack>
+      </Card>
+      <Card withBorder>
+        <Stack gap="sm">
+          <Title order={6}>Map tiles (CARTO)</Title>
+          <Text size="sm" c="dimmed">
+            API key for the institution map's CARTO basemaps — keyless tiles are
+            deprecated and watermarked. Get a free key at{' '}
+            <Anchor href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener noreferrer" size="sm">
+              carto.com/basemaps/apikey
+            </Anchor>
+            . The key is visible to anyone loading the map (it rides on every
+            tile URL), so restrict it to this site's domain in the CARTO
+            dashboard. Clear the field to fall back to keyless tiles.
+          </Text>
+          <TextInput
+            label="CARTO API key"
+            maxLength={200}
+            value={form.carto_api_key}
+            onChange={(e) => setForm({ ...form, carto_api_key: e.currentTarget.value })}
           />
         </Stack>
       </Card>

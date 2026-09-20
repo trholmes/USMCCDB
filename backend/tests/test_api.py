@@ -1102,26 +1102,35 @@ def test_person_notes_hidden_from_members(admin):
 
 def test_photo_upload_and_serve(admin, tmp_path_factory):
     os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
+    from io import BytesIO
+
+    from PIL import Image
+
     from app.config import get_settings
 
     get_settings.cache_clear()
 
     person = admin.get("/api/v1/people").json()[0]
-    png = bytes.fromhex(
-        "89504e470d0a1a0a0000000d494844520000000100000001080600000"
-        "01f15c4890000000d49444154789c6260010000000500010d0a2db400"
-        "00000049454e44ae426082"
-    )
+    # An oversized PNG with EXIF metadata: normalization (issue #137) must
+    # re-encode it to WebP, cap the longest edge, and strip the metadata.
+    buf = BytesIO()
+    exif = Image.Exif()
+    exif[0x010F] = "TestCam"  # Make tag
+    Image.new("RGB", (2000, 1200), "red").save(buf, format="PNG", exif=exif)
     r = admin.post(
         f"/api/v1/people/{person['id']}/photo",
-        files={"file": ("me.png", png, "image/png")},
+        files={"file": ("me.png", buf.getvalue(), "image/png")},
     )
     assert r.status_code == 201, r.text
-    assert r.json()["photo_file"]
+    assert r.json()["photo_file"].endswith(".webp")
 
     served = admin.get(f"/api/v1/people/{person['id']}/photo")
     assert served.status_code == 200
-    assert served.content == png
+    stored = Image.open(BytesIO(served.content))
+    assert stored.format == "WEBP"
+    assert max(stored.size) == 1024
+    assert stored.size[0] / stored.size[1] == pytest.approx(2000 / 1200, rel=0.01)
+    assert not stored.getexif()
 
     # Wrong content type is rejected.
     bad = admin.post(
@@ -1148,6 +1157,14 @@ def test_photo_upload_rejects_bad_content(admin, tmp_path_factory, monkeypatch):
         files={"file": ("fake.png", b"<html>not an image</html>", "image/png")},
     )
     assert fake.status_code == 422
+    assert admin.get(f"/api/v1/people/{person['id']}").json()["photo_file"] == before
+
+    # Right magic bytes but an undecodable body fails normalization (issue #137).
+    corrupt = admin.post(
+        f"/api/v1/people/{person['id']}/photo",
+        files={"file": ("corrupt.png", b"\x89PNG\r\n\x1a\n" + b"\xde\xad" * 40, "image/png")},
+    )
+    assert corrupt.status_code == 422
     assert admin.get(f"/api/v1/people/{person['id']}").json()["photo_file"] == before
 
     # An oversized body is rejected (shrink the limit rather than posting 10 MB).
@@ -3270,7 +3287,12 @@ def test_site_settings_banner(admin):
     fresh = TestClient(app)
     r = fresh.get("/api/v1/site/settings")
     assert r.status_code == 200
-    assert r.json() == {"banner_message": None, "banner_level": "info", "login_message": None}
+    assert r.json() == {
+        "banner_message": None,
+        "banner_level": "info",
+        "login_message": None,
+        "carto_api_key": None,
+    }
 
     # Admin sets a banner + login message.
     r = admin.patch(
@@ -3303,6 +3325,13 @@ def test_site_settings_banner(admin):
     assert admin.patch(
         "/api/v1/site/settings", json={"banner_level": "sparkly"}
     ).status_code == 422
+
+    # CARTO basemap key (issue #138): admin sets it, everyone reads it, and
+    # clearing it falls back to keyless tiles.
+    admin.patch("/api/v1/site/settings", json={"carto_api_key": "test-carto-key"})
+    assert fresh.get("/api/v1/site/settings").json()["carto_api_key"] == "test-carto-key"
+    admin.patch("/api/v1/site/settings", json={"carto_api_key": ""})
+    assert fresh.get("/api/v1/site/settings").json()["carto_api_key"] is None
 
 
 def test_admin_password_reset_and_delete(admin):

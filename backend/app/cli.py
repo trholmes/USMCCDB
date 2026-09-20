@@ -34,6 +34,7 @@ from app.models import (
     WorkingGroup,
 )
 from app.security import hash_password
+from app.services.photos import InvalidImageError
 
 cli = typer.Typer(help="USMCC database management commands")
 
@@ -1006,10 +1007,15 @@ def _photos_dir() -> Path:
     return d
 
 
-def _save_photo(db, person: Person, content: bytes, ext: str) -> None:
+def _save_photo(db, person: Person, content: bytes) -> None:
+    """Normalize (issue #137) and store a photo. Raises
+    app.services.photos.InvalidImageError on undecodable input."""
     from datetime import datetime, timezone
 
-    name = f"{person.id}-{int(datetime.now(timezone.utc).timestamp())}{ext}"
+    from app.services import photos as photo_service
+
+    content = photo_service.optimize(content)
+    name = f"{person.id}-{int(datetime.now(timezone.utc).timestamp())}{photo_service.EXT}"
     (_photos_dir() / name).write_bytes(content)
     old = person.photo_file
     person.photo_file = name
@@ -1082,9 +1088,9 @@ def import_photos_xlsx(
                     )
                     failed += 1
                     continue
-                _save_photo(db, person, resp.content, CONTENT_EXTS[ctype])
+                _save_photo(db, person, resp.content)
                 ok += 1
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, InvalidImageError) as exc:
                 failures.append(f"{person.given_name} {person.family_name}: {exc}")
                 failed += 1
         db.commit()
@@ -1131,13 +1137,57 @@ def import_photos_dir(
             if person.photo_file and not overwrite:
                 skipped += 1
                 continue
-            _save_photo(db, person, path.read_bytes(), ext)
+            try:
+                _save_photo(db, person, path.read_bytes())
+            except InvalidImageError:
+                unmatched.append(f"{path.name} (not a decodable image)")
+                continue
             ok += 1
         db.commit()
 
     typer.echo(f"Photos: {ok} imported, {skipped} already present, {len(unmatched)} unmatched")
     for name in unmatched:
         typer.echo(f"  unmatched: {name}")
+
+
+@cli.command()
+def optimize_photos(
+    redo_webp: bool = typer.Option(
+        False, help="Also re-encode photos that are already .webp"
+    ),
+):
+    """Re-encode existing member photos to the normalized format (issue #137):
+    WebP, longest edge capped, metadata stripped. Photos uploaded before the
+    normalization landed keep their original bytes until this runs."""
+    done = skipped = failed = 0
+    before_bytes = after_bytes = 0
+    with SessionLocal() as db:
+        people = db.execute(select(Person).where(Person.photo_file.isnot(None))).scalars().all()
+        for person in people:
+            path = _photos_dir() / person.photo_file
+            if not path.is_file():
+                typer.echo(f"  missing file for {person.given_name} {person.family_name}: {person.photo_file}")
+                failed += 1
+                continue
+            if path.suffix == ".webp" and not redo_webp:
+                skipped += 1
+                continue
+            original = path.read_bytes()
+            try:
+                _save_photo(db, person, original)
+            except InvalidImageError as exc:
+                typer.echo(f"  failed for {person.given_name} {person.family_name}: {exc}")
+                failed += 1
+                continue
+            before_bytes += len(original)
+            after_bytes += (_photos_dir() / person.photo_file).stat().st_size
+            done += 1
+        db.commit()
+
+    typer.echo(
+        f"Photos: {done} re-encoded ({before_bytes / 1e6:.1f} MB -> {after_bytes / 1e6:.1f} MB), "
+        f"{skipped} already optimized, {failed} failed"
+    )
 
 
 if __name__ == "__main__":

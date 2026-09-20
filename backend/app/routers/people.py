@@ -59,14 +59,10 @@ from app.security import (
     require_office,
 )
 from app.services import notifications
+from app.services import photos as photo_service
 from app.services.email import send_email
 
-PHOTO_TYPES = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
+PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 PHOTO_CHUNK_BYTES = 1024 * 1024
 
@@ -675,8 +671,7 @@ async def upload_photo(
 ) -> PersonSummary:
     person = _get_person(db, person_id)
     _require_self_or_office(user, person_id, "upload a photo for")
-    ext = PHOTO_TYPES.get(file.content_type or "")
-    if ext is None:
+    if (file.content_type or "") not in PHOTO_TYPES:
         raise HTTPException(422, f"Unsupported type; use one of {sorted(PHOTO_TYPES)}")
     # Read in chunks so an oversized body is aborted at the limit instead of
     # being buffered whole first.
@@ -690,11 +685,17 @@ async def upload_photo(
     content = b"".join(chunks)
     if not _photo_signature_ok(file.content_type or "", content[:16]):
         raise HTTPException(422, "File content does not match the declared image type")
+    # Normalize on the way in: uniform format, bounded size, metadata (incl.
+    # EXIF GPS) stripped (issue #137).
+    try:
+        content = photo_service.optimize(content)
+    except photo_service.InvalidImageError:
+        raise HTTPException(422, "File could not be decoded as an image")
     photos = Path(get_settings().photos_dir)
     photos.mkdir(parents=True, exist_ok=True)
     # Fixed name per person, timestamped to bust caches on replacement.
     old = person.photo_file
-    name = f"{person_id}-{int(datetime.now(UTC).timestamp())}{ext}"
+    name = f"{person_id}-{int(datetime.now(UTC).timestamp())}{photo_service.EXT}"
     (photos / name).write_bytes(content)
     person.photo_file = name
     db.commit()
