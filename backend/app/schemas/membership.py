@@ -305,6 +305,24 @@ class InstitutionChange(BaseModel):
         return self
 
 
+class SecondaryAffiliationAdd(BaseModel):
+    """One additional, non-primary affiliation alongside the primary
+    (issue #3) — self-service or office, same institution semantics as a
+    primary move (free text creates an entry pending office review)."""
+
+    institution_id: int | None = None
+    institution_name: str | None = None  # free text if not in the list yet
+    institution_is_us: bool | None = None
+    start_date: date
+
+    @model_validator(mode="after")
+    def require_new_institution_is_us(self) -> "SecondaryAffiliationAdd":
+        _check_new_institution_is_us(
+            self.institution_id, self.institution_name, self.institution_is_us
+        )
+        return self
+
+
 class RegistrationAck(BaseModel):
     """The one answer public registration gives, duplicate or not — the
     response must not confirm whether an email/ORCID iD is already a member
