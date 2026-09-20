@@ -1,0 +1,7 @@
+# Never ship host state into the image build: COPY . . would overwrite the
+# node_modules freshly installed inside the builder with the host's copy
+# (wrong platform binaries, host file modes — e.g. lost exec bits on
+# node_modules/.bin, exit 126 "tsc: Permission denied").
+node_modules
+dist
+*.tsbuildinfo
