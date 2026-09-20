@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -29,6 +30,9 @@ const emptyForm = {
   title: '',
   event_id: '',
   venue: '',
+  url: '',
+  slides_url: '',
+  recording_url: '',
   talk_type: 'parallel',
   date: '',
   is_invited: 'false',
@@ -117,6 +121,9 @@ export default function TalksPage() {
       title: talk.title,
       event_id: talk.event_id ? String(talk.event_id) : '',
       venue: talk.venue ?? '',
+      url: talk.url ?? '',
+      slides_url: talk.slides_url ?? '',
+      recording_url: talk.recording_url ?? '',
       talk_type: talk.talk_type,
       date: talk.date ?? '',
       is_invited: String(talk.is_invited),
@@ -136,6 +143,9 @@ export default function TalksPage() {
         title: form.title,
         event_id: form.event_id ? Number(form.event_id) : null,
         venue: form.venue || null,
+        url: form.url || null,
+        slides_url: form.slides_url || null,
+        recording_url: form.recording_url || null,
         talk_type: form.talk_type,
         date: form.date || null,
         is_invited: form.is_invited === 'true',
@@ -166,6 +176,9 @@ export default function TalksPage() {
         title: form.title,
         event_id: form.event_id ? Number(form.event_id) : null,
         venue: form.venue || null,
+        url: form.url || null,
+        slides_url: form.slides_url || null,
+        recording_url: form.recording_url || null,
         talk_type: form.talk_type,
         date: form.date || null,
         is_invited: form.is_invited === 'true',
@@ -347,6 +360,35 @@ export default function TalksPage() {
                 </Group>
               )}
             </Group>
+            {(detail.url || detail.slides_url || detail.recording_url) && (
+              <Group gap="md">
+                {detail.url && (
+                  <Anchor href={detail.url} target="_blank" rel="noopener noreferrer" size="sm">
+                    Talk page ↗
+                  </Anchor>
+                )}
+                {detail.slides_url && (
+                  <Anchor
+                    href={detail.slides_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    size="sm"
+                  >
+                    Slides ↗
+                  </Anchor>
+                )}
+                {detail.recording_url && (
+                  <Anchor
+                    href={detail.recording_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    size="sm"
+                  >
+                    Recording ↗
+                  </Anchor>
+                )}
+              </Group>
+            )}
             {detail.notes && <Text size="sm">{detail.notes}</Text>}
 
             <Card withBorder>
@@ -488,6 +530,24 @@ export default function TalksPage() {
             value={form.date}
             onChange={(e) => setForm({ ...form, date: e.currentTarget.value })}
           />
+          <TextInput
+            label="Talk URL"
+            description="The talk's page on the event site, e.g. an indico contribution"
+            value={form.url}
+            onChange={(e) => setForm({ ...form, url: e.currentTarget.value })}
+          />
+          <Group grow>
+            <TextInput
+              label="Slides URL"
+              value={form.slides_url}
+              onChange={(e) => setForm({ ...form, slides_url: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Recording URL"
+              value={form.recording_url}
+              onChange={(e) => setForm({ ...form, recording_url: e.currentTarget.value })}
+            />
+          </Group>
           {editing && (
             <>
               <Select

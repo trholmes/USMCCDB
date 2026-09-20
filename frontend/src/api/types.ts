@@ -167,6 +167,9 @@ export interface Talk {
   title: string
   event_id: number | null
   venue: string | null
+  url: string | null
+  slides_url: string | null
+  recording_url: string | null
   talk_type: string
   date: string | null
   working_group_id: number | null
