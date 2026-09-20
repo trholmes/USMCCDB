@@ -43,6 +43,10 @@ export default function PublicationDetailPage() {
   // Several people can be picked and attached in one go (issue #102).
   const [personPicks, setPersonPicks] = useState<string[]>([])
   const [rolePick, setRolePick] = useState<string | null>('contributor')
+  // Group staging (issue #102): picking an institution or working group adds
+  // its (active) members to the picker as a reviewable preview, not straight
+  // to the publication.
+  const [groupWgBusy, setGroupWgBusy] = useState(false)
   const [ack, setAck] = useState<string | null>(null)
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
   const [editOpen, setEditOpen] = useState(false)
@@ -159,6 +163,33 @@ export default function PublicationDetailPage() {
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const stagePeople = (ids: string[]) => {
+    setPersonPicks((prev) => [...new Set([...prev, ...ids])])
+  }
+
+  const stageInstitution = (instId: string | null) => {
+    if (!instId) return
+    stagePeople(
+      people
+        .filter((p) => String(p.primary_institution?.id) === instId)
+        .map((p) => String(p.id)),
+    )
+  }
+
+  const stageWorkingGroup = async (wgId: string | null) => {
+    if (!wgId) return
+    setGroupWgBusy(true)
+    try {
+      const members = await api.get<PersonSummary[]>(`/working-groups/${wgId}/members`)
+      const active = new Set(people.map((p) => p.id))
+      stagePeople(members.filter((m) => active.has(m.id)).map((m) => String(m.id)))
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setGroupWgBusy(false)
     }
   }
 
@@ -307,6 +338,42 @@ export default function PublicationDetailPage() {
             <Button size="xs" onClick={addPeople} disabled={personPicks.length === 0 || !rolePick}>
               Add{personPicks.length > 1 ? ` ${personPicks.length}` : ''}
             </Button>
+          </Group>
+        )}
+        {canManage && (
+          <Group mt="xs" gap="xs" align="center">
+            <Text size="xs" c="dimmed">
+              Add a whole group (staged into the picker above to review before adding):
+            </Text>
+            <Select
+              placeholder="Everyone at institution…"
+              searchable
+              size="xs"
+              data={[
+                ...new Map(
+                  people
+                    .filter((p) => p.primary_institution)
+                    .map((p) => [
+                      String(p.primary_institution!.id),
+                      p.primary_institution!.short_name || p.primary_institution!.name,
+                    ]),
+                ).entries(),
+              ]
+                .map(([value, label]) => ({ value, label }))
+                .sort((a, b) => a.label.localeCompare(b.label))}
+              value={null}
+              onChange={stageInstitution}
+              w={230}
+            />
+            <Select
+              placeholder="Everyone in working group…"
+              size="xs"
+              data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
+              value={null}
+              onChange={stageWorkingGroup}
+              disabled={groupWgBusy}
+              w={240}
+            />
           </Group>
         )}
       </Card>
