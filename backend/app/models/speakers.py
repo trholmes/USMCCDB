@@ -66,6 +66,11 @@ class Talk(TimestampedBase):
     # Where a talk without an event was given (seminar / colloquium host).
     venue: Mapped[str | None] = mapped_column(String(300))
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    # External links (issue #140): the talk's page on e.g. indico, and where
+    # the slides / recording live. Nothing is hosted here.
+    url: Mapped[str | None] = mapped_column(String(500))
+    slides_url: Mapped[str | None] = mapped_column(String(500))
+    recording_url: Mapped[str | None] = mapped_column(String(500))
     talk_type: Mapped[TalkType] = mapped_column(
         Enum(TalkType, name="talk_type"), default=TalkType.parallel, nullable=False
     )

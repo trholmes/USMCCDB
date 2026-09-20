@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary } from '../api/types'
+import ExportEmails from '../components/ExportEmails'
 import PersonAvatar from '../components/PersonAvatar'
 import StatusBadge from '../components/StatusBadge'
 import { PageCount, PaginationBar, usePagination } from '../components/pagination'
@@ -84,12 +85,15 @@ export default function DirectoryPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Member directory</Title>
-        <TextInput
-          placeholder="Search name or email…"
-          value={q}
-          onChange={(e) => setQ(e.currentTarget.value)}
-          w={240}
-        />
+        <Group gap="xs">
+          <ExportEmails people={filtered} />
+          <TextInput
+            placeholder="Search name or email…"
+            value={q}
+            onChange={(e) => setQ(e.currentTarget.value)}
+            w={240}
+          />
+        </Group>
       </Group>
       <Group mb="md" gap="xs" align="flex-start">
         <MultiSelect

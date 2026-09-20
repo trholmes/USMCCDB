@@ -30,6 +30,7 @@ import StatsPage from './pages/Stats'
 import TalksPage from './pages/Talks'
 import WorkingGroupsPage from './pages/WorkingGroups'
 import SiteBanner from './components/SiteBanner'
+import Footer from './components/Footer'
 
 const NAV = [
   { to: '/directory', label: 'Directory' },
@@ -75,11 +76,14 @@ export default function App() {
   // Unauthenticated users only see login + registration.
   if (!me) {
     return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+        <Footer />
+      </>
     )
   }
 
@@ -196,6 +200,7 @@ export default function App() {
           {isAdmin && <Route path="/admin" element={<AdminPage />} />}
           <Route path="*" element={<Navigate to="/directory" replace />} />
         </Routes>
+        <Footer />
       </AppShell.Main>
     </AppShell>
   )

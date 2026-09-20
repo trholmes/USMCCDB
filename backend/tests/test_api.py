@@ -1171,8 +1171,21 @@ def test_speakers_flow(admin):
             "talk_type": "plenary",
             "date": "2026-08-01",
             "is_invited": True,
+            "url": "https://indico.example.org/event/1/contributions/2/",
+            "slides_url": "https://indico.example.org/event/1/contributions/2/attachments/3.pdf",
         },
     ).json()
+    assert talk["url"] == "https://indico.example.org/event/1/contributions/2/"
+    assert talk["recording_url"] is None
+
+    # Links can be added after the fact, e.g. once the recording is up (#140).
+    r = admin.patch(
+        f"/api/v1/talks/{talk['id']}",
+        json={"recording_url": "https://www.youtube.com/watch?v=abc123"},
+    )
+    assert r.status_code == 200
+    assert r.json()["recording_url"] == "https://www.youtube.com/watch?v=abc123"
+    assert r.json()["slides_url"] == talk["slides_url"]
 
     person = admin.get("/api/v1/people").json()[0]
     nom = admin.post(
