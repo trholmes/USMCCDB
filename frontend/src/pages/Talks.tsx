@@ -490,7 +490,7 @@ export default function TalksPage() {
           />
           <Autocomplete
             label="Conference / venue"
-            description="Pick a conference from the list, or type any venue — e.g. “MIT physics colloquium”"
+            description="Pick a conference from the list (e.g. “CPAD 2026”), or type any venue (e.g. “UTK Physics Colloquium”)"
             placeholder="Where was it given?"
             data={events.map((e) => e.name)}
             limit={8}
