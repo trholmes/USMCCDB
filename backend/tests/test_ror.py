@@ -7,6 +7,7 @@ from app.services.ror import (
     parse_address,
     parse_affiliation_match,
     parse_coordinates,
+    parse_country,
     parse_short_name,
 )
 
@@ -127,7 +128,17 @@ def test_affiliation_match_uses_only_the_chosen_item():
     assert match.name == "University of Tennessee"  # the ror_display name
     assert match.short_name == "Tennessee"
     assert match.address == "University of Tennessee, Knoxville, TN, USA"
+    assert (match.country_code, match.country_name) == ("US", "United States")
     assert (match.latitude, match.longitude) == (35.960638, -83.920739)
+
+
+def test_parse_country():
+    assert parse_country(RECORD) == ("US", "United States")
+    assert parse_country({}) == (None, None)
+    assert parse_country({"locations": [{"geonames_details": {"country_code": "CH"}}]}) == (
+        "CH",
+        None,
+    )
 
 
 def test_affiliation_match_none_when_nothing_chosen():

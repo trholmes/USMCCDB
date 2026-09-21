@@ -16,6 +16,7 @@ export interface RorParsed {
   longitude: number | null
   location: string | null // "Knoxville, United States" — for display only
   isUS: boolean | null
+  countryName: string | null
   score: number | null // affiliation-matcher confidence, when it came from one
 }
 
@@ -70,6 +71,7 @@ export function parseRorRecord(rec: any, score: number | null = null): RorParsed
     longitude: geo.lng ?? null,
     location: city ? `${city}${geo.country_name ? `, ${geo.country_name}` : ''}` : null,
     isUS: geo.country_code ? geo.country_code === 'US' : null,
+    countryName: geo.country_name ?? null,
     score,
   }
 }

@@ -90,7 +90,7 @@ export default function InstitutionsPage() {
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
             <SortableTh label="Short name" k="short_name" sort={sort} toggle={toggle} />
             <SortableTh label="Author-list address" k="latex_address" sort={sort} toggle={toggle} />
-            <SortableTh label="US" k="is_us" sort={sort} toggle={toggle} />
+            <SortableTh label="Region" k="is_us" sort={sort} toggle={toggle} />
             <SortableTh label="People" k="people_count" sort={sort} toggle={toggle} />
             <Table.Th />
           </Table.Tr>
@@ -118,7 +118,9 @@ export default function InstitutionsPage() {
               <Table.Td>{i.short_name}</Table.Td>
               <Table.Td>{i.latex_address}</Table.Td>
               <Table.Td>
-                {i.is_us ? null : (
+                {i.is_us ? (
+                  'US'
+                ) : (
                   <Badge color="gray" variant="light">
                     non-US
                   </Badge>
