@@ -2,5 +2,6 @@
 # List all database backups (in the host backups directory, BACKUP_DIR).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/_engine.sh
 
-docker compose exec -T backup sh -c "find /backups -name '*.dump' -exec du -h {} + | sort -k2"
+compose exec -T backup sh -c "find /backups -name '*.dump' -exec du -h {} + | sort -k2"
