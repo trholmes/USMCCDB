@@ -30,7 +30,7 @@ export default function WorkingGroupsPage() {
   const [modal, setModal] = useState<WorkingGroup | 'new' | null>(null)
   const [form, setForm] = useState({ name: '', slug: '', description: '', is_active: true })
   const [slugTouched, setSlugTouched] = useState(false)
-  const { me, isOffice } = useSession()
+  const { me, isOffice, isAdmin } = useSession()
 
   const load = useCallback(() => {
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
@@ -66,6 +66,23 @@ export default function WorkingGroupsPage() {
       await api.delete(`/working-groups/${wgId}/members/${me.person_id}`)
       notifications.show({ message: 'Left the group.' })
       loadMembers(wgId)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const remove = async (wg: WorkingGroup) => {
+    if (
+      !window.confirm(
+        `Delete the working group "${wg.name}"? Its ${wg.member_count} membership(s) and ` +
+          'any convener roles are removed with it; talks and publications tagged with it lose the tag.',
+      )
+    )
+      return
+    try {
+      await api.delete(`/working-groups/${wg.id}`)
+      notifications.show({ message: 'Working group deleted.' })
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -148,6 +165,11 @@ export default function WorkingGroupsPage() {
                 {isOffice && (
                   <Button size="xs" variant="subtle" onClick={() => open(wg)}>
                     Edit
+                  </Button>
+                )}
+                {isAdmin && (
+                  <Button size="xs" variant="subtle" color="red" onClick={() => remove(wg)}>
+                    Delete
                   </Button>
                 )}
               </Group>

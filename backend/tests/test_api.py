@@ -1858,6 +1858,37 @@ def test_working_group_crud(admin):
         {"slug": w["slug"], "count": w["member_count"]} for w in listed
     ]
 
+    # Deleting a group is admin-only: neither a member nor the office may.
+    assert member.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 403
+    assert admin.post(
+        "/api/v1/auth/users",
+        json={"username": "wg.officer", "password": "office-pw-123", "role": "office"},
+    ).status_code == 201
+    office = TestClient(app)
+    assert office.post(
+        "/api/v1/auth/login", json={"username": "wg.officer", "password": "office-pw-123"}
+    ).status_code == 200
+    assert office.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 403
+
+    # An admin deletes the group; memberships and convener roles go with it.
+    assert admin.post(
+        f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid}
+    ).status_code == 201
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "convener",
+            "working_group_id": wg["id"],
+            "start_date": "2025-01-01",
+        },
+    ).status_code == 201
+    assert admin.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 204
+    assert admin.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 404
+    assert wg["id"] not in [w["id"] for w in admin.get("/api/v1/working-groups").json()]
+    assert member.get(f"/api/v1/people/{pid}").json()["working_groups"] == []
+    assert admin.get(f"/api/v1/collab-roles?person_id={pid}").json() == []
+
 
 def test_member_stats(admin):
     # An active member with a research area and a US affiliation, so every
