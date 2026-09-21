@@ -228,41 +228,25 @@ There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
 
 #### The whole sequence at a glance
 
-Every import command in one copy-pasteable block (all input files go in
-`data/`, mounted read-only in the backend container at `/data`):
+Input files go in `data/` (mounted read-only in the backend container at
+`/data`). To start over first, `./scripts/reset.sh` wipes the database
+(keeping `.env`, backups, TLS certs, and photos) — but re-importing in place
+is also safe: the importers upsert rather than duplicate.
 
 ```bash
-# 0. Optional: wipe the database and start fresh (asks for confirmation,
-#    offers a final backup; keeps .env, backups, TLS certs, and photos).
-#    Skip this to re-import in place — the member importers upsert on
-#    email/ORCID and the talks importer skips exact duplicates, so
-#    re-running on a loaded database updates rows rather than duplicating.
-./scripts/reset.sh
-
-# 1. Working groups (idempotent)
 docker compose exec backend python -m app.cli seed-wgs
-
-# 2. Membership spreadsheet — preview, then run for real
-docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx --dry-run
 docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
-
-# 3. Institution details from ROR (coordinates, short names, draft addresses)
-docker compose exec backend python -m app.cli seed-coordinates --dry-run
 docker compose exec backend python -m app.cli seed-coordinates
-
-# 4. Talks spreadsheet
-docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx --dry-run
 docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
-
-# 5. Photos: Drive links from the spreadsheet, then a bulk-downloaded
-#    data/photos/ folder for the links that weren't shared publicly
-#    (see "Member photos" below)
 docker compose exec backend python -m app.cli import-photos-xlsx /data/USMCC_Membership.xlsx
 docker compose exec backend python -m app.cli import-photos-dir /data/photos
 ```
 
-Then finish in the UI: Institutions page → **"Fill from ROR"** to resolve
-the lookups step 3 couldn't, then review, de-duplicate, and activate the
+(The importers take `--dry-run` to preview; the photo steps are Drive links
+from the spreadsheet, then a bulk-downloaded `data/photos/` folder for links
+that weren't shared publicly — see "Member photos" below.) Then finish in
+the UI: Institutions page → **"Fill from ROR"** to resolve the lookups
+`seed-coordinates` couldn't, then review, de-duplicate, and activate the
 import-created institutions (step 4 above).
 
 ### Member photos
