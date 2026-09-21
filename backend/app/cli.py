@@ -636,7 +636,7 @@ def seed_demo():
             PublicationPerson(
                 publication_id=pub.id,
                 person_id=people[0].id,
-                role=PublicationPersonRole.editor,
+                role=PublicationPersonRole.contact,
             )
         )
         snapshot = build_snapshot(db, date(2026, 7, 1))

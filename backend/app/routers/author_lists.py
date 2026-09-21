@@ -24,7 +24,7 @@ def _can_generate(db, user: User, pub: Publication | None) -> bool:
         select(PublicationPerson.id).where(
             PublicationPerson.publication_id == pub.id,
             PublicationPerson.person_id == user.person_id,
-            PublicationPerson.role == PublicationPersonRole.editor,
+            PublicationPerson.role == PublicationPersonRole.contact,
         )
     ).first()
     return row is not None
@@ -41,7 +41,7 @@ def generate_for_publication(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not _can_generate(db, user, pub):
-        raise HTTPException(403, "Only editors or the office can generate author lists")
+        raise HTTPException(403, "Only contacts or the office can generate author lists")
     cutoff = body.cutoff_date if body else pub.author_cutoff_date
     if cutoff is None:
         raise HTTPException(422, "No cutoff date: set author_cutoff_date or pass one")

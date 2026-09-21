@@ -44,13 +44,13 @@ def _pub_line(pub: Publication) -> str:
     return line
 
 
-def _editor_emails(db, pub: Publication, exclude_person_id: int | None = None) -> list[str]:
+def _contact_emails(db, pub: Publication, exclude_person_id: int | None = None) -> list[str]:
     stmt = (
         select(Person.email)
         .join(PublicationPerson, PublicationPerson.person_id == Person.id)
         .where(
             PublicationPerson.publication_id == pub.id,
-            PublicationPerson.role == PublicationPersonRole.editor,
+            PublicationPerson.role == PublicationPersonRole.contact,
         )
     )
     if exclude_person_id is not None:
@@ -197,8 +197,8 @@ def reviewer_assigned(db, pub: Publication, reviewer: Person, actor: User) -> Me
 def status_changed(
     db, pub: Publication, from_status: str, to_status: str, actor: User
 ) -> Message | None:
-    """Tell a paper's editors (minus the actor) its status moved."""
-    recipients = _editor_emails(db, pub, exclude_person_id=actor.person_id)
+    """Tell a paper's contacts (minus the actor) its status moved."""
+    recipients = _contact_emails(db, pub, exclude_person_id=actor.person_id)
     if not recipients:
         return None
     body = (

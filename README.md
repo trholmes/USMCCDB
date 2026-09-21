@@ -28,12 +28,14 @@ used by the LHC experiments, built as a self-hosted open-source stack:
   slides, and recording, member nominations, office assignment, and
   fair-share statistics per person and institution.
 - **Publications** — paper/proceedings/note/white-paper registry any member
-  can add to (the creator becomes an editor), with a status workflow
-  (in progress → collaboration review → submitted → published). Editors
-  attach the people involved from the directory, request collaboration
+  can add to (the creator becomes the paper's contact), with a status workflow
+  (in progress → collaboration review → submitted → published). Contacts
+  attach the people involved from the directory — singly or as whole
+  institutions/working groups — each with a note on their contribution
+  (written by the person, editable by the contacts), request collaboration
   review when ready (with suggested acknowledgment text crediting USMCC and
-  the assigned reviewers), plus editors/contacts, arXiv/DOI metadata, and
-  auto-assigned `USMCC-XXXX-YYYY-NNN` codes.
+  the assigned reviewers), plus arXiv/DOI metadata and auto-assigned
+  `USMCC-XXXX-YYYY-NNN` codes.
 - **Author lists** — one click builds the alphabetical (accent-aware) author
   list for any cutoff date, either collaboration-wide from members' authorship
   periods and affiliations or from just the people involved in a publication,
@@ -117,7 +119,7 @@ backend at an SMTP server. When configured, the instance sends:
   office too.
 - **Publication workflow** — the office (`CONTACT_EMAIL`) is notified when
   someone requests collaboration review, reviewers are notified when the
-  office assigns them, and a paper's editors are notified of status changes.
+  office assigns them, and a paper's contacts are notified of status changes.
 
 Configuration in `.env` (then re-run `./scripts/start.sh`):
 

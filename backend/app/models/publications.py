@@ -30,9 +30,10 @@ class PublicationStatus(str, enum.Enum):
 
 
 class PublicationPersonRole(str, enum.Enum):
-    editor = "editor"
+    # The contact manages the publication (the creator becomes one). The
+    # earlier editor / analysis_contact roles are folded into contact
+    # (migration 0021).
     contact = "contact"
-    analysis_contact = "analysis_contact"
     contributor = "contributor"
     reviewer = "reviewer"
 
@@ -83,6 +84,9 @@ class PublicationPerson(TimestampedBase):
     role: Mapped[PublicationPersonRole] = mapped_column(
         Enum(PublicationPersonRole, name="pub_person_role"), nullable=False
     )
+    # What this person did on the paper — written by the person themselves,
+    # editable by the publication's contacts (and office).
+    contribution: Mapped[str | None] = mapped_column(Text)
 
     publication = relationship("Publication", back_populates="people")
     person = relationship("Person")

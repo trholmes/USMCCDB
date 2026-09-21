@@ -105,6 +105,14 @@ export default function PersonPage() {
   const [instStage, setInstStage] = useState<string | null>(null) // null = keep current
   const [instBusy, setInstBusy] = useState(false)
 
+  // Secondary affiliation form (issue #3; collapsed behind a button).
+  const [secOpen, setSecOpen] = useState(false)
+  const [secInstId, setSecInstId] = useState<string | null>(null)
+  const [secInstName, setSecInstName] = useState('')
+  const [secInstIsUs, setSecInstIsUs] = useState<string | null>(null)
+  const [secDate, setSecDate] = useState(today())
+  const [secBusy, setSecBusy] = useState(false)
+
   // Status change form (self-service; collapsed behind a button until requested).
   const [statusOpen, setStatusOpen] = useState(false)
   const [newStatus, setNewStatus] = useState<string | null>(null)
@@ -355,6 +363,44 @@ export default function PersonPage() {
       notifications.show({ color: 'red', message: err.message })
     } finally {
       setInstBusy(false)
+    }
+  }
+
+  const closeSecForm = () => {
+    setSecOpen(false)
+    setSecInstId(null)
+    setSecInstName('')
+    setSecInstIsUs(null)
+    setSecDate(today())
+  }
+
+  const addSecondaryAffiliation = async () => {
+    if (!secInstId && !secInstName.trim()) {
+      notifications.show({ color: 'red', message: 'Pick an institution or enter a name' })
+      return
+    }
+    if (!secInstId && !secInstIsUs) {
+      notifications.show({
+        color: 'red',
+        message: 'Please indicate whether the institution is US-based',
+      })
+      return
+    }
+    setSecBusy(true)
+    try {
+      await api.post(`/people/${person.id}/secondary-affiliation`, {
+        institution_id: secInstId ? Number(secInstId) : null,
+        institution_name: secInstId ? null : secInstName.trim(),
+        institution_is_us: secInstId ? null : secInstIsUs === 'us',
+        start_date: secDate,
+      })
+      notifications.show({ message: 'Secondary affiliation added' })
+      closeSecForm()
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setSecBusy(false)
     }
   }
 
@@ -731,6 +777,13 @@ export default function PersonPage() {
                 <b>Institution:</b> {currentPrimary.institution.name}
               </Text>
             )}
+            {person.affiliations
+              .filter((a) => !a.is_primary && a.end_date === null)
+              .map((a) => (
+                <Text size="sm" key={a.id}>
+                  <b>Also at:</b> {a.institution.name}
+                </Text>
+              ))}
             {person.professional_title && (
               <Text size="sm">
                 <b>Professional title:</b> {person.professional_title}
@@ -862,6 +915,71 @@ export default function PersonPage() {
               Change institution…
             </Button>
           )}
+
+          {/* One additional affiliation alongside the primary (issue #3). */}
+          {!person.affiliations.some((a) => !a.is_primary && a.end_date === null) &&
+            (secOpen ? (
+              <Card withBorder w={340}>
+                <Stack gap="sm">
+                  <Title order={5}>Add secondary affiliation</Title>
+                  <Text size="xs" c="dimmed">
+                    An additional affiliation held alongside the primary one — shown on the
+                    profile and in author lists. Contact the office to end or correct it later.
+                  </Text>
+                  <Select
+                    label="Institution"
+                    placeholder="Search institutions…"
+                    searchable
+                    clearable
+                    data={institutions.map((i) => ({
+                      value: String(i.id),
+                      label: i.short_name ? `${i.name} (${i.short_name})` : i.name,
+                    }))}
+                    value={secInstId}
+                    onChange={setSecInstId}
+                  />
+                  {!secInstId && (
+                    <TextInput
+                      label="…or a new institution not in the list"
+                      placeholder="Institution name"
+                      value={secInstName}
+                      onChange={(e) => setSecInstName(e.currentTarget.value)}
+                    />
+                  )}
+                  {!secInstId && secInstName.trim() && (
+                    <Select
+                      label="Is this a US institution?"
+                      description="New institutions are reviewed by the USMCC office."
+                      placeholder="Select…"
+                      data={[
+                        { value: 'us', label: 'US institution' },
+                        { value: 'non-us', label: 'Non-US institution' },
+                      ]}
+                      value={secInstIsUs}
+                      onChange={setSecInstIsUs}
+                    />
+                  )}
+                  <TextInput
+                    label="Since"
+                    type="date"
+                    value={secDate}
+                    onChange={(e) => setSecDate(e.currentTarget.value)}
+                  />
+                  <Group>
+                    <Button onClick={addSecondaryAffiliation} loading={secBusy}>
+                      Add affiliation
+                    </Button>
+                    <Button variant="subtle" onClick={closeSecForm}>
+                      Cancel
+                    </Button>
+                  </Group>
+                </Stack>
+              </Card>
+            ) : (
+              <Button variant="default" onClick={() => setSecOpen(true)}>
+                Add secondary affiliation…
+              </Button>
+            ))}
 
           {statusOpen ? (
             <Card withBorder w={340}>

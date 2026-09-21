@@ -416,6 +416,85 @@ def test_member_self_institution_move_keeps_history(admin):
     assert all(x["institution"]["id"] != b["id"] for x in person["affiliations"])
 
 
+def test_secondary_affiliation(admin):
+    """One additional, non-primary affiliation alongside the primary (issue #3):
+    members add it for themselves, it shows in author lists next to the
+    primary, and at most one may be open at a time."""
+    member, pid = _linked_member(
+        admin, given="Dua", family="Places", email="dua.places@example.edu"
+    )
+    a = admin.post("/api/v1/institutions", json={"name": "Home University"}).json()
+    b = admin.post("/api/v1/institutions", json={"name": "Second Lab"}).json()
+    c = admin.post("/api/v1/institutions", json={"name": "Third Center"}).json()
+    assert member.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": a["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
+
+    r = member.post(
+        f"/api/v1/people/{pid}/secondary-affiliation",
+        json={"institution_id": b["id"], "start_date": "2025-06-01"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["is_primary"] is False
+    person = member.get(f"/api/v1/people/{pid}").json()
+    open_affils = [x for x in person["affiliations"] if x["end_date"] is None]
+    assert {(x["institution"]["id"], x["is_primary"]) for x in open_affils} == {
+        (a["id"], True),
+        (b["id"], False),
+    }
+
+    # The primary institution is refused, and only one secondary may be open.
+    assert member.post(
+        f"/api/v1/people/{pid}/secondary-affiliation",
+        json={"institution_id": a["id"], "start_date": "2025-07-01"},
+    ).status_code == 400
+    assert member.post(
+        f"/api/v1/people/{pid}/secondary-affiliation",
+        json={"institution_id": c["id"], "start_date": "2025-07-01"},
+    ).status_code == 409
+
+    # No cross-profile adds; future dates are rejected.
+    other = admin.get("/api/v1/people").json()[0]["id"]
+    if other != pid:
+        assert member.post(
+            f"/api/v1/people/{other}/secondary-affiliation",
+            json={"institution_id": b["id"], "start_date": "2025-06-01"},
+        ).status_code == 403
+    assert member.post(
+        f"/api/v1/people/{pid}/secondary-affiliation",
+        json={"institution_id": c["id"], "start_date": "2199-01-01"},
+    ).status_code == 422
+
+    # Author lists carry both institutions, primary first.
+    for inst_id in (a["id"], b["id"]):
+        admin.patch(f"/api/v1/institutions/{inst_id}", json={"latex_address": "addr"})
+    admin.post(f"/api/v1/people/{pid}/author-periods", json={"start_date": "2025-01-01"})
+    snap = admin.post(
+        "/api/v1/author-lists/preview", json={"cutoff_date": "2025-12-01"}
+    ).json()
+    row = next(x for x in snap["authors"] if x["person_id"] == pid)
+    assert row["institution_ids"] == [a["id"], b["id"]]
+
+    # The office ends the secondary through the normal affiliation endpoints;
+    # after that, a new one may be added — free text creates a review-pending
+    # institution (same as a primary move).
+    sec_id = next(x["id"] for x in open_affils if not x["is_primary"])
+    assert admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{sec_id}", json={"end_date": "2026-01-01"}
+    ).status_code == 200
+    r = member.post(
+        f"/api/v1/people/{pid}/secondary-affiliation",
+        json={
+            "institution_name": "Brand New Center",
+            "institution_is_us": True,
+            "start_date": "2026-02-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["institution"]["name"] == "Brand New Center"
+
+
 def test_institution_history_records_career_stage(admin):
     member, pid = _linked_member(
         admin, given="Cara", family="Stage", email="cara.stage@example.edu", career_stage="grad"
@@ -1567,8 +1646,8 @@ def test_member_publication_flow(admin, monkeypatch):
     assert r.status_code == 201, r.text
     pub = r.json()
     assert pub["status"] == "in_progress"
-    # The creator is automatically an editor…
-    assert [(pp["person"]["id"], pp["role"]) for pp in pub["people"]] == [(editor_pid, "editor")]
+    # The creator is automatically a contact…
+    assert [(pp["person"]["id"], pp["role"]) for pp in pub["people"]] == [(editor_pid, "contact")]
 
     # …and may edit the record and attach involved people from the directory.
     assert editor.patch(
@@ -1576,9 +1655,32 @@ def test_member_publication_flow(admin, monkeypatch):
     ).status_code == 200
     r = editor.post(
         f"/api/v1/publications/{pub['id']}/people",
-        json={"person_id": friend_pid, "role": "contributor"},
+        json={"person_id": friend_pid, "role": "contributor", "contribution": "Detector plots"},
     )
     assert r.status_code == 201, r.text
+    pp_friend = r.json()
+    assert pp_friend["contribution"] == "Detector plots"
+
+    # Contributions: the person edits their own, contacts can edit anyone's,
+    # an uninvolved member cannot.
+    r = friend.patch(
+        f"/api/v1/publications/{pub['id']}/people/{pp_friend['id']}",
+        json={"contribution": "Detector plots and simulation"},
+    )
+    assert r.status_code == 200 and r.json()["contribution"] == "Detector plots and simulation"
+    r = editor.patch(
+        f"/api/v1/publications/{pub['id']}/people/{pp_friend['id']}",
+        json={"contribution": "Detector plots, simulation, and validation"},
+    )
+    assert r.status_code == 200
+    outsider, _out_pid = _linked_member(
+        admin, given="Uma", family="Uninvolved", email="uma.uninvolved@example.edu"
+    )
+    assert outsider.patch(
+        f"/api/v1/publications/{pub['id']}/people/{pp_friend['id']}",
+        json={"contribution": "vandalism"},
+    ).status_code == 403
+
     # Reviewers stay office-assigned.
     assert editor.post(
         f"/api/v1/publications/{pub['id']}/people",
@@ -1591,7 +1693,7 @@ def test_member_publication_flow(admin, monkeypatch):
     ).status_code == 403
     assert friend.post(
         f"/api/v1/publications/{pub['id']}/people",
-        json={"person_id": friend_pid, "role": "editor"},
+        json={"person_id": friend_pid, "role": "contact"},
     ).status_code == 403
 
     # Author list from just the involved people (no author periods needed).
@@ -1610,7 +1712,7 @@ def test_member_publication_flow(admin, monkeypatch):
     assert friend.post(
         f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
     ).status_code == 403
-    # …but an editor may request collaboration review, which emails the office.
+    # …but a contact may request collaboration review, which emails the office.
     sent.clear()
     r = editor.post(
         f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
@@ -1650,7 +1752,7 @@ def test_member_publication_flow(admin, monkeypatch):
     assert ack["reviewers"] == ["Rae Reviewer"]
     assert "Rae Reviewer" in ack["text"]
 
-    # Office status changes notify the paper's editors.
+    # Office status changes notify the paper's contacts.
     sent.clear()
     r = admin.post(f"/api/v1/publications/{pub['id']}/status", json={"status": "submitted"})
     assert r.status_code == 200, r.text
@@ -3151,7 +3253,7 @@ def test_bulk_add_publication_people(admin):
     )
     assert r.status_code == 404
 
-    # A member who is neither editor, convener, nor office cannot bulk-add…
+    # A member who is neither contact, convener, nor office cannot bulk-add…
     member, mid = _linked_member(
         admin, given="Nadia", family="Nonauthor", email="nadia.nonauthor@example.edu"
     )
@@ -3160,10 +3262,10 @@ def test_bulk_add_publication_people(admin):
         json={"person_ids": [mid], "role": "contributor"},
     )
     assert r.status_code == 403
-    # …and even an editor cannot bulk-assign reviewers (office only).
+    # …and even a contact cannot bulk-assign reviewers (office only).
     admin.post(
         f"/api/v1/publications/{pub['id']}/people",
-        json={"person_id": mid, "role": "editor"},
+        json={"person_id": mid, "role": "contact"},
     )
     r = member.post(
         f"/api/v1/publications/{pub['id']}/people/bulk",
