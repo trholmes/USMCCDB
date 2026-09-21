@@ -1,12 +1,14 @@
-import { Anchor, Badge, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
+import { Anchor, Badge, Button, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { CollabRole, Institution, PersonSummary } from '../api/types'
+import InstitutionEditModal from '../components/InstitutionEditModal'
 import PersonAvatar from '../components/PersonAvatar'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { collabRoleLabel } from '../constants'
 import { today } from '../dates'
+import { useSession } from '../auth/SessionContext'
 
 const ACCESSORS: Accessors<PersonSummary> = {
   name: (p) => `${p.family_name} ${p.given_name}`,
@@ -20,6 +22,8 @@ export default function InstitutionDetailPage() {
   const [inst, setInst] = useState<Institution | null>(null)
   const [members, setMembers] = useState<PersonSummary[]>([])
   const [roles, setRoles] = useState<CollabRole[]>([])
+  const [editing, setEditing] = useState(false)
+  const { isOffice } = useSession()
   const navigate = useNavigate()
   const { sorted, sort, toggle } = useSortable(members, ACCESSORS)
 
@@ -45,23 +49,30 @@ export default function InstitutionDetailPage() {
 
   return (
     <Stack>
-      <div>
-        <Title order={3}>{inst.name}</Title>
-        <Group gap="xs" mt={4}>
-          {inst.short_name && <Badge variant="light">{inst.short_name}</Badge>}
+      <Group justify="space-between" align="flex-start">
+        <div>
+          <Title order={3}>{inst.name}</Title>
+          <Group gap="xs" mt={4}>
+            {inst.short_name && <Badge variant="light">{inst.short_name}</Badge>}
           {inst.country && (
             <Text size="sm" c="dimmed">
               {inst.country}
             </Text>
           )}
-          {!inst.is_us && (
-            <Badge color="gray" variant="light" title="People currently here are not eligible for voting membership">
-              non-US
-            </Badge>
-          )}
-          {!inst.is_active && <Badge color="gray">inactive</Badge>}
-        </Group>
-      </div>
+            {!inst.is_us && (
+              <Badge color="gray" variant="light" title="People currently here are not eligible for voting membership">
+                non-US
+              </Badge>
+            )}
+            {!inst.is_active && (
+              <Badge color="gray" title="Created by an import or registration and awaiting office review; hidden from the registration form's institution list">
+                inactive
+              </Badge>
+            )}
+          </Group>
+        </div>
+        {isOffice && <Button variant="light" onClick={() => setEditing(true)}>Edit</Button>}
+      </Group>
 
       {currentRoles.length > 0 && (
         <Card withBorder maw={720}>
@@ -128,9 +139,11 @@ export default function InstitutionDetailPage() {
           ))}
         </Table.Tbody>
       </Table>
-      <Text size="sm" c="dimmed">
-        Manage institution details in <Link to="/institutions">Institutions</Link> (office).
-      </Text>
+      <InstitutionEditModal
+        target={editing ? inst : null}
+        onClose={() => setEditing(false)}
+        onSaved={load}
+      />
     </Stack>
   )
 }

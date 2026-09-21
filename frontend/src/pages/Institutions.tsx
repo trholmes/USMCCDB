@@ -1,21 +1,19 @@
 import {
   Badge,
   Button,
-  Checkbox,
   Group,
-  Modal,
   SegmentedControl,
-  Stack,
   Table,
   TextInput,
   Title,
 } from '@mantine/core'
-import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Institution } from '../api/types'
+import InstitutionEditModal from '../components/InstitutionEditModal'
 import InstitutionMap from '../components/InstitutionMap'
+import RorFillModal from '../components/RorFillModal'
 import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
@@ -31,16 +29,7 @@ const ACCESSORS: Accessors<Institution> = {
 export default function InstitutionsPage() {
   const [rows, setRows] = useState<Institution[]>([])
   const [modal, setModal] = useState<Institution | 'new' | null>(null)
-  const emptyForm = {
-    name: '',
-    short_name: '',
-    ror_id: '',
-    latex_address: '',
-    is_us: true,
-    latitude: '',
-    longitude: '',
-  }
-  const [form, setForm] = useState(emptyForm)
+  const [fillOpen, setFillOpen] = useState(false)
   const [q, setQ] = useState('')
   const [view, setView] = useState<'list' | 'map'>('list')
   const { isOffice } = useSession()
@@ -63,119 +52,6 @@ export default function InstitutionsPage() {
   }, [])
   useEffect(load, [load])
 
-  const open = (target: Institution | 'new') => {
-    setForm(
-      target === 'new'
-        ? emptyForm
-        : {
-            name: target.name,
-            short_name: target.short_name ?? '',
-            ror_id: target.ror_id ?? '',
-            latex_address: target.latex_address ?? '',
-            is_us: target.is_us,
-            latitude: target.latitude != null ? String(target.latitude) : '',
-            longitude: target.longitude != null ? String(target.longitude) : '',
-          },
-    )
-    setModal(target)
-  }
-
-  // Copy the ROR id and coordinates out of a ROR v2 record into the form.
-  const applyRorRecord = (rec: any) => {
-    const geo = rec.locations?.[0]?.geonames_details
-    if (geo?.lat == null || geo?.lng == null) throw new Error('ROR record has no coordinates')
-    const id = String(rec.id).match(/(0[a-z0-9]{8})$/)?.[1]
-    setForm((f) => ({
-      ...f,
-      ror_id: id ?? f.ror_id,
-      latitude: String(geo.lat),
-      longitude: String(geo.lng),
-    }))
-  }
-
-  // Pull coordinates from the public ROR record (issue #112) — fetched by the
-  // browser, so an air-gapped backend still works; entering them by hand does too.
-  const fetchRorCoordinates = async () => {
-    const m = form.ror_id.trim().toLowerCase().match(/(0[a-z0-9]{8})$/)
-    if (!m) {
-      notifications.show({ color: 'red', message: 'Enter a ROR id first' })
-      return
-    }
-    try {
-      const resp = await fetch(`https://api.ror.org/v2/organizations/${m[1]}`)
-      if (!resp.ok) throw new Error(`ROR lookup failed (${resp.status})`)
-      applyRorRecord(await resp.json())
-    } catch (err: any) {
-      notifications.show({ color: 'red', message: err.message })
-    }
-  }
-
-  // Search ROR by institution name and, after the user confirms the best
-  // match, fill in the ROR id and coordinates from it.
-  const lookupRorByName = async () => {
-    const name = form.name.trim()
-    if (!name) {
-      notifications.show({ color: 'red', message: 'Enter the institution name first' })
-      return
-    }
-    try {
-      const resp = await fetch(
-        `https://api.ror.org/v2/organizations?query=${encodeURIComponent(name)}`,
-      )
-      if (!resp.ok) throw new Error(`ROR search failed (${resp.status})`)
-      const rec = (await resp.json()).items?.[0]
-      if (!rec) throw new Error(`No ROR match for “${name}”`)
-      const recName =
-        rec.names?.find((n: any) => n.types?.includes('ror_display'))?.value ??
-        rec.names?.[0]?.value ??
-        '(unnamed)'
-      const country = rec.locations?.[0]?.geonames_details?.country_name
-      if (
-        !window.confirm(
-          `Best ROR match for “${name}”:\n\n${recName}${country ? `, ${country}` : ''}\n${rec.id}\n\nUse it?`,
-        )
-      )
-        return
-      applyRorRecord(rec)
-    } catch (err: any) {
-      notifications.show({ color: 'red', message: err.message })
-    }
-  }
-
-  const save = async (allowSimilar = false) => {
-    const body = {
-      name: form.name,
-      short_name: form.short_name || null,
-      ror_id: form.ror_id || null,
-      latex_address: form.latex_address || null,
-      is_us: form.is_us,
-      latitude: form.latitude.trim() === '' ? null : Number(form.latitude),
-      longitude: form.longitude.trim() === '' ? null : Number(form.longitude),
-    }
-    if (Number.isNaN(body.latitude) || Number.isNaN(body.longitude)) {
-      notifications.show({ color: 'red', message: 'Coordinates must be decimal numbers' })
-      return
-    }
-    try {
-      if (modal === 'new') await api.post('/institutions', { ...body, allow_similar: allowSimilar })
-      else if (modal) await api.patch(`/institutions/${modal.id}`, body)
-      setModal(null)
-      load()
-    } catch (err: any) {
-      // The backend flags likely duplicates (normalized-name match) with a
-      // 409; the office can confirm it really is a distinct institution.
-      if (
-        modal === 'new' &&
-        err.status === 409 &&
-        String(err.message).includes('Similar institution') &&
-        window.confirm(`${err.message.split(' — ')[0]}.\n\nCreate it anyway?`)
-      ) {
-        return save(true)
-      }
-      notifications.show({ color: 'red', message: err.message })
-    }
-  }
-
   return (
     <>
       <Group justify="space-between" mb="md">
@@ -196,7 +72,12 @@ export default function InstitutionsPage() {
             onChange={(e) => setQ(e.currentTarget.value)}
             w={220}
           />
-          {isOffice && <Button onClick={() => open('new')}>Add institution</Button>}
+          {isOffice && (
+            <Button variant="light" onClick={() => setFillOpen(true)}>
+              Fill from ROR
+            </Button>
+          )}
+          {isOffice && <Button onClick={() => setModal('new')}>Add institution</Button>}
         </Group>
       </Group>
       {view === 'map' && <InstitutionMap institutions={filtered} />}
@@ -234,7 +115,7 @@ export default function InstitutionsPage() {
               <Table.Td>{i.people_count}</Table.Td>
               <Table.Td onClick={(e) => e.stopPropagation()}>
                 {isOffice && (
-                  <Button size="compact-xs" variant="subtle" onClick={() => open(i)}>
+                  <Button size="compact-xs" variant="subtle" onClick={() => setModal(i)}>
                     Edit
                   </Button>
                 )}
@@ -247,68 +128,17 @@ export default function InstitutionsPage() {
         </>
       )}
 
-      <Modal
-        opened={modal !== null}
-        onClose={() => setModal(null)}
-        title={modal === 'new' ? 'Add institution' : 'Edit institution'}
-      >
-        <Stack gap="sm">
-          <TextInput
-            label="Full name"
-            required
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.currentTarget.value })}
-          />
-          <TextInput
-            label="Short name"
-            value={form.short_name}
-            onChange={(e) => setForm({ ...form, short_name: e.currentTarget.value })}
-          />
-          <Group align="flex-end" gap="xs">
-            <TextInput
-              label="ROR id"
-              description="Stable identifier from ror.org, e.g. 05gvnxz63 — used to detect duplicates."
-              placeholder="05gvnxz63"
-              value={form.ror_id}
-              onChange={(e) => setForm({ ...form, ror_id: e.currentTarget.value })}
-              style={{ flex: 1 }}
-            />
-            <Button variant="light" onClick={lookupRorByName} disabled={!form.name.trim()}>
-              Look up by name
-            </Button>
-          </Group>
-          <TextInput
-            label="Author-list address (as printed on papers)"
-            value={form.latex_address}
-            onChange={(e) => setForm({ ...form, latex_address: e.currentTarget.value })}
-          />
-          <Group grow align="flex-end">
-            <TextInput
-              label="Latitude"
-              description="For the institutions map."
-              placeholder="41.789"
-              value={form.latitude}
-              onChange={(e) => setForm({ ...form, latitude: e.currentTarget.value })}
-            />
-            <TextInput
-              label="Longitude"
-              placeholder="-87.599"
-              value={form.longitude}
-              onChange={(e) => setForm({ ...form, longitude: e.currentTarget.value })}
-            />
-            <Button variant="light" onClick={fetchRorCoordinates} disabled={!form.ror_id.trim()}>
-              Fetch from ROR
-            </Button>
-          </Group>
-          <Checkbox
-            label="US institution"
-            description="Only people currently at a US institution are eligible to vote; unchecking this clears the voting flag of everyone currently here."
-            checked={form.is_us}
-            onChange={(e) => setForm({ ...form, is_us: e.currentTarget.checked })}
-          />
-          <Button onClick={() => save()}>Save</Button>
-        </Stack>
-      </Modal>
+      <InstitutionEditModal target={modal} onClose={() => setModal(null)} onSaved={load} />
+      <RorFillModal
+        opened={fillOpen}
+        onClose={() => setFillOpen(false)}
+        institutions={rows}
+        onChanged={load}
+        onEdit={(inst) => {
+          setFillOpen(false)
+          setModal(inst)
+        }}
+      />
     </>
   )
 }

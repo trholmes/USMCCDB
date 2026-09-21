@@ -3592,3 +3592,25 @@ def test_multiple_grant_numbers(admin):
     many = ", ".join(f"DE-SC00{i:05d}" for i in range(20))
     assert len(many) < 500
     assert member.patch(f"/api/v1/people/{pid}", json={"grant_number": many}).status_code == 200
+
+
+def test_institution_short_name_conflict(admin):
+    a = admin.post(
+        "/api/v1/institutions", json={"name": "Conflict U One", "short_name": "CU-A"}
+    ).json()
+    # Duplicate short_name on create is a 409.
+    r = admin.post("/api/v1/institutions", json={"name": "Conflict U Two", "short_name": "CU-A"})
+    assert r.status_code == 409
+    b = admin.post(
+        "/api/v1/institutions", json={"name": "Conflict U Two", "short_name": "CU-B"}
+    ).json()
+    # PATCHing onto a taken short_name must 409 too, not hit the unique
+    # constraint (500) — the ROR auto-fill relies on this being catchable.
+    r = admin.patch(f"/api/v1/institutions/{b['id']}", json={"short_name": "CU-A"})
+    assert r.status_code == 409
+    assert "Conflict U One" in r.json()["detail"]
+    # Re-saving a row's own short_name stays fine.
+    assert (
+        admin.patch(f"/api/v1/institutions/{a['id']}", json={"short_name": "CU-A"}).status_code
+        == 200
+    )
