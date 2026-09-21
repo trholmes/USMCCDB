@@ -106,7 +106,6 @@ Permissions: FastAPI dependencies `require_role()`, `require_self_or(office)`, `
 
 - `create-admin` (idempotent; also env-var bootstrap at startup when users table empty)
 - `import-members members.csv` — upsert on email; creates institutions/affiliations/author_periods; `--dry-run`
-- `seed-wgs` initial working groups
 - `seed-coordinates` — fill missing institution details (coordinates, short name, author-list address, ROR id) from ror.org; `--dry-run`. The Institutions page's "Fill from ROR" does the same from the browser, with interactive review of ambiguous matches.
 
 ### Backend layout

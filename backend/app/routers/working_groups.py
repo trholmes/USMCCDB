@@ -15,7 +15,7 @@ from app.schemas.membership import (
     WorkingGroupOut,
     WorkingGroupUpdate,
 )
-from app.security import get_current_user, is_convener_of, is_office, require_office
+from app.security import get_current_user, is_convener_of, is_office, require_admin, require_office
 
 router = APIRouter(tags=["membership"])
 
@@ -62,6 +62,18 @@ def update_wg(wg_id: int, body: WorkingGroupUpdate, db: Session = Depends(get_db
     db.commit()
     db.refresh(wg)
     return _wg_out(db, wg)
+
+
+@router.delete("/working-groups/{wg_id}", dependencies=[Depends(require_admin)], status_code=204)
+def delete_wg(wg_id: int, db: Session = Depends(get_db)) -> None:
+    """Remove a working group entirely. Memberships and convener roles go with
+    it (FK cascade); talks and publications tagged with it keep the row but
+    lose the tag (SET NULL)."""
+    wg = db.get(WorkingGroup, wg_id)
+    if wg is None:
+        raise HTTPException(404, "Working group not found")
+    db.delete(wg)
+    db.commit()
 
 
 @router.get("/working-groups/{wg_id}/members")

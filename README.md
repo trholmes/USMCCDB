@@ -147,16 +147,12 @@ workflow still functions; nothing else in the app depends on it.
 
 ### Initializing a new instance from the existing spreadsheets
 
-A fresh database contains nothing but the bootstrap admin account. To go
-from there to a fully populated instance:
+A fresh database contains nothing but the bootstrap admin account. Working
+groups are created and managed in the UI (Working Groups page, office/admin;
+admins can also delete a group there). To go from there to a fully populated
+instance:
 
-1. **Seed the working groups** (idempotent):
-
-   ```bash
-   docker compose exec backend python -m app.cli seed-wgs
-   ```
-
-2. **Import the membership spreadsheet.** Drop the exports in `data/`
+1. **Import the membership spreadsheet.** Drop the exports in `data/`
    (gitignored — never commit member data), preview with `--dry-run`, then
    run for real:
 
@@ -173,7 +169,7 @@ from there to a fully populated instance:
    they have a name but no short name, ROR id, author-list address, or
    coordinates yet. The next two steps fill those in.
 
-3. **Fill missing institution details from [ROR](https://ror.org)** —
+2. **Fill missing institution details from [ROR](https://ror.org)** —
    coordinates (without which the map view starts empty), short names
    ("Cornell" for universities, the ROR acronym for labs), and draft
    author-list addresses:
@@ -192,9 +188,9 @@ from there to a fully populated instance:
    registrations) is safe. The office can run the same fill from the
    browser instead: **"Fill from ROR"** on the Institutions page does the
    identical lookups and, for the ambiguous cases, shows ROR's candidates
-   to pick from (see step 4).
+   to pick from (see step 3).
 
-4. **Review the imported institutions** on the Institutions page: the
+3. **Review the imported institutions** on the Institutions page: the
    **"Fill from ROR"** button re-checks everything still missing a short
    name, author-list address, or coordinates, applies the unambiguous
    matches, and lists the rest with ROR's candidate matches so you can pick
@@ -208,7 +204,7 @@ from there to a fully populated instance:
    own detail page, and the edit form's ROR buttons fill blank fields for
    one-off fixes.
 
-5. **Import the talks spreadsheet:**
+4. **Import the talks spreadsheet:**
 
    ```bash
    docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
@@ -217,9 +213,9 @@ from there to a fully populated instance:
    Also accepts `--dry-run`. It creates conferences, matches speakers by
    name, and keeps unmatched names in the talk notes.
 
-6. **Import member photos** — see [Member photos](#member-photos) below.
+5. **Import member photos** — see [Member photos](#member-photos) below.
 
-7. **Enable ORCID sign-in** (see above) — members whose ORCID iD came in
+6. **Enable ORCID sign-in** (see above) — members whose ORCID iD came in
    with the spreadsheet are linked to their record automatically on first
    sign-in.
 
@@ -234,7 +230,6 @@ Input files go in `data/` (mounted read-only in the backend container at
 is also safe: the importers upsert rather than duplicate.
 
 ```bash
-docker compose exec backend python -m app.cli seed-wgs
 docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
 docker compose exec backend python -m app.cli seed-coordinates
 docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
@@ -247,7 +242,7 @@ from the spreadsheet, then a bulk-downloaded `data/photos/` folder for links
 that weren't shared publicly — see "Member photos" below.) Then finish in
 the UI: Institutions page → **"Fill from ROR"** to resolve the lookups
 `seed-coordinates` couldn't, then review, de-duplicate, and activate the
-import-created institutions (step 4 above).
+import-created institutions (step 3 above).
 
 ### Member photos
 
@@ -285,7 +280,7 @@ The Institutions page has a **List/Map toggle**; the map shows every
 institution with coordinates as a circle sized by its current member count.
 Nothing needs configuring — but institutions only appear once they have
 coordinates. The `seed-coordinates` CLI command fills them all at once from
-[ROR](https://ror.org) (step 3 of the
+[ROR](https://ror.org) (step 2 of the
 [initialization walkthrough](#initializing-a-new-instance-from-the-existing-spreadsheets));
 the office fills in stragglers in each institution's edit form, either by
 hand or with the **"Fetch from ROR"** button (uses the institution's ROR id;

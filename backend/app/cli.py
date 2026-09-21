@@ -2,7 +2,6 @@
 
     python -m app.cli create-admin --username chair
     python -m app.cli import-members members.csv [--dry-run]
-    python -m app.cli seed-wgs
 
 CSV columns (header required):
     given_name, family_name, email, orcid, institution_short_name,
@@ -38,13 +37,6 @@ from app.services.photos import InvalidImageError
 
 cli = typer.Typer(help="USMCC database management commands")
 
-DEFAULT_WGS = [
-    ("Accelerator", "accelerator"),
-    ("Detector", "detector"),
-    ("Physics", "physics"),
-    ("Community Engagement", "community"),
-]
-
 
 @cli.command()
 def create_admin(
@@ -63,21 +55,6 @@ def create_admin(
             typer.echo(f"Updating existing user '{username}' (now admin, password reset)")
         user.password_hash = hash_password(password)
         user.is_active = True
-        db.commit()
-    typer.echo("Done.")
-
-
-@cli.command()
-def seed_wgs():
-    """Insert the initial USMCC working groups (idempotent)."""
-    with SessionLocal() as db:
-        for name, slug in DEFAULT_WGS:
-            if db.execute(
-                select(WorkingGroup).where(WorkingGroup.slug == slug)
-            ).scalar_one_or_none():
-                continue
-            db.add(WorkingGroup(name=name, slug=slug))
-            typer.echo(f"Added working group: {name}")
         db.commit()
     typer.echo("Done.")
 
@@ -545,7 +522,12 @@ def seed_demo():
                 db.add(AuthorPeriod(person_id=person.id, start_date=date(2024, 6, 1)))
             people.append(person)
 
-        for name, slug in DEFAULT_WGS:
+        for name, slug in [
+            ("Accelerator", "accelerator"),
+            ("Detector", "detector"),
+            ("Physics", "physics"),
+            ("Community Engagement", "community"),
+        ]:
             if not db.execute(
                 select(WorkingGroup).where(WorkingGroup.slug == slug)
             ).scalar_one_or_none():
