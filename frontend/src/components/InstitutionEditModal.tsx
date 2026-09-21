@@ -51,14 +51,27 @@ export default function InstitutionEditModal({
   // Copy a parsed ROR record into the form: ROR id and coordinates always
   // (that's what the buttons promise), short name and author-list address
   // only into blank fields — never over something the office already wrote.
+  // The US checkbox follows ROR's country (still editable before saving).
+  // When ROR's canonical name differs from the stored one (free-text
+  // registrations produce names like "UT Knoxville"), offer — never force —
+  // renaming to match.
   const applyRor = (p: RorParsed) => {
+    const rorName = p.name !== '(unnamed)' ? p.name : null
+    const rename =
+      rorName != null &&
+      rorName.trim().toLowerCase() !== form.name.trim().toLowerCase() &&
+      window.confirm(
+        `ROR names this institution:\n\n${rorName}\n\nUpdate the name to match?\n(Currently “${form.name}”; everything else is filled either way.)`,
+      )
     setForm((f) => ({
       ...f,
+      name: rename && rorName ? rorName : f.name,
       ror_id: p.rorId ?? f.ror_id,
       latitude: p.latitude != null ? String(p.latitude) : f.latitude,
       longitude: p.longitude != null ? String(p.longitude) : f.longitude,
       short_name: f.short_name.trim() ? f.short_name : (p.shortName ?? ''),
       latex_address: f.latex_address.trim() ? f.latex_address : (p.address ?? ''),
+      is_us: p.isUS ?? f.is_us,
     }))
     const extras = [
       p.latitude == null && 'no coordinates on the ROR record',

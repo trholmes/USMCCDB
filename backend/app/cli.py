@@ -266,7 +266,7 @@ def seed_coordinates(
 
     from app.services import ror
 
-    coords_filled = names_filled = addresses_filled = matched = unresolved = 0
+    coords_filled = names_filled = addresses_filled = non_us_tagged = matched = unresolved = 0
     problems: list[str] = []
     with SessionLocal() as db, httpx.Client(
         timeout=30, headers={"User-Agent": ror.USER_AGENT}
@@ -312,6 +312,7 @@ def seed_coordinates(
                     coords = ror.parse_coordinates(record)
                     short = ror.parse_short_name(record)
                     address = ror.parse_address(record)
+                    country_code, country_name = ror.parse_country(record)
                 elif match_missing:
                     match = ror.fetch_affiliation_match(client, inst.latex_address or inst.name)
                     if match is None:
@@ -337,6 +338,7 @@ def seed_coordinates(
                         else None
                     )
                     short, address = match.short_name, match.address
+                    country_code, country_name = match.country_code, match.country_name
                 else:
                     problems.append(f"{label}: no ROR id")
                     unresolved += 1
@@ -365,6 +367,37 @@ def seed_coordinates(
                     inst.latex_address = address
                     addresses_filled += 1
                     filled.append(f"address '{address}'")
+                # Import-created rows default to US; when ROR places the
+                # institution abroad, mark it non-US and clear the voting
+                # flags of everyone currently there (the same consequence
+                # the PATCH endpoint applies) — voting membership requires
+                # a US institution. Never flips non-US back to US: that
+                # stays an office decision.
+                if inst.is_us and country_code and country_code != "US":
+                    inst.is_us = False
+                    if country_name:
+                        inst.country = country_name
+                    cleared = (
+                        db.execute(
+                            select(Person)
+                            .join(Affiliation, Affiliation.person_id == Person.id)
+                            .where(
+                                Affiliation.institution_id == inst.id,
+                                Affiliation.is_primary.is_(True),
+                                Affiliation.end_date.is_(None),
+                                Person.is_voting.is_(True),
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    for person in cleared:
+                        person.is_voting = False
+                    non_us_tagged += 1
+                    filled.append(
+                        f"marked non-US ({country_name or country_code})"
+                        + (f", cleared {len(cleared)} voting flag(s)" if cleared else "")
+                    )
                 if filled:
                     typer.echo(f"{label}: {'; '.join(filled)} ({source})")
             except httpx.HTTPError as exc:
@@ -372,7 +405,7 @@ def seed_coordinates(
                 unresolved += 1
         summary = (
             f"{coords_filled} coordinate(s), {names_filled} short name(s), "
-            f"{addresses_filled} author-list address(es) "
+            f"{addresses_filled} author-list address(es), {non_us_tagged} marked non-US "
             f"({matched} via a newly matched ROR id); {unresolved} unresolved"
         )
         if dry_run:

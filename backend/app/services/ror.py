@@ -24,6 +24,8 @@ class RorMatch:
     longitude: float | None
     short_name: str | None = None  # candidate short_name (see parse_short_name)
     address: str | None = None  # draft author-list (latex) address
+    country_code: str | None = None  # ISO code from the first location, e.g. "US"
+    country_name: str | None = None
 
 
 def parse_coordinates(record: dict) -> tuple[float, float] | None:
@@ -97,6 +99,13 @@ def parse_address(record: dict) -> str | None:
     return ", ".join(parts)
 
 
+def parse_country(record: dict) -> tuple[str | None, str | None]:
+    """(ISO country code, country name) of the record's first location."""
+    locations = record.get("locations") or [{}]
+    geo = locations[0].get("geonames_details") or {}
+    return geo.get("country_code"), geo.get("country_name")
+
+
 def _bare_id(record: dict) -> str:
     # v2 record ids are full URLs like https://ror.org/05gvnxz63
     return str(record.get("id", "")).rstrip("/").rsplit("/", 1)[-1]
@@ -119,6 +128,7 @@ def parse_affiliation_match(payload: dict) -> RorMatch | None:
         if item.get("chosen"):
             org = item.get("organization") or {}
             coords = parse_coordinates(org)
+            country_code, country_name = parse_country(org)
             return RorMatch(
                 ror_id=_bare_id(org),
                 name=_display_name(org) or _bare_id(org),
@@ -126,6 +136,8 @@ def parse_affiliation_match(payload: dict) -> RorMatch | None:
                 longitude=coords[1] if coords else None,
                 short_name=parse_short_name(org),
                 address=parse_address(org),
+                country_code=country_code,
+                country_name=country_name,
             )
     return None
 

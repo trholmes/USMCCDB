@@ -76,6 +76,14 @@ export default function RorFillModal({
       patch.latitude = p.latitude
       patch.longitude = p.longitude
     }
+    // Import-created rows default to US; when ROR places the institution
+    // abroad, mark it non-US (the backend then clears the voting flags of
+    // everyone currently there). Never flips non-US back to US — that stays
+    // an office decision.
+    if (inst.is_us && p.isUS === false) {
+      patch.is_us = false
+      if (p.countryName) patch.country = p.countryName
+    }
     return { patch, skipped }
   }
 
@@ -187,6 +195,7 @@ export default function RorFillModal({
     if (patch.latex_address) bits.push(`address '${patch.latex_address}'`)
     if (patch.latitude != null) bits.push('coordinates')
     if (patch.ror_id) bits.push(`ROR id ${patch.ror_id}`)
+    if (patch.is_us === false) bits.push(`marks non-US (${patch.country ?? 'abroad'})`)
     return bits.length ? `fills ${bits.join(', ')}` : 'nothing left to fill'
   }
 

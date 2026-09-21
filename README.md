@@ -171,8 +171,11 @@ instance:
 
 2. **Fill missing institution details from [ROR](https://ror.org)** —
    coordinates (without which the map view starts empty), short names
-   ("Cornell" for universities, the ROR acronym for labs), and draft
-   author-list addresses:
+   ("Cornell" for universities, the ROR acronym for labs), draft
+   author-list addresses, and the non-US tag (import-created rows default
+   to US; when ROR places one abroad it is marked non-US and the voting
+   flags of anyone there are cleared, since voting requires a US
+   institution — the fill never flips non-US back to US):
 
    ```bash
    docker compose exec backend python -m app.cli seed-coordinates --dry-run
@@ -196,8 +199,9 @@ instance:
    matches, and lists the rest with ROR's candidate matches so you can pick
    the right one (or drop into the edit form) — auto-filled addresses are
    drafts (ROR has no street/zip), so refine them where papers need more.
-   Then fix names, set the US flag (import-created rows default to US, and
-   the flag gates voting eligibility), merge any duplicates the free-text
+   Then fix names, check the Region column (the ROR fill tags non-US
+   institutions automatically; the flag gates voting eligibility), merge
+   any duplicates the free-text
    affiliations produced, and activate each row (the **Active** checkbox in
    the edit form — import-created institutions start inactive and carry an
    "inactive" badge until then). Institutions can also be edited from their
