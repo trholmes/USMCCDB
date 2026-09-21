@@ -7,11 +7,12 @@
 # Run scripts/list-backups.sh to see what's available.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/_engine.sh
 
 if [ $# -lt 1 ] || [ $# -gt 2 ]; then
     echo "Usage: scripts/restore.sh <dump-relative-to-/backups> [<photos-tarball>]" >&2
     echo "Available backups:" >&2
-    docker compose exec -T backup sh -c "find /backups -name '*.dump' -o -name 'photos-*.tar.gz' | sort" >&2
+    compose exec -T backup sh -c "find /backups -name '*.dump' -o -name 'photos-*.tar.gz' | sort" >&2
     exit 1
 fi
 
@@ -20,7 +21,7 @@ printf "Type 'yes' to continue: "
 read -r confirm
 [ "$confirm" = "yes" ] || { echo "Aborted."; exit 1; }
 
-docker compose stop backend
-docker compose exec -T backup /restore.sh "$@"
-docker compose start backend
+compose stop backend
+compose exec -T backup /restore.sh "$@"
+compose start backend
 echo "Restore complete."

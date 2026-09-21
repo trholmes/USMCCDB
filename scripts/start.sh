@@ -3,6 +3,7 @@
 # First run: creates .env from .env.example with random secrets.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/_engine.sh
 
 if [ ! -f .env ]; then
     # Volumes are namespaced by the compose project name, which defaults to
@@ -12,8 +13,8 @@ if [ ! -f .env ]; then
     # volume: the backend would crash-loop against the old password (502)
     # and the other checkout's containers would be taken over. Refuse.
     project=${COMPOSE_PROJECT_NAME:-$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')}
-    if docker volume inspect "${project}_pgdata" >/dev/null 2>&1; then
-        echo "ERROR: no .env here, but the Docker volume '${project}_pgdata' already exists —"
+    if "$ENGINE" volume inspect "${project}_pgdata" >/dev/null 2>&1; then
+        echo "ERROR: no .env here, but the ${ENGINE} volume '${project}_pgdata' already exists —"
         echo "another checkout has already deployed under the compose project name"
         echo "'${project}' (it defaults to the directory name). Starting now would reuse"
         echo "that database with freshly generated credentials that don't match it, and"
@@ -43,6 +44,12 @@ if [ ! -f .env ]; then
         printf '\n# Compose project name (set at first start for a side-by-side instance).\nCOMPOSE_PROJECT_NAME=%s\n' \
             "${COMPOSE_PROJECT_NAME}" >> .env
     fi
+    if [ "${CONTAINER_ENGINE}" != auto ]; then
+        # Persist an explicit engine choice so every later script run (and
+        # the next start.sh) keeps using the same engine.
+        tmp=$(mktemp)
+        sed -e "s|^CONTAINER_ENGINE=.*|CONTAINER_ENGINE=${CONTAINER_ENGINE}|" .env > "$tmp" && mv "$tmp" .env
+    fi
     echo
     echo "  Generated SECRET_KEY and POSTGRES_PASSWORD."
     echo "  BOOTSTRAP ADMIN LOGIN:  username: admin   password: ${adminpass}"
@@ -63,10 +70,10 @@ if [ -n "${domain}" ]; then
 fi
 
 echo "Building and starting containers..."
-docker compose ${profile_args[@]+"${profile_args[@]}"} up -d --build
+compose ${profile_args[@]+"${profile_args[@]}"} up -d --build
 
 echo
-docker compose ${profile_args[@]+"${profile_args[@]}"} ps
+compose ${profile_args[@]+"${profile_args[@]}"} ps
 port=$(grep -E '^HTTP_PORT=' .env | cut -d= -f2)
 echo
 if [ -n "${domain}" ]; then

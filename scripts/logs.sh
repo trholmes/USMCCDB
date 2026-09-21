@@ -2,5 +2,6 @@
 # Tail logs. Usage: scripts/logs.sh [service]   (backend, frontend, db, caddy, backup)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. scripts/_engine.sh
 
-docker compose --profile tls logs -f --tail 100 "$@"
+compose --profile tls logs -f --tail 100 "$@"

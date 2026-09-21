@@ -7,7 +7,8 @@ The membership, speakers, and publications database of the
 [Glance/Fence](https://readthedocs.web.cern.ch/display/FP/Fence+Project) systems
 used by the LHC experiments, built as a self-hosted open-source stack:
 **FastAPI + PostgreSQL + React (Mantine)**, deployed with a single
-`docker compose`, HTTPS via Caddy, nightly backups, and ORCID sign-in.
+`docker compose` (Podman works too), HTTPS via Caddy, nightly backups, and
+ORCID sign-in.
 
 | | |
 |---|---|
@@ -57,7 +58,8 @@ used by the LHC experiments, built as a self-hosted open-source stack:
 
 ## Quick start
 
-Requirements: any Linux box with Docker (compose v2).
+Requirements: any Linux box with Docker (compose v2) **or Podman** (with a
+compose provider — see [Running under Podman](#running-under-podman)).
 
 ```bash
 git clone https://github.com/trholmes/USMCCDB.git
@@ -354,6 +356,43 @@ still works from a host shell.
 All ports/hosts are configurable in `.env` (`HTTP_PORT`, `BIND_HOST`,
 `HTTPS_PORT`, `HTTP_REDIRECT_PORT`, database credentials, token lifetime,
 backup retention — see `.env.example` for the full annotated list).
+
+### Running under Podman
+
+The `scripts/` all go through a single engine switch, `CONTAINER_ENGINE` in
+`.env` (`docker` | `podman` | `auto`). The default `auto` uses Docker when it
+is installed and falls back to Podman otherwise, so on a Podman-only server
+nothing needs configuring — `./scripts/start.sh` just works. On a machine
+that has both, pin the choice either in `.env` or once at first start (it is
+then persisted into the generated `.env`):
+
+```bash
+CONTAINER_ENGINE=podman ./scripts/start.sh
+```
+
+Requirements and caveats:
+
+- **Podman ≥ 4.1 plus a compose provider.** The scripts call `podman
+  compose`, which delegates to `podman-compose` or `docker-compose` —
+  install one of them (`pip install podman-compose`, or the distro package).
+  A recent provider is needed for the `tls` profile and the
+  `depends_on: service_healthy` conditions in `docker-compose.yml`
+  (podman-compose ≥ 1.0.6, or any docker-compose v2 against the Podman
+  socket).
+- **Rootless + HTTPS:** without `SITE_DOMAIN` the stack only publishes
+  `HTTP_PORT` (default 8080) and runs rootless out of the box. With
+  `SITE_DOMAIN` set, the Caddy container binds ports 80/443, which rootless
+  Podman may not publish by default — either allow it with
+  `sysctl net.ipv4.ip_unprivileged_port_start=80`, run under root Podman, or
+  move `HTTPS_PORT`/`HTTP_REDIRECT_PORT` above 1024 behind an external proxy.
+- **Restart on reboot:** Docker's daemon honors `restart: unless-stopped`
+  across reboots; daemonless Podman needs `systemctl enable --now
+  podman-restart` (or Quadlet/systemd units) for the same behavior.
+
+Everything else — the compose file, volumes, backups, `.env` settings — is
+identical under both engines. Where this README shows one-off
+`docker compose exec …` commands (data imports, tests), substitute
+`podman compose exec …`.
 
 ### Running a second (test) instance
 
