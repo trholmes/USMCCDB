@@ -117,15 +117,7 @@ export default function InstitutionsPage() {
               </Table.Td>
               <Table.Td>{i.short_name}</Table.Td>
               <Table.Td>{i.latex_address}</Table.Td>
-              <Table.Td>
-                {i.is_us ? (
-                  'US'
-                ) : (
-                  <Badge color="gray" variant="light">
-                    non-US
-                  </Badge>
-                )}
-              </Table.Td>
+              <Table.Td>{i.is_us ? 'US' : 'non-US'}</Table.Td>
               <Table.Td>{i.people_count}</Table.Td>
               <Table.Td onClick={(e) => e.stopPropagation()}>
                 {isOffice && (
