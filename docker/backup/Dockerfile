@@ -1,4 +1,4 @@
-FROM postgres:16-alpine
+FROM docker.io/library/postgres:16-alpine
 
 COPY entrypoint.sh backup.sh restore.sh /
 RUN chmod +x /entrypoint.sh /backup.sh /restore.sh
