@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: docker.io/library/postgres:16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-usmccdb}
       POSTGRES_USER: ${POSTGRES_USER:-usmccdb}
@@ -74,7 +74,7 @@ services:
   # profile, which scripts/start.sh enables automatically when SITE_DOMAIN is
   # set in .env. Obtains and renews the Let's Encrypt certificate itself.
   caddy:
-    image: caddy:2
+    image: docker.io/library/caddy:2
     profiles: ["tls"]
     command: caddy reverse-proxy --from ${SITE_DOMAIN:-}:${HTTPS_PORT:-443} --to frontend:80
     ports:
