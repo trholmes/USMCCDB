@@ -7,6 +7,7 @@ without network access. Coordinates come from the record's first location's
 browser-side "Fetch from ROR" button reads.
 """
 
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -21,7 +22,7 @@ class RorMatch:
     name: str
     latitude: float | None
     longitude: float | None
-    acronym: str | None = None  # ROR acronym, candidate short_name
+    short_name: str | None = None  # candidate short_name (see parse_short_name)
     address: str | None = None  # draft author-list (latex) address
 
 
@@ -36,11 +37,43 @@ def parse_coordinates(record: dict) -> tuple[float, float] | None:
 
 
 def parse_acronym(record: dict) -> str | None:
-    """The record's acronym ("UTK", "FNAL", …), a candidate short name."""
+    """The record's acronym ("UTK", "FNAL", …)."""
     for name in record.get("names") or []:
         if "acronym" in (name.get("types") or []):
             return name.get("value") or None
     return None
+
+
+def _university_short_name(name: str) -> str | None:
+    """The distinctive part of a university name, the way collaboration
+    lists abbreviate them: "Cornell University" → "Cornell", "University of
+    Chicago" → "Chicago", "University of California, Berkeley" → "UC
+    Berkeley". None when the name doesn't fit a pattern we trust."""
+    name = re.sub(r"^The\s+", "", name.strip())
+    m = re.match(r"^University of California[,–-]\s*(.+)$", name, re.IGNORECASE)
+    if m:
+        return f"UC {m.group(1)}"
+    m = re.match(r"^University of (.+)$", name, re.IGNORECASE)
+    if m and "," not in m.group(1):
+        return m.group(1)
+    m = re.match(r"^(.+?) University$", name, re.IGNORECASE)
+    if m and " of " not in m.group(1).lower():
+        return m.group(1)
+    return None
+
+
+def parse_short_name(record: dict) -> str | None:
+    """Candidate short name for a record. Universities (ROR type
+    "education") read better as the distinctive part of their name
+    ("Cornell", not "CU"); labs and everything else keep their acronym
+    (FNAL, BNL, …). Falls back to the acronym when the university name
+    doesn't fit a known pattern (e.g. "Massachusetts Institute of
+    Technology" → "MIT")."""
+    if "education" in (record.get("types") or []):
+        derived = _university_short_name(_display_name(record) or "")
+        if derived:
+            return derived
+    return parse_acronym(record)
 
 
 def parse_address(record: dict) -> str | None:
@@ -91,7 +124,7 @@ def parse_affiliation_match(payload: dict) -> RorMatch | None:
                 name=_display_name(org) or _bare_id(org),
                 latitude=coords[0] if coords else None,
                 longitude=coords[1] if coords else None,
-                acronym=parse_acronym(org),
+                short_name=parse_short_name(org),
                 address=parse_address(org),
             )
     return None

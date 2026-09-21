@@ -7,10 +7,12 @@ from app.services.ror import (
     parse_address,
     parse_affiliation_match,
     parse_coordinates,
+    parse_short_name,
 )
 
 RECORD = {
     "id": "https://ror.org/024mw5h28",
+    "types": ["education"],
     "names": [
         {"value": "UTK", "types": ["acronym"]},
         {"value": "University of Tennessee", "types": ["ror_display", "label"]},
@@ -46,6 +48,42 @@ def test_parse_acronym():
     assert parse_acronym(RECORD) == "UTK"
     assert parse_acronym({}) is None
     assert parse_acronym({"names": [{"value": "X", "types": ["label"]}]}) is None
+
+
+def _education(name: str, acronym: str | None = None) -> dict:
+    names = [{"value": name, "types": ["ror_display"]}]
+    if acronym:
+        names.append({"value": acronym, "types": ["acronym"]})
+    return {"types": ["education"], "names": names}
+
+
+def test_short_name_universities_use_name_not_acronym():
+    # "University of X" and "X University" take the distinctive part…
+    assert parse_short_name(RECORD) == "Tennessee"
+    assert parse_short_name(_education("Cornell University", "CU")) == "Cornell"
+    assert parse_short_name(_education("The Ohio State University", "OSU")) == "Ohio State"
+    assert parse_short_name(_education("Texas A&M University", "TAMU")) == "Texas A&M"
+    # …the UC system reads as "UC <campus>"…
+    assert (
+        parse_short_name(_education("University of California, Berkeley", "UCB"))
+        == "UC Berkeley"
+    )
+    # …and a name that fits no trusted pattern falls back to the acronym.
+    assert (
+        parse_short_name(_education("Massachusetts Institute of Technology", "MIT")) == "MIT"
+    )
+    assert parse_short_name(_education("Weird College Name")) is None
+
+
+def test_short_name_labs_keep_the_acronym():
+    lab = {
+        "types": ["facility", "funder"],
+        "names": [
+            {"value": "Fermi National Accelerator Laboratory", "types": ["ror_display"]},
+            {"value": "FNAL", "types": ["acronym"]},
+        ],
+    }
+    assert parse_short_name(lab) == "FNAL"
 
 
 def test_parse_address_us_includes_state_and_usa():
@@ -87,6 +125,8 @@ def test_affiliation_match_uses_only_the_chosen_item():
     assert match is not None
     assert match.ror_id == "024mw5h28"  # bare id extracted from the URL
     assert match.name == "University of Tennessee"  # the ror_display name
+    assert match.short_name == "Tennessee"
+    assert match.address == "University of Tennessee, Knoxville, TN, USA"
     assert (match.latitude, match.longitude) == (35.960638, -83.920739)
 
 

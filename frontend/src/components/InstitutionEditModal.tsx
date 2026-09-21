@@ -11,6 +11,7 @@ const EMPTY_FORM = {
   ror_id: '',
   latex_address: '',
   is_us: true,
+  is_active: true,
   latitude: '',
   longitude: '',
 }
@@ -40,6 +41,7 @@ export default function InstitutionEditModal({
             ror_id: target.ror_id ?? '',
             latex_address: target.latex_address ?? '',
             is_us: target.is_us,
+            is_active: target.is_active,
             latitude: target.latitude != null ? String(target.latitude) : '',
             longitude: target.longitude != null ? String(target.longitude) : '',
           },
@@ -55,12 +57,12 @@ export default function InstitutionEditModal({
       ror_id: p.rorId ?? f.ror_id,
       latitude: p.latitude != null ? String(p.latitude) : f.latitude,
       longitude: p.longitude != null ? String(p.longitude) : f.longitude,
-      short_name: f.short_name.trim() ? f.short_name : (p.acronym ?? ''),
+      short_name: f.short_name.trim() ? f.short_name : (p.shortName ?? ''),
       latex_address: f.latex_address.trim() ? f.latex_address : (p.address ?? ''),
     }))
     const extras = [
       p.latitude == null && 'no coordinates on the ROR record',
-      !p.acronym && 'no acronym for the short name',
+      !p.shortName && 'no short-name suggestion',
     ].filter(Boolean)
     if (extras.length)
       notifications.show({ color: 'yellow', message: `Filled from ROR, but ${extras.join('; ')}` })
@@ -116,6 +118,7 @@ export default function InstitutionEditModal({
       ror_id: form.ror_id || null,
       latex_address: form.latex_address || null,
       is_us: form.is_us,
+      is_active: form.is_active,
       latitude: form.latitude.trim() === '' ? null : Number(form.latitude),
       longitude: form.longitude.trim() === '' ? null : Number(form.longitude),
     }
@@ -202,6 +205,12 @@ export default function InstitutionEditModal({
           description="Only people currently at a US institution are eligible to vote; unchecking this clears the voting flag of everyone currently here."
           checked={form.is_us}
           onChange={(e) => setForm({ ...form, is_us: e.currentTarget.checked })}
+        />
+        <Checkbox
+          label="Active"
+          description="Institutions created by imports or free-text registration start inactive, awaiting office review; only active institutions appear in the registration form's institution list. Check this once the details above are right."
+          checked={form.is_active}
+          onChange={(e) => setForm({ ...form, is_active: e.currentTarget.checked })}
         />
         <Button onClick={() => save()}>Save</Button>
       </Stack>

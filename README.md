@@ -174,8 +174,9 @@ from there to a fully populated instance:
    coordinates yet. The next two steps fill those in.
 
 3. **Fill missing institution details from [ROR](https://ror.org)** —
-   coordinates (without which the map view starts empty), short names (the
-   ROR acronym), and draft author-list addresses:
+   coordinates (without which the map view starts empty), short names
+   ("Cornell" for universities, the ROR acronym for labs), and draft
+   author-list addresses:
 
    ```bash
    docker compose exec backend python -m app.cli seed-coordinates --dry-run
@@ -201,9 +202,11 @@ from there to a fully populated instance:
    drafts (ROR has no street/zip), so refine them where papers need more.
    Then fix names, set the US flag (import-created rows default to US, and
    the flag gates voting eligibility), merge any duplicates the free-text
-   affiliations produced, and activate each row. Institutions can also be
-   edited from their own detail page, and the edit form's ROR buttons fill
-   blank fields for one-off fixes.
+   affiliations produced, and activate each row (the **Active** checkbox in
+   the edit form — import-created institutions start inactive and carry an
+   "inactive" badge until then). Institutions can also be edited from their
+   own detail page, and the edit form's ROR buttons fill blank fields for
+   one-off fixes.
 
 5. **Import the talks spreadsheet:**
 
@@ -222,6 +225,29 @@ from there to a fully populated instance:
 
 There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
 (fictional demo data) commands — see `python -m app.cli --help`.
+
+#### The whole sequence at a glance
+
+Input files go in `data/` (mounted read-only in the backend container at
+`/data`). To start over first, `./scripts/reset.sh` wipes the database
+(keeping `.env`, backups, TLS certs, and photos) — but re-importing in place
+is also safe: the importers upsert rather than duplicate.
+
+```bash
+docker compose exec backend python -m app.cli seed-wgs
+docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
+docker compose exec backend python -m app.cli seed-coordinates
+docker compose exec backend python -m app.cli import-talks-xlsx /data/Conferences_and_Speakers.xlsx
+docker compose exec backend python -m app.cli import-photos-xlsx /data/USMCC_Membership.xlsx
+docker compose exec backend python -m app.cli import-photos-dir /data/photos
+```
+
+(The importers take `--dry-run` to preview; the photo steps are Drive links
+from the spreadsheet, then a bulk-downloaded `data/photos/` folder for links
+that weren't shared publicly — see "Member photos" below.) Then finish in
+the UI: Institutions page → **"Fill from ROR"** to resolve the lookups
+`seed-coordinates` couldn't, then review, de-duplicate, and activate the
+import-created institutions (step 4 above).
 
 ### Member photos
 

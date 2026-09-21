@@ -102,7 +102,19 @@ export default function InstitutionsPage() {
               style={{ cursor: 'pointer' }}
               onClick={() => navigate(`/institutions/${i.id}`)}
             >
-              <Table.Td>{i.name}</Table.Td>
+              <Table.Td>
+                {i.name}
+                {!i.is_active && (
+                  <Badge
+                    color="gray"
+                    variant="light"
+                    ml="xs"
+                    title="Created by an import or registration and awaiting office review — edit it, then check 'Active'"
+                  >
+                    inactive
+                  </Badge>
+                )}
+              </Table.Td>
               <Table.Td>{i.short_name}</Table.Td>
               <Table.Td>{i.latex_address}</Table.Td>
               <Table.Td>

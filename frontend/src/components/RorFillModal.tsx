@@ -64,11 +64,11 @@ export default function RorFillModal({
         patch.ror_id = p.rorId
       }
     }
-    if (!inst.short_name && p.acronym) {
-      if (takenShortNames.current.has(p.acronym.toLowerCase())) {
-        skipped.push(`acronym '${p.acronym}' is already another institution's short name`)
+    if (!inst.short_name && p.shortName) {
+      if (takenShortNames.current.has(p.shortName.toLowerCase())) {
+        skipped.push(`short name '${p.shortName}' is already another institution's short name`)
       } else {
-        patch.short_name = p.acronym
+        patch.short_name = p.shortName
       }
     }
     if (!inst.latex_address && p.address) patch.latex_address = p.address
@@ -194,22 +194,34 @@ export default function RorFillModal({
   return (
     <Modal opened={opened} onClose={onClose} title="Fill missing details from ROR" size="lg">
       <Stack gap="sm">
-        <Text size="sm" c="dimmed">
-          Looks up every institution missing a short name, author-list address, or map
-          coordinates on ror.org and fills the blanks (never overwriting existing values).
-          Unambiguous matches are applied directly; the rest are listed below for review.
-        </Text>
-        {total === 0 && !running && (
-          <Text size="sm">Nothing to do — every institution already has all three.</Text>
-        )}
-        {total > 0 && (
+        {running && (
           <>
-            <Progress value={total ? (progress.done / total) * 100 : 0} animated={running} />
+            <Text size="sm" c="dimmed">
+              Looking up every institution missing a short name, author-list address, or map
+              coordinates on ror.org and filling the blanks (never overwriting existing
+              values). Unambiguous matches are applied directly; anything needing a decision
+              appears below.
+            </Text>
+            <Progress value={total ? (progress.done / total) * 100 : 0} animated />
             <Text size="sm">
               {progress.done}/{total} checked — {filledCount} filled automatically,{' '}
               {unresolved.length} to review
             </Text>
           </>
+        )}
+        {!running && total === 0 && (
+          <Text size="sm">
+            Nothing to do — every institution already has a short name, author-list address,
+            and coordinates.
+          </Text>
+        )}
+        {!running && total > 0 && (
+          <Text size="sm">
+            {unresolved.length > 0
+              ? `${filledCount} of ${total} filled automatically — ${unresolved.length} ` +
+                `need${unresolved.length === 1 ? 's' : ''} a decision:`
+              : `All done — ${filledCount} of ${total} filled automatically, nothing needs review.`}
+          </Text>
         )}
         {unresolved.map((u) => (
           <Card key={u.inst.id} withBorder padding="sm">
