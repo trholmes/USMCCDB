@@ -171,29 +171,37 @@ from there to a fully populated instance:
    they have a name but no short name, ROR id, author-list address, or
    coordinates yet. The next two steps fill those in.
 
-3. **Seed institution coordinates and ROR ids from [ROR](https://ror.org)**
-   — without this the map view starts empty:
+3. **Fill missing institution details from [ROR](https://ror.org)** —
+   coordinates (without which the map view starts empty), short names (the
+   ROR acronym), and draft author-list addresses:
 
    ```bash
    docker compose exec backend python -m app.cli seed-coordinates --dry-run
    docker compose exec backend python -m app.cli seed-coordinates
    ```
 
-   Institutions with a ROR id get the coordinates of their ROR record; the
-   rest (including everything just created by the member import) are matched
-   by their author-list address or name via ROR's affiliation matcher, which
+   Institutions with a ROR id are filled from their ROR record; the rest
+   (including everything just created by the member import) are matched by
+   their author-list address or name via ROR's affiliation matcher, which
    also fills in the missing ROR id when the match is unambiguous. Anything
-   unresolved is listed at the end for the next step. Already-set
-   coordinates are never touched, so re-running it later (e.g. after more
-   registrations) is safe.
+   unresolved is listed at the end for the next step. Already-set values
+   are never touched, so re-running it later (e.g. after more
+   registrations) is safe. The office can run the same fill from the
+   browser instead: **"Fill from ROR"** on the Institutions page does the
+   identical lookups and, for the ambiguous cases, shows ROR's candidates
+   to pick from (see step 4).
 
-4. **Review the imported institutions** on the Institutions page: fix names,
-   add short names and author-list addresses (needed for author-list
-   generation), set the US flag (import-created rows default to US, and the
-   flag gates voting eligibility), merge any duplicates the free-text
-   affiliations produced, and activate each row. The edit form has a
-   per-institution "Fetch from ROR" button for anything step 3 couldn't
-   resolve.
+4. **Review the imported institutions** on the Institutions page: the
+   **"Fill from ROR"** button re-checks everything still missing a short
+   name, author-list address, or coordinates, applies the unambiguous
+   matches, and lists the rest with ROR's candidate matches so you can pick
+   the right one (or drop into the edit form) — auto-filled addresses are
+   drafts (ROR has no street/zip), so refine them where papers need more.
+   Then fix names, set the US flag (import-created rows default to US, and
+   the flag gates voting eligibility), merge any duplicates the free-text
+   affiliations produced, and activate each row. Institutions can also be
+   edited from their own detail page, and the edit form's ROR buttons fill
+   blank fields for one-off fixes.
 
 5. **Import the talks spreadsheet:**
 

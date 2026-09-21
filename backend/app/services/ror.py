@@ -21,6 +21,8 @@ class RorMatch:
     name: str
     latitude: float | None
     longitude: float | None
+    acronym: str | None = None  # ROR acronym, candidate short_name
+    address: str | None = None  # draft author-list (latex) address
 
 
 def parse_coordinates(record: dict) -> tuple[float, float] | None:
@@ -33,16 +35,45 @@ def parse_coordinates(record: dict) -> tuple[float, float] | None:
     return float(lat), float(lng)
 
 
+def parse_acronym(record: dict) -> str | None:
+    """The record's acronym ("UTK", "FNAL", …), a candidate short name."""
+    for name in record.get("names") or []:
+        if "acronym" in (name.get("types") or []):
+            return name.get("value") or None
+    return None
+
+
+def parse_address(record: dict) -> str | None:
+    """A draft author-list address: "<name>, <city>, <ST>, USA" for US
+    records (ROR has no street/zip, so this is a starting point for the
+    office to refine), "<name>, <city>, <country>" elsewhere."""
+    display = _display_name(record)
+    locations = record.get("locations") or [{}]
+    geo = locations[0].get("geonames_details") or {}
+    city = geo.get("name")
+    if not display or not city:
+        return None
+    parts = [display, city]
+    if geo.get("country_code") == "US":
+        subdivision = geo.get("country_subdivision_code")
+        if subdivision:
+            parts.append(subdivision)
+        parts.append("USA")
+    elif geo.get("country_name"):
+        parts.append(geo["country_name"])
+    return ", ".join(parts)
+
+
 def _bare_id(record: dict) -> str:
     # v2 record ids are full URLs like https://ror.org/05gvnxz63
     return str(record.get("id", "")).rstrip("/").rsplit("/", 1)[-1]
 
 
-def _display_name(record: dict) -> str:
+def _display_name(record: dict) -> str | None:
     for name in record.get("names") or []:
         if "ror_display" in (name.get("types") or []):
-            return name.get("value") or _bare_id(record)
-    return _bare_id(record)
+            return name.get("value") or None
+    return None
 
 
 def parse_affiliation_match(payload: dict) -> RorMatch | None:
@@ -57,9 +88,11 @@ def parse_affiliation_match(payload: dict) -> RorMatch | None:
             coords = parse_coordinates(org)
             return RorMatch(
                 ror_id=_bare_id(org),
-                name=_display_name(org),
+                name=_display_name(org) or _bare_id(org),
                 latitude=coords[0] if coords else None,
                 longitude=coords[1] if coords else None,
+                acronym=parse_acronym(org),
+                address=parse_address(org),
             )
     return None
 

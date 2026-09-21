@@ -35,6 +35,18 @@ def _find_similar(db: Session, name: str, exclude_id: int | None = None) -> Inst
     return None
 
 
+def _check_short_name_conflict(
+    db: Session, short_name: str | None, exclude_id: int | None = None
+) -> None:
+    if short_name is None:
+        return
+    other = db.execute(
+        select(Institution).where(Institution.short_name == short_name)
+    ).scalar_one_or_none()
+    if other is not None and other.id != exclude_id:
+        raise HTTPException(409, f"short_name already in use by '{other.name}'")
+
+
 def _check_ror_conflict(db: Session, ror_id: str | None, exclude_id: int | None = None) -> None:
     if ror_id is None:
         return
@@ -106,10 +118,7 @@ def get_institution(
 
 @router.post("", dependencies=[Depends(require_office)], status_code=201)
 def create_institution(body: InstitutionCreate, db: Session = Depends(get_db)) -> InstitutionOut:
-    if body.short_name and db.execute(
-        select(Institution).where(Institution.short_name == body.short_name)
-    ).scalar_one_or_none():
-        raise HTTPException(409, "short_name already in use")
+    _check_short_name_conflict(db, body.short_name)
     _check_ror_conflict(db, body.ror_id)
     if not body.allow_similar:
         similar = _find_similar(db, body.name)
@@ -135,6 +144,8 @@ def update_institution(
     if inst is None:
         raise HTTPException(404, "Institution not found")
     changes = body.model_dump(exclude_unset=True)
+    if "short_name" in changes:
+        _check_short_name_conflict(db, changes["short_name"], exclude_id=institution_id)
     if "ror_id" in changes:
         _check_ror_conflict(db, changes["ror_id"], exclude_id=institution_id)
     for field, value in changes.items():

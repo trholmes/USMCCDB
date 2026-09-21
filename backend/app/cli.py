@@ -273,19 +273,22 @@ def seed_coordinates(
         "address (or name) and store it when the match is unambiguous",
     ),
 ):
-    """Fill missing institution coordinates from ror.org (for the map view).
+    """Fill missing institution details from ror.org: coordinates (for the
+    map view), short name (the ROR acronym), and a draft author-list address
+    (ROR name + city — refine by hand where papers need more).
 
-    Institutions with a ROR id get coordinates straight from their ROR
-    record; the rest go through ROR's affiliation matcher, and only an
-    unambiguous ("chosen") match is used. Everything unresolved is listed at
-    the end for the office to fix in the institution edit form. Already-set
-    coordinates are never touched.
+    Institutions with a ROR id are filled straight from their ROR record;
+    the rest go through ROR's affiliation matcher, and only an unambiguous
+    ("chosen") match is used. Everything unresolved is listed at the end for
+    the office to fix on the Institutions page ("Fill from ROR" reviews the
+    ambiguous candidates interactively). Already-set values are never
+    touched.
     """
     import httpx
 
     from app.services import ror
 
-    filled = matched = unresolved = 0
+    coords_filled = names_filled = addresses_filled = matched = unresolved = 0
     problems: list[str] = []
     with SessionLocal() as db, httpx.Client(
         timeout=30, headers={"User-Agent": ror.USER_AGENT}
@@ -293,40 +296,51 @@ def seed_coordinates(
         institutions = (
             db.execute(
                 select(Institution)
-                .where(Institution.latitude.is_(None) | Institution.longitude.is_(None))
+                .where(
+                    Institution.latitude.is_(None)
+                    | Institution.longitude.is_(None)
+                    | Institution.short_name.is_(None)
+                    | Institution.latex_address.is_(None)
+                )
                 .order_by(Institution.id)
             )
             .scalars()
             .all()
         )
         if not institutions:
-            typer.echo("All institutions already have coordinates.")
+            typer.echo(
+                "All institutions already have coordinates, a short name, "
+                "and an author-list address."
+            )
             return
         taken_ror_ids = set(
             db.execute(
                 select(Institution.ror_id).where(Institution.ror_id.is_not(None))
             ).scalars()
         )
+        # short_name is unique — never fill one that another row already uses.
+        taken_short_names = {
+            s.lower()
+            for s in db.execute(
+                select(Institution.short_name).where(Institution.short_name.is_not(None))
+            ).scalars()
+        }
         for inst in institutions:
             label = inst.short_name or inst.name
             try:
                 if inst.ror_id:
-                    coords = ror.parse_coordinates(ror.fetch_record(client, inst.ror_id))
-                    if coords is None:
-                        problems.append(f"{label}: ROR record {inst.ror_id} has no coordinates")
-                        unresolved += 1
-                        continue
-                    inst.latitude, inst.longitude = coords
-                    filled += 1
-                    typer.echo(f"{label}: {coords[0]:.4f}, {coords[1]:.4f} (ROR {inst.ror_id})")
+                    record = ror.fetch_record(client, inst.ror_id)
+                    source = f"ROR {inst.ror_id}"
+                    coords = ror.parse_coordinates(record)
+                    acronym = ror.parse_acronym(record)
+                    address = ror.parse_address(record)
                 elif match_missing:
-                    match = ror.fetch_affiliation_match(
-                        client, inst.latex_address or inst.name
-                    )
+                    match = ror.fetch_affiliation_match(client, inst.latex_address or inst.name)
                     if match is None:
                         problems.append(f"{label}: no unambiguous ROR match")
                         unresolved += 1
-                    elif match.ror_id in taken_ror_ids:
+                        continue
+                    if match.ror_id in taken_ror_ids:
                         # ror_id is unique — two of our rows matching the same
                         # ROR record means they are duplicates to merge by hand.
                         problems.append(
@@ -334,29 +348,53 @@ def seed_coordinates(
                             "ROR id already belongs to another institution"
                         )
                         unresolved += 1
-                    elif match.latitude is None or match.longitude is None:
-                        problems.append(
-                            f"{label}: matched {match.name} ({match.ror_id}), "
-                            "which has no coordinates"
-                        )
-                        unresolved += 1
-                    else:
-                        inst.ror_id = match.ror_id
-                        taken_ror_ids.add(match.ror_id)
-                        inst.latitude, inst.longitude = match.latitude, match.longitude
-                        matched += 1
-                        typer.echo(
-                            f"{label}: {match.latitude:.4f}, {match.longitude:.4f} "
-                            f"(matched '{match.name}', new ROR id {match.ror_id})"
-                        )
+                        continue
+                    inst.ror_id = match.ror_id
+                    taken_ror_ids.add(match.ror_id)
+                    matched += 1
+                    source = f"matched '{match.name}', new ROR id {match.ror_id}"
+                    coords = (
+                        (match.latitude, match.longitude)
+                        if match.latitude is not None and match.longitude is not None
+                        else None
+                    )
+                    acronym, address = match.acronym, match.address
                 else:
                     problems.append(f"{label}: no ROR id")
                     unresolved += 1
+                    continue
+
+                filled: list[str] = []
+                if inst.latitude is None or inst.longitude is None:
+                    if coords is not None:
+                        inst.latitude, inst.longitude = coords
+                        coords_filled += 1
+                        filled.append(f"coordinates {coords[0]:.4f}, {coords[1]:.4f}")
+                    else:
+                        problems.append(f"{label}: ROR record has no coordinates ({source})")
+                if inst.short_name is None and acronym:
+                    if acronym.lower() in taken_short_names:
+                        problems.append(
+                            f"{label}: ROR acronym '{acronym}' is already another "
+                            "institution's short name"
+                        )
+                    else:
+                        inst.short_name = acronym
+                        taken_short_names.add(acronym.lower())
+                        names_filled += 1
+                        filled.append(f"short name '{acronym}'")
+                if inst.latex_address is None and address:
+                    inst.latex_address = address
+                    addresses_filled += 1
+                    filled.append(f"address '{address}'")
+                if filled:
+                    typer.echo(f"{label}: {'; '.join(filled)} ({source})")
             except httpx.HTTPError as exc:
                 problems.append(f"{label}: {exc}")
                 unresolved += 1
         summary = (
-            f"{filled + matched} institution(s) "
+            f"{coords_filled} coordinate(s), {names_filled} short name(s), "
+            f"{addresses_filled} author-list address(es) "
             f"({matched} via a newly matched ROR id); {unresolved} unresolved"
         )
         if dry_run:
@@ -366,7 +404,10 @@ def seed_coordinates(
             db.commit()
             typer.echo(f"Filled {summary}")
     if problems:
-        typer.echo("\nUnresolved (fill these in the institution edit form):")
+        typer.echo(
+            "\nUnresolved (use 'Fill from ROR' on the Institutions page to review "
+            "candidates, or the edit form):"
+        )
         for p in problems:
             typer.echo(f"  - {p}")
 

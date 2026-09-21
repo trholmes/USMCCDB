@@ -2,7 +2,12 @@
 JSON payloads, so (like test_migrations.py) these run without a database or
 network access."""
 
-from app.services.ror import parse_affiliation_match, parse_coordinates
+from app.services.ror import (
+    parse_acronym,
+    parse_address,
+    parse_affiliation_match,
+    parse_coordinates,
+)
 
 RECORD = {
     "id": "https://ror.org/024mw5h28",
@@ -13,7 +18,15 @@ RECORD = {
     "locations": [
         {
             "geonames_id": 4634946,
-            "geonames_details": {"name": "Knoxville", "lat": 35.960638, "lng": -83.920739},
+            "geonames_details": {
+                "name": "Knoxville",
+                "lat": 35.960638,
+                "lng": -83.920739,
+                "country_code": "US",
+                "country_name": "United States",
+                "country_subdivision_code": "TN",
+                "country_subdivision_name": "Tennessee",
+            },
         }
     ],
 }
@@ -27,6 +40,40 @@ def test_parse_coordinates_missing():
     assert parse_coordinates({}) is None
     assert parse_coordinates({"locations": []}) is None
     assert parse_coordinates({"locations": [{"geonames_details": {"lat": 1.0}}]}) is None
+
+
+def test_parse_acronym():
+    assert parse_acronym(RECORD) == "UTK"
+    assert parse_acronym({}) is None
+    assert parse_acronym({"names": [{"value": "X", "types": ["label"]}]}) is None
+
+
+def test_parse_address_us_includes_state_and_usa():
+    assert parse_address(RECORD) == "University of Tennessee, Knoxville, TN, USA"
+
+
+def test_parse_address_non_us_uses_country_name():
+    record = {
+        "names": [{"value": "CERN Lab", "types": ["ror_display"]}],
+        "locations": [
+            {
+                "geonames_details": {
+                    "name": "Geneva",
+                    "country_code": "CH",
+                    "country_name": "Switzerland",
+                }
+            }
+        ],
+    }
+    assert parse_address(record) == "CERN Lab, Geneva, Switzerland"
+
+
+def test_parse_address_requires_name_and_city():
+    assert parse_address({}) is None
+    # No ror_display name → no address (a bare id is not an address).
+    assert parse_address({"locations": RECORD["locations"]}) is None
+    # No city either.
+    assert parse_address({"names": RECORD["names"], "locations": []}) is None
 
 
 def test_affiliation_match_uses_only_the_chosen_item():
