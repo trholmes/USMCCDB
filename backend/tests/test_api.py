@@ -1646,8 +1646,8 @@ def test_member_publication_flow(admin, monkeypatch):
     assert r.status_code == 201, r.text
     pub = r.json()
     assert pub["status"] == "in_progress"
-    # The creator is automatically an editor…
-    assert [(pp["person"]["id"], pp["role"]) for pp in pub["people"]] == [(editor_pid, "editor")]
+    # The creator is automatically a contact…
+    assert [(pp["person"]["id"], pp["role"]) for pp in pub["people"]] == [(editor_pid, "contact")]
 
     # …and may edit the record and attach involved people from the directory.
     assert editor.patch(
@@ -1655,9 +1655,32 @@ def test_member_publication_flow(admin, monkeypatch):
     ).status_code == 200
     r = editor.post(
         f"/api/v1/publications/{pub['id']}/people",
-        json={"person_id": friend_pid, "role": "contributor"},
+        json={"person_id": friend_pid, "role": "contributor", "contribution": "Detector plots"},
     )
     assert r.status_code == 201, r.text
+    pp_friend = r.json()
+    assert pp_friend["contribution"] == "Detector plots"
+
+    # Contributions: the person edits their own, contacts can edit anyone's,
+    # an uninvolved member cannot.
+    r = friend.patch(
+        f"/api/v1/publications/{pub['id']}/people/{pp_friend['id']}",
+        json={"contribution": "Detector plots and simulation"},
+    )
+    assert r.status_code == 200 and r.json()["contribution"] == "Detector plots and simulation"
+    r = editor.patch(
+        f"/api/v1/publications/{pub['id']}/people/{pp_friend['id']}",
+        json={"contribution": "Detector plots, simulation, and validation"},
+    )
+    assert r.status_code == 200
+    outsider, _out_pid = _linked_member(
+        admin, given="Uma", family="Uninvolved", email="uma.uninvolved@example.edu"
+    )
+    assert outsider.patch(
+        f"/api/v1/publications/{pub['id']}/people/{pp_friend['id']}",
+        json={"contribution": "vandalism"},
+    ).status_code == 403
+
     # Reviewers stay office-assigned.
     assert editor.post(
         f"/api/v1/publications/{pub['id']}/people",
@@ -1670,7 +1693,7 @@ def test_member_publication_flow(admin, monkeypatch):
     ).status_code == 403
     assert friend.post(
         f"/api/v1/publications/{pub['id']}/people",
-        json={"person_id": friend_pid, "role": "editor"},
+        json={"person_id": friend_pid, "role": "contact"},
     ).status_code == 403
 
     # Author list from just the involved people (no author periods needed).
@@ -1689,7 +1712,7 @@ def test_member_publication_flow(admin, monkeypatch):
     assert friend.post(
         f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
     ).status_code == 403
-    # …but an editor may request collaboration review, which emails the office.
+    # …but a contact may request collaboration review, which emails the office.
     sent.clear()
     r = editor.post(
         f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"}
@@ -1729,7 +1752,7 @@ def test_member_publication_flow(admin, monkeypatch):
     assert ack["reviewers"] == ["Rae Reviewer"]
     assert "Rae Reviewer" in ack["text"]
 
-    # Office status changes notify the paper's editors.
+    # Office status changes notify the paper's contacts.
     sent.clear()
     r = admin.post(f"/api/v1/publications/{pub['id']}/status", json={"status": "submitted"})
     assert r.status_code == 200, r.text
@@ -3230,7 +3253,7 @@ def test_bulk_add_publication_people(admin):
     )
     assert r.status_code == 404
 
-    # A member who is neither editor, convener, nor office cannot bulk-add…
+    # A member who is neither contact, convener, nor office cannot bulk-add…
     member, mid = _linked_member(
         admin, given="Nadia", family="Nonauthor", email="nadia.nonauthor@example.edu"
     )
@@ -3239,10 +3262,10 @@ def test_bulk_add_publication_people(admin):
         json={"person_ids": [mid], "role": "contributor"},
     )
     assert r.status_code == 403
-    # …and even an editor cannot bulk-assign reviewers (office only).
+    # …and even a contact cannot bulk-assign reviewers (office only).
     admin.post(
         f"/api/v1/publications/{pub['id']}/people",
-        json={"person_id": mid, "role": "editor"},
+        json={"person_id": mid, "role": "contact"},
     )
     r = member.post(
         f"/api/v1/publications/{pub['id']}/people/bulk",
