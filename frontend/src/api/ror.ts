@@ -10,7 +10,7 @@ const ID_RE = /(0[a-z0-9]{8})$/
 export interface RorParsed {
   rorId: string | null
   name: string
-  acronym: string | null // candidate short name
+  shortName: string | null // candidate short name (see parseRorRecord)
   address: string | null // draft author-list address
   latitude: number | null
   longitude: number | null
@@ -19,12 +19,33 @@ export interface RorParsed {
   score: number | null // affiliation-matcher confidence, when it came from one
 }
 
+// The distinctive part of a university name, the way collaboration lists
+// abbreviate them: "Cornell University" → "Cornell", "University of
+// Chicago" → "Chicago", "University of California, Berkeley" → "UC
+// Berkeley". null when the name doesn't fit a pattern we trust.
+function universityShortName(name: string): string | null {
+  name = name.trim().replace(/^The\s+/, '')
+  let m = name.match(/^University of California[,–-]\s*(.+)$/i)
+  if (m) return `UC ${m[1]}`
+  m = name.match(/^University of (.+)$/i)
+  if (m && !m[1].includes(',')) return m[1]
+  m = name.match(/^(.+?) University$/i)
+  if (m && !m[1].toLowerCase().includes(' of ')) return m[1]
+  return null
+}
+
 export function parseRorRecord(rec: any, score: number | null = null): RorParsed {
   const names: any[] = rec.names ?? []
   const display: string | null =
     names.find((n) => n.types?.includes('ror_display'))?.value ?? names[0]?.value ?? null
   const acronym: string | null =
     names.find((n) => n.types?.includes('acronym'))?.value ?? null
+  // Universities read better as the distinctive part of their name
+  // ("Cornell", not "CU"); labs and everything else keep their acronym
+  // (FNAL, BNL, …). Mirrors parse_short_name in backend/app/services/ror.py.
+  const shortName =
+    (rec.types?.includes('education') && display ? universityShortName(display) : null) ??
+    acronym
   const geo = rec.locations?.[0]?.geonames_details ?? {}
   const city: string | null = geo.name ?? null
   // Same draft-address shape the backend builds: "Name, City, ST, USA" for
@@ -43,7 +64,7 @@ export function parseRorRecord(rec: any, score: number | null = null): RorParsed
   return {
     rorId: String(rec.id ?? '').match(ID_RE)?.[1] ?? null,
     name: display ?? '(unnamed)',
-    acronym,
+    shortName,
     address,
     latitude: geo.lat ?? null,
     longitude: geo.lng ?? null,

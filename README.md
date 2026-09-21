@@ -174,8 +174,9 @@ from there to a fully populated instance:
    coordinates yet. The next two steps fill those in.
 
 3. **Fill missing institution details from [ROR](https://ror.org)** —
-   coordinates (without which the map view starts empty), short names (the
-   ROR acronym), and draft author-list addresses:
+   coordinates (without which the map view starts empty), short names
+   ("Cornell" for universities, the ROR acronym for labs), and draft
+   author-list addresses:
 
    ```bash
    docker compose exec backend python -m app.cli seed-coordinates --dry-run
@@ -201,9 +202,11 @@ from there to a fully populated instance:
    drafts (ROR has no street/zip), so refine them where papers need more.
    Then fix names, set the US flag (import-created rows default to US, and
    the flag gates voting eligibility), merge any duplicates the free-text
-   affiliations produced, and activate each row. Institutions can also be
-   edited from their own detail page, and the edit form's ROR buttons fill
-   blank fields for one-off fixes.
+   affiliations produced, and activate each row (the **Active** checkbox in
+   the edit form — import-created institutions start inactive and carry an
+   "inactive" badge until then). Institutions can also be edited from their
+   own detail page, and the edit form's ROR buttons fill blank fields for
+   one-off fixes.
 
 5. **Import the talks spreadsheet:**
 

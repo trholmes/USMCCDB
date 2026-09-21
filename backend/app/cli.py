@@ -274,7 +274,8 @@ def seed_coordinates(
     ),
 ):
     """Fill missing institution details from ror.org: coordinates (for the
-    map view), short name (the ROR acronym), and a draft author-list address
+    map view), short name ("Cornell" for universities, the acronym for labs),
+    and a draft author-list address
     (ROR name + city — refine by hand where papers need more).
 
     Institutions with a ROR id are filled straight from their ROR record;
@@ -332,7 +333,7 @@ def seed_coordinates(
                     record = ror.fetch_record(client, inst.ror_id)
                     source = f"ROR {inst.ror_id}"
                     coords = ror.parse_coordinates(record)
-                    acronym = ror.parse_acronym(record)
+                    short = ror.parse_short_name(record)
                     address = ror.parse_address(record)
                 elif match_missing:
                     match = ror.fetch_affiliation_match(client, inst.latex_address or inst.name)
@@ -358,7 +359,7 @@ def seed_coordinates(
                         if match.latitude is not None and match.longitude is not None
                         else None
                     )
-                    acronym, address = match.acronym, match.address
+                    short, address = match.short_name, match.address
                 else:
                     problems.append(f"{label}: no ROR id")
                     unresolved += 1
@@ -372,17 +373,17 @@ def seed_coordinates(
                         filled.append(f"coordinates {coords[0]:.4f}, {coords[1]:.4f}")
                     else:
                         problems.append(f"{label}: ROR record has no coordinates ({source})")
-                if inst.short_name is None and acronym:
-                    if acronym.lower() in taken_short_names:
+                if inst.short_name is None and short:
+                    if short.lower() in taken_short_names:
                         problems.append(
-                            f"{label}: ROR acronym '{acronym}' is already another "
-                            "institution's short name"
+                            f"{label}: suggested short name '{short}' is already "
+                            "another institution's short name"
                         )
                     else:
-                        inst.short_name = acronym
-                        taken_short_names.add(acronym.lower())
+                        inst.short_name = short
+                        taken_short_names.add(short.lower())
                         names_filled += 1
-                        filled.append(f"short name '{acronym}'")
+                        filled.append(f"short name '{short}'")
                 if inst.latex_address is None and address:
                     inst.latex_address = address
                     addresses_filled += 1
