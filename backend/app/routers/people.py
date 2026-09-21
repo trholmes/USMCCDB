@@ -36,6 +36,7 @@ from app.schemas.membership import (
     AuthorPeriodOut,
     AuthorPeriodUpdate,
     InstitutionChange,
+    SecondaryAffiliationAdd,
     InstitutionRef,
     LabelCount,
     MembershipEventOut,
@@ -776,6 +777,56 @@ def change_institution(
         institution_id=institution_id,
         is_primary=True,
         career_stage=person.career_stage,
+        start_date=body.start_date,
+        end_date=None,
+    )
+    db.add(affil)
+    db.commit()
+    db.refresh(affil)
+    return AffiliationOut.model_validate(affil)
+
+
+@router.post("/{person_id}/secondary-affiliation", status_code=201)
+def add_secondary_affiliation(
+    person_id: int,
+    body: SecondaryAffiliationAdd,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AffiliationOut:
+    """Add one additional, non-primary affiliation alongside the primary
+    (issue #3), self-service or office. Same institution semantics as a
+    primary move: free text creates an inactive entry the office reviews.
+    At most one secondary affiliation may be open at a time; the office
+    ends/edits/deletes it through the affiliation endpoints like any other
+    row. Secondary affiliations never affect voting eligibility, which is
+    tied to the primary institution."""
+    _get_person(db, person_id)
+    _require_self_or_office(user, person_id, "add a secondary affiliation for")
+    _validate_entered_date(body.start_date, "start_date")
+    institution_id = _resolve_institution_id(
+        db, body.institution_id, body.institution_name, body.institution_is_us
+    )
+    open_primary = _open_primary(db, person_id)
+    if open_primary is not None and open_primary.institution_id == institution_id:
+        raise HTTPException(400, "That is already the person's primary institution")
+    open_secondary = db.execute(
+        select(Affiliation).where(
+            Affiliation.person_id == person_id,
+            Affiliation.is_primary.is_(False),
+            Affiliation.end_date.is_(None),
+        )
+    ).scalar_one_or_none()
+    if open_secondary is not None:
+        raise HTTPException(
+            409,
+            "Person already has an open secondary affiliation — "
+            "ask the office to end or correct it first",
+        )
+    affil = Affiliation(
+        person_id=person_id,
+        institution_id=institution_id,
+        is_primary=False,
+        career_stage=None,
         start_date=body.start_date,
         end_date=None,
     )

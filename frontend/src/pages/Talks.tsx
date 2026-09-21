@@ -1,5 +1,6 @@
 import {
   Anchor,
+  Autocomplete,
   Badge,
   Button,
   Card,
@@ -28,8 +29,10 @@ import { today } from '../dates'
 
 const emptyForm = {
   title: '',
-  event_id: '',
-  venue: '',
+  // One "where" field covers both cases: text matching a conference name
+  // links the talk to that conference, anything else is a free-text venue
+  // (seminar / colloquium host).
+  where: '',
   url: '',
   slides_url: '',
   recording_url: '',
@@ -116,11 +119,19 @@ export default function TalksPage() {
     setCreateOpen(true)
   }
 
+  // The typed "where" text resolves to a conference when it names one
+  // (case-insensitively), and to a free-text venue otherwise.
+  const resolveWhere = () => {
+    const text = form.where.trim()
+    const event = events.find((e) => e.name.toLowerCase() === text.toLowerCase())
+    if (event) return { event_id: event.id, venue: null }
+    return { event_id: null, venue: text || null }
+  }
+
   const openEdit = (talk: Talk) => {
     setForm({
       title: talk.title,
-      event_id: talk.event_id ? String(talk.event_id) : '',
-      venue: talk.venue ?? '',
+      where: eventName(talk.event_id) || talk.venue || '',
       url: talk.url ?? '',
       slides_url: talk.slides_url ?? '',
       recording_url: talk.recording_url ?? '',
@@ -141,8 +152,7 @@ export default function TalksPage() {
     try {
       await api.patch(`/talks/${editing.id}`, {
         title: form.title,
-        event_id: form.event_id ? Number(form.event_id) : null,
-        venue: form.venue || null,
+        ...resolveWhere(),
         url: form.url || null,
         slides_url: form.slides_url || null,
         recording_url: form.recording_url || null,
@@ -174,8 +184,7 @@ export default function TalksPage() {
     try {
       await api.post('/talks', {
         title: form.title,
-        event_id: form.event_id ? Number(form.event_id) : null,
-        venue: form.venue || null,
+        ...resolveWhere(),
         url: form.url || null,
         slides_url: form.slides_url || null,
         recording_url: form.recording_url || null,
@@ -479,22 +488,21 @@ export default function TalksPage() {
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.currentTarget.value })}
           />
-          <Select
-            label="Conference"
-            description="Leave empty for seminars and colloquia"
-            data={events.map((e) => ({ value: String(e.id), label: e.name }))}
-            value={form.event_id}
-            onChange={(v) => setForm({ ...form, event_id: v ?? '' })}
-            searchable
-            clearable
+          <Autocomplete
+            label="Conference / venue"
+            description="Pick a conference from the list (e.g. “CPAD 2026”), or type any venue (e.g. “UTK Physics Colloquium”)"
+            placeholder="Where was it given?"
+            data={events.map((e) => e.name)}
+            limit={8}
+            value={form.where}
+            onChange={(v) => setForm({ ...form, where: v })}
           />
-          {!form.event_id && (
-            <TextInput
-              label="Venue"
-              description="Where it was given, e.g. “MIT physics colloquium”"
-              value={form.venue}
-              onChange={(e) => setForm({ ...form, venue: e.currentTarget.value })}
-            />
+          {form.where.trim() && (
+            <Text size="xs" c="dimmed" mt={-8}>
+              {resolveWhere().event_id !== null
+                ? '✓ Will be linked to this conference'
+                : 'Will be recorded as a seminar / colloquium venue'}
+            </Text>
           )}
           <Group grow>
             <Select

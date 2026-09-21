@@ -216,6 +216,7 @@ export interface PubPerson {
   id: number
   person: PersonSummary
   role: string
+  contribution: string | null
 }
 
 export interface Publication {

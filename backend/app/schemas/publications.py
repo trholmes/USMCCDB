@@ -40,19 +40,30 @@ class PubStatusChange(BaseModel):
 class PubPersonAdd(BaseModel):
     person_id: int
     role: PublicationPersonRole
+    contribution: str | None = Field(default=None, max_length=2000)
 
 
 class PubPeopleAdd(BaseModel):
-    """Bulk form: attach several people with the same role at once (issue #102)."""
+    """Bulk form: attach several people with the same role at once (issue #102).
+    Contributions are individual, so they are filled in afterwards — by each
+    person themselves, or by a contact."""
 
     person_ids: list[int] = Field(min_length=1, max_length=500)
     role: PublicationPersonRole
+
+
+class PubPersonUpdate(BaseModel):
+    """What this person did on the paper — written by the person themselves,
+    editable by the publication's contacts. Empty clears it."""
+
+    contribution: str | None = Field(default=None, max_length=2000)
 
 
 class PubPersonOut(ORMModel):
     id: int
     person: PersonSummary
     role: PublicationPersonRole
+    contribution: str | None = None
 
 
 class PublicationOut(ORMModel):
