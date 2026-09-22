@@ -10,6 +10,7 @@ CSV columns (header required):
 
 import csv
 import re
+import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 
@@ -1056,6 +1057,14 @@ CONTENT_EXTS = {
 }
 
 
+def _fold_name(s: str) -> str:
+    """Lowercase and keep only ASCII letters/digits, with accents folded to
+    their base letter, so 'AaronDominguez', 'IMG_1234 - Jane Doe' and
+    "Gardner-O'Kearny" all compare on the same footing."""
+    decomposed = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in decomposed.lower() if c.isascii() and c.isalnum())
+
+
 def _photos_dir() -> Path:
     from app.config import get_settings
 
@@ -1165,7 +1174,8 @@ def import_photos_dir(
     overwrite: bool = typer.Option(False, help="Replace photos that already exist"),
 ):
     """Import photos from a directory, matching people by name in the file
-    name (Google-Form uploads are named like 'IMG_1234 - Jane Doe.jpg').
+    name. Matching ignores case, spacing, punctuation, and accents, so
+    'IMG_1234 - Jane Doe.jpg', 'JaneDoe.jpg' and 'jane_doe.png' all work.
     Unmatched files are listed at the end."""
     ok = skipped = 0
     unmatched: list[str] = []
@@ -1179,14 +1189,15 @@ def import_photos_dir(
                 f"{p.given_name.split()[0]} {p.family_name}" if p.given_name else "",
                 f"{p.preferred_name} {p.family_name}" if p.preferred_name else "",
             }
-            variants.extend((n.lower(), p) for n in names if n)
+            variants.extend((_fold_name(n), p) for n in names if n)
+        variants = [(n, p) for n, p in variants if n]
         variants.sort(key=lambda v: -len(v[0]))
 
         for path in sorted(dir_path.iterdir()):
             ext = IMAGE_EXTS.get(path.suffix.lower())
             if not path.is_file() or ext is None:
                 continue
-            stem = path.stem.lower()
+            stem = _fold_name(path.stem)
             person = next((p for n, p in variants if n in stem), None)
             if person is None:
                 unmatched.append(path.name)
