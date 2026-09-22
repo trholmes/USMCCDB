@@ -282,3 +282,33 @@ export interface AuthorList {
   snapshot: AuthorListSnapshot
   created_at: string
 }
+
+export interface PersonAlert {
+  person_id: number
+  name: string
+  email: string | null
+  detail: string | null
+}
+
+export interface InstitutionAlert {
+  institution_id: number
+  name: string
+  current_members: number
+}
+
+export interface AccountAlert {
+  user_id: number
+  login: string
+}
+
+export interface AdminAlerts {
+  pending_registrations: PersonAlert[]
+  unreviewed_institutions: InstitutionAlert[]
+  institutions_missing_admin_contact: InstitutionAlert[]
+  unlinked_accounts: AccountAlert[]
+  active_without_affiliation: PersonAlert[]
+  ineligible_voting_members: PersonAlert[]
+  open_author_periods_not_active: PersonAlert[]
+  migrations_pending: boolean
+  total: number
+}
