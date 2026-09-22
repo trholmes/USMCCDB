@@ -1,10 +1,12 @@
 import { Anchor, Badge, Button, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { CollabRole, Institution, PersonSummary } from '../api/types'
 import InstitutionEditModal from '../components/InstitutionEditModal'
 import PersonAvatar from '../components/PersonAvatar'
+import PersonSelect from '../components/PersonSelect'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { collabRoleLabel } from '../constants'
 import { today } from '../dates'
@@ -23,6 +25,7 @@ export default function InstitutionDetailPage() {
   const [members, setMembers] = useState<PersonSummary[]>([])
   const [roles, setRoles] = useState<CollabRole[]>([])
   const [editing, setEditing] = useState(false)
+  const [contactSel, setContactSel] = useState<string | null>(null)
   const { isOffice } = useSession()
   const navigate = useNavigate()
   const { sorted, sort, toggle } = useSortable(members, ACCESSORS)
@@ -40,12 +43,45 @@ export default function InstitutionDetailPage() {
   }, [id])
   useEffect(load, [load])
 
+  const assignContact = async () => {
+    if (!contactSel) return
+    try {
+      await api.post('/collab-roles', {
+        person_id: Number(contactSel),
+        role: 'admin_contact',
+        detail: null,
+        working_group_id: null,
+        institution_id: Number(id),
+        start_date: today(),
+      })
+      notifications.show({ message: 'Administrative contact assigned.' })
+      setContactSel(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const endRole = async (r: CollabRole) => {
+    const name = r.person ? `${r.person.given_name} ${r.person.family_name}` : 'this person'
+    if (!window.confirm(`End ${name}'s "${collabRoleLabel(r.role, r.detail)}" role today?`))
+      return
+    try {
+      await api.patch(`/collab-roles/${r.id}`, { end_date: today() })
+      notifications.show({ message: 'Role ended today.' })
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
   if (!inst) return <Text c="dimmed">Loading…</Text>
 
   // Institution-scoped roles currently in effect (admin contacts, IB reps);
   // date ranges are inclusive on both ends, so a role ending today is current.
   const t = today()
   const currentRoles = roles.filter((r) => r.start_date <= t && (!r.end_date || r.end_date >= t))
+  const currentContacts = currentRoles.filter((r) => r.role === 'admin_contact')
 
   return (
     <Stack>
@@ -74,7 +110,7 @@ export default function InstitutionDetailPage() {
         {isOffice && <Button variant="light" onClick={() => setEditing(true)}>Edit</Button>}
       </Group>
 
-      {currentRoles.length > 0 && (
+      {(currentRoles.length > 0 || isOffice) && (
         <Card withBorder maw={720}>
           <Text size="sm" c="dimmed">
             Contacts & representatives
@@ -90,9 +126,34 @@ export default function InstitutionDetailPage() {
                 ) : (
                   <Text size="sm">—</Text>
                 )}
+                {isOffice && r.role === 'admin_contact' && (
+                  <Button size="compact-xs" variant="subtle" color="red" onClick={() => endRole(r)}>
+                    End
+                  </Button>
+                )}
               </Group>
             ))}
+            {currentContacts.length === 0 && (
+              <Text size="sm" c="dimmed">
+                No administrative contact assigned.
+              </Text>
+            )}
           </Stack>
+          {isOffice && (
+            <Group gap="xs" mt="sm" align="flex-end">
+              <PersonSelect
+                people={members}
+                excludeIds={currentContacts.map((r) => r.person_id)}
+                value={contactSel}
+                onChange={setContactSel}
+                placeholder="Assign administrative contact…"
+                w={{ base: '100%', xs: 280 }}
+              />
+              <Button size="xs" disabled={!contactSel} onClick={assignContact}>
+                Assign contact
+              </Button>
+            </Group>
+          )}
         </Card>
       )}
 
