@@ -297,7 +297,7 @@ export default function PublicationDetailPage() {
             </Button>
           )}
           {isOffice && (
-            <Select placeholder="Change status…" data={STATUSES} onChange={changeStatus} w={170} />
+            <Select placeholder="Change status…" data={STATUSES} onChange={changeStatus} w={{ base: '100%', xs: 170 }} />
           )}
         </Group>
       </Group>
@@ -401,13 +401,13 @@ export default function PublicationDetailPage() {
               }))}
               value={personPicks}
               onChange={setPersonPicks}
-              w={340}
+              w={{ base: '100%', xs: 340 }}
             />
             <Select
               data={isOffice ? OFFICE_ROLES : MEMBER_ROLES}
               value={rolePick}
               onChange={setRolePick}
-              w={170}
+              w={{ base: '100%', xs: 170 }}
             />
             <Button
               size="xs"
@@ -457,7 +457,7 @@ export default function PublicationDetailPage() {
                 .sort((a, b) => a.label.localeCompare(b.label))}
               value={null}
               onChange={stageInstitution}
-              w={230}
+              w={{ base: '100%', xs: 230 }}
             />
             <Select
               placeholder="Everyone in working group…"
@@ -466,7 +466,7 @@ export default function PublicationDetailPage() {
               value={null}
               onChange={stageWorkingGroup}
               disabled={groupWgBusy}
-              w={240}
+              w={{ base: '100%', xs: 240 }}
             />
           </Group>
         )}
@@ -526,13 +526,13 @@ export default function PublicationDetailPage() {
             ]}
             value={scope}
             onChange={setScope}
-            w={190}
+            w={{ base: '100%', xs: 190 }}
           />
           <TextInput
             placeholder="Cutoff date YYYY-MM-DD (default: today)"
             value={cutoff}
             onChange={(e) => setCutoff(e.currentTarget.value)}
-            w={280}
+            w={{ base: '100%', xs: 280 }}
           />
           <Button size="xs" onClick={generate}>
             Generate author list

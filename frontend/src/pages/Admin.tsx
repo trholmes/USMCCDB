@@ -195,7 +195,7 @@ export default function AdminPage() {
             placeholder="Search login or person…"
             value={q}
             onChange={(e) => setQ(e.currentTarget.value)}
-            w={220}
+            w={{ base: '100%', xs: 220 }}
           />
           <Button onClick={() => setModal(true)}>Create local account</Button>
         </Group>
@@ -209,7 +209,8 @@ export default function AdminPage() {
         </Text>
       </Card>
 
-      <Table striped>
+      <Table.ScrollContainer minWidth={700}>
+<Table striped>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="ID" k="id" sort={sort} toggle={toggle} />
@@ -277,6 +278,7 @@ export default function AdminPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
       <Modal
         opened={manage !== null}

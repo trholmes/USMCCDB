@@ -138,7 +138,7 @@ export default function RegisterPage() {
   if (done) {
     return (
       <Center mih="60vh">
-        <Card withBorder w={480} p="xl">
+        <Card withBorder w={{ base: '100%', xs: 480 }} p="xl">
           <Title order={3}>Registration received</Title>
           <Text mt="sm">
             Thanks! Your membership is now pending review by the USMCC office. You'll be able
@@ -154,7 +154,7 @@ export default function RegisterPage() {
 
   return (
     <Center p="md">
-      <Card withBorder w={560} p="xl">
+      <Card withBorder w={{ base: '100%', sm: 560 }} p="xl">
         <Stack>
           <div>
             <Title order={3}>Join USMCC</Title>

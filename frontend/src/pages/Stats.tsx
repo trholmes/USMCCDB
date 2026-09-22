@@ -475,7 +475,8 @@ function TalkStats() {
         </ResponsiveContainer>
       </Card>
 
-      <Table striped highlightOnHover maw={720}>
+      <Table.ScrollContainer minWidth={600} maw={720}>
+<Table striped highlightOnHover maw={720}>
         <Table.Thead>
           <Table.Tr>
             <SortableTh
@@ -504,6 +505,7 @@ function TalkStats() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
     </>
   )
 }

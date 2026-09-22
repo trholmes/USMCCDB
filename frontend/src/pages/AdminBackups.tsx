@@ -248,7 +248,8 @@ export default function AdminBackups() {
         </Alert>
       )}
 
-      <Table striped>
+      <Table.ScrollContainer minWidth={600}>
+<Table striped>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Snapshot</Table.Th>
@@ -313,6 +314,7 @@ export default function AdminBackups() {
           )}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
       <Group mt="md" gap="sm">
         <FileButton accept=".dump" onChange={setUploadFile}>

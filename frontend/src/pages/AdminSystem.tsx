@@ -78,7 +78,8 @@ export default function AdminSystem() {
             last {events.length} attempts, newest first
           </Text>
         </Group>
-        <Table striped highlightOnHover>
+        <Table.ScrollContainer minWidth={600}>
+<Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>When</Table.Th>
@@ -125,6 +126,7 @@ export default function AdminSystem() {
             )}
           </Table.Tbody>
         </Table>
+        </Table.ScrollContainer>
       </Card>
     </Stack>
   )

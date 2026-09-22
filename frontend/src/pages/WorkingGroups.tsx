@@ -60,6 +60,14 @@ export default function WorkingGroupsPage() {
 
   const canManage = (wgId: number) => isOffice || convenerWgIds.includes(wgId)
 
+  // One shared directory load for the per-group "Add member" pickers (every
+  // accordion panel stays mounted, so self-loading pickers would each fetch).
+  const [people, setPeople] = useState<PersonSummary[]>([])
+  useEffect(() => {
+    if (!isOffice && convenerWgIds.length === 0) return
+    api.get<PersonSummary[]>('/people').then(setPeople).catch(() => setPeople([]))
+  }, [isOffice, convenerWgIds])
+
   const load = useCallback(() => {
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
   }, [])
@@ -234,6 +242,7 @@ export default function WorkingGroupsPage() {
               {canManage(wg.id) && (
                 <Group gap="xs" mb="sm" align="flex-end">
                   <PersonSelect
+                    people={people}
                     value={addPersonId}
                     onChange={setAddPersonId}
                     placeholder="Add a person to this group…"
@@ -245,6 +254,7 @@ export default function WorkingGroupsPage() {
                   </Button>
                 </Group>
               )}
+              <Table.ScrollContainer minWidth={500}>
               <Table>
                 <Table.Tbody>
                   {(members[wg.id] ?? []).map((p) => (
@@ -272,6 +282,7 @@ export default function WorkingGroupsPage() {
                   ))}
                 </Table.Tbody>
               </Table>
+              </Table.ScrollContainer>
             </Accordion.Panel>
           </Accordion.Item>
         ))}

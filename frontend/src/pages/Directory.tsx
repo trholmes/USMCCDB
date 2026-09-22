@@ -91,7 +91,7 @@ export default function DirectoryPage() {
             placeholder="Search name or email…"
             value={q}
             onChange={(e) => setQ(e.currentTarget.value)}
-            w={240}
+            w={{ base: '100%', xs: 240 }}
           />
         </Group>
       </Group>
@@ -107,7 +107,7 @@ export default function DirectoryPage() {
           onChange={setStatuses}
           clearable
           placeholder={statuses.length ? undefined : 'All statuses'}
-          w={190}
+          w={{ base: '100%', sm: 190 }}
         />
         <MultiSelect
           data={CAREER_STAGES}
@@ -116,7 +116,7 @@ export default function DirectoryPage() {
           clearable
           searchable
           placeholder={stages.length ? undefined : 'All positions'}
-          w={210}
+          w={{ base: '100%', sm: 210 }}
         />
         <MultiSelect
           data={institutionOptions}
@@ -125,7 +125,7 @@ export default function DirectoryPage() {
           clearable
           searchable
           placeholder={institutions.length ? undefined : 'All institutions'}
-          w={230}
+          w={{ base: '100%', sm: 230 }}
         />
         <MultiSelect
           data={RESEARCH_AREAS}
@@ -133,7 +133,7 @@ export default function DirectoryPage() {
           onChange={setAreas}
           clearable
           placeholder={areas.length ? undefined : 'All research areas'}
-          w={240}
+          w={{ base: '100%', sm: 240 }}
         />
         <Select
           data={[
@@ -144,12 +144,13 @@ export default function DirectoryPage() {
           onChange={setVoting}
           clearable
           placeholder="Voting?"
-          w={130}
+          w={{ base: '100%', sm: 130 }}
         />
       </Group>
 
       <PageCount shown={paged.length} count={count} noun="people" />
-      <Table striped highlightOnHover stickyHeader>
+      <Table.ScrollContainer minWidth={800}>
+        <Table striped highlightOnHover stickyHeader>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
@@ -222,7 +223,8 @@ export default function DirectoryPage() {
             </Table.Tr>
           ))}
         </Table.Tbody>
-      </Table>
+        </Table>
+      </Table.ScrollContainer>
       <PaginationBar page={page} total={total} setPage={setPage} />
     </>
   )

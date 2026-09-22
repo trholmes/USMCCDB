@@ -169,7 +169,8 @@ export default function InstitutionDetailPage() {
       <Title order={5}>
         People ({members.length})
       </Title>
-      <Table striped highlightOnHover maw={900}>
+      <Table.ScrollContainer minWidth={700} maw={900}>
+      <Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
@@ -200,6 +201,7 @@ export default function InstitutionDetailPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
       <InstitutionEditModal
         target={editing ? inst : null}
         onClose={() => setEditing(false)}

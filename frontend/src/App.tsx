@@ -94,8 +94,8 @@ export default function App() {
       padding="md"
     >
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group>
+        <Group h="100%" px="md" justify="space-between" wrap="nowrap">
+          <Group wrap="nowrap" style={{ minWidth: 0 }}>
             <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
             <Link
               to="/"
@@ -108,16 +108,23 @@ export default function App() {
               }}
             >
               <img src="/usmcc-mark.png" alt="" height={32} width={32} />
-              <Title order={4}>US Muon Collider Collaboration</Title>
+              {/* Full title doesn't fit next to the header controls on a
+                  phone — show the acronym there instead. */}
+              <Title order={4} visibleFrom="sm">
+                US Muon Collider Collaboration
+              </Title>
+              <Title order={4} hiddenFrom="sm">
+                USMCC
+              </Title>
             </Link>
-            <Badge variant="light" color="orange" size="sm">
+            <Badge variant="light" color="orange" size="sm" visibleFrom="xs">
               alpha
             </Badge>
             <Text c="dimmed" size="sm" visibleFrom="md">
               Collaboration Database
             </Text>
           </Group>
-          <Group gap="xs">
+          <Group gap="xs" wrap="nowrap">
             <ColorSchemeToggle />
             <ActionIcon
               component={Link}
@@ -136,6 +143,7 @@ export default function App() {
               c="indigo"
               style={{ cursor: 'pointer' }}
               title={me.person_id ? 'View / edit your profile' : 'Account settings'}
+              visibleFrom="sm"
             >
               {me.display_name || me.user.username || me.user.orcid}
               {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
@@ -143,7 +151,7 @@ export default function App() {
             <Text
               size="sm"
               c="indigo"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
               onClick={async () => {
                 await logout()
                 navigate('/login')

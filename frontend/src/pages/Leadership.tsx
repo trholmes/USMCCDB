@@ -58,7 +58,8 @@ function RoleRows({
   const { sorted, sort, toggle } = useSortable(roles, ACCESSORS)
   const canEdit = Boolean(onEdit)
   return (
-    <Table maw={860}>
+    <Table.ScrollContainer minWidth={700} maw={860}>
+    <Table>
       <Table.Thead>
         <Table.Tr>
           <SortableTh label="Role" k="role" sort={sort} toggle={toggle} />
@@ -120,6 +121,7 @@ function RoleRows({
         ))}
       </Table.Tbody>
     </Table>
+    </Table.ScrollContainer>
   )
 }
 

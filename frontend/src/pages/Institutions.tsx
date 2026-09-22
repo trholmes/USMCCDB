@@ -70,7 +70,7 @@ export default function InstitutionsPage() {
             placeholder="Search name…"
             value={q}
             onChange={(e) => setQ(e.currentTarget.value)}
-            w={220}
+            w={{ base: '100%', xs: 220 }}
           />
           {isOffice && (
             <Button variant="light" onClick={() => setFillOpen(true)}>
@@ -84,7 +84,8 @@ export default function InstitutionsPage() {
       {view === 'list' && (
         <>
       <PageCount shown={paged.length} count={count} noun="institutions" />
-      <Table striped highlightOnHover>
+      <Table.ScrollContainer minWidth={700}>
+<Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
@@ -130,6 +131,7 @@ export default function InstitutionsPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
       <PaginationBar page={page} total={total} setPage={setPage} />
         </>
       )}
