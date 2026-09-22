@@ -1,9 +1,11 @@
-import { Button, Checkbox, Group, Modal, Stack, TextInput } from '@mantine/core'
+import { Button, Checkbox, Divider, Group, Modal, Stack, Text, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { fetchRorRecord, parseRorRecord, type RorParsed } from '../api/ror'
-import type { Institution } from '../api/types'
+import type { CollabRole, Institution, PersonSummary } from '../api/types'
+import { today } from '../dates'
+import PersonSelect from './PersonSelect'
 
 const EMPTY_FORM = {
   name: '',
@@ -18,7 +20,8 @@ const EMPTY_FORM = {
 
 /** Office-only add/edit form, shared by the Institutions list and the
  * institution detail page. `target` is the institution to edit, 'new' to
- * create one, or null (closed). */
+ * create one, or null (closed). When editing an existing institution it also
+ * manages the institution's administrative contacts (admin_contact roles). */
 export default function InstitutionEditModal({
   target,
   onClose,
@@ -29,9 +32,17 @@ export default function InstitutionEditModal({
   onSaved: () => void
 }) {
   const [form, setForm] = useState(EMPTY_FORM)
+  const [members, setMembers] = useState<PersonSummary[]>([])
+  const [contacts, setContacts] = useState<CollabRole[]>([])
+  const [contactSel, setContactSel] = useState<string | null>(null)
+
+  // The institution being edited, if any — the administrative-contact section
+  // needs a persisted id, so it's hidden while creating a new institution.
+  const instId = target !== null && target !== 'new' ? target.id : null
 
   useEffect(() => {
     if (target === null) return
+    setContactSel(null)
     setForm(
       target === 'new'
         ? EMPTY_FORM
@@ -47,6 +58,58 @@ export default function InstitutionEditModal({
           },
     )
   }, [target])
+
+  const loadContacts = useCallback(() => {
+    if (instId == null) {
+      setMembers([])
+      setContacts([])
+      return
+    }
+    api
+      .get<PersonSummary[]>(`/people?institution_id=${instId}`)
+      .then(setMembers)
+      .catch(() => setMembers([]))
+    api
+      .get<CollabRole[]>(`/collab-roles?institution_id=${instId}&role=admin_contact`)
+      .then(setContacts)
+      .catch(() => setContacts([]))
+  }, [instId])
+  useEffect(loadContacts, [loadContacts])
+
+  // Assigning/ending a contact takes effect immediately (it's a collab-role
+  // change, not part of the institution PATCH the Save button sends).
+  const assignContact = async () => {
+    if (!contactSel || instId == null) return
+    try {
+      await api.post('/collab-roles', {
+        person_id: Number(contactSel),
+        role: 'admin_contact',
+        detail: null,
+        working_group_id: null,
+        institution_id: instId,
+        start_date: today(),
+      })
+      notifications.show({ message: 'Administrative contact assigned.' })
+      setContactSel(null)
+      loadContacts()
+      onSaved()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const endContact = async (r: CollabRole) => {
+    const name = r.person ? `${r.person.given_name} ${r.person.family_name}` : 'this person'
+    if (!window.confirm(`End ${name}'s administrative-contact role today?`)) return
+    try {
+      await api.patch(`/collab-roles/${r.id}`, { end_date: today() })
+      notifications.show({ message: 'Role ended today.' })
+      loadContacts()
+      onSaved()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
 
   // Copy a parsed ROR record into the form: ROR id and coordinates always
   // (that's what the buttons promise), short name and author-list address
@@ -159,6 +222,13 @@ export default function InstitutionEditModal({
     }
   }
 
+  // Contacts currently in effect; date ranges are inclusive on both ends,
+  // so a role ending today is still current.
+  const t = today()
+  const currentContacts = contacts.filter(
+    (r) => r.start_date <= t && (!r.end_date || r.end_date >= t),
+  )
+
   return (
     <Modal
       opened={target !== null}
@@ -225,6 +295,48 @@ export default function InstitutionEditModal({
           checked={form.is_active}
           onChange={(e) => setForm({ ...form, is_active: e.currentTarget.checked })}
         />
+        {instId != null && (
+          <>
+            <Divider
+              label="Administrative Institutional Contact"
+              labelPosition="left"
+              mt="xs"
+            />
+            {currentContacts.map((r) => (
+              <Group key={r.id} gap="xs" wrap="nowrap">
+                <Text size="sm">
+                  {r.person
+                    ? `${r.person.preferred_name || r.person.given_name} ${r.person.family_name}`
+                    : '—'}
+                </Text>
+                <Button size="compact-xs" variant="subtle" color="red" onClick={() => endContact(r)}>
+                  End
+                </Button>
+              </Group>
+            ))}
+            {currentContacts.length === 0 && (
+              <Text size="sm" c="dimmed">
+                No administrative contact assigned.
+              </Text>
+            )}
+            <Group gap="xs" align="flex-end">
+              <PersonSelect
+                people={members}
+                excludeIds={currentContacts.map((r) => r.person_id)}
+                value={contactSel}
+                onChange={setContactSel}
+                placeholder="Assign administrative contact…"
+                style={{ flex: 1 }}
+              />
+              <Button variant="light" disabled={!contactSel} onClick={assignContact}>
+                Assign
+              </Button>
+            </Group>
+            <Text size="xs" c="dimmed" mt={-8}>
+              Contact changes apply immediately; Save is only needed for the fields above.
+            </Text>
+          </>
+        )}
         <Button onClick={() => save()}>Save</Button>
       </Stack>
     </Modal>
