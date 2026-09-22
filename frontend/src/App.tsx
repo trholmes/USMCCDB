@@ -13,9 +13,11 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useAlerts } from './auth/AlertsContext'
 import { useSession } from './auth/SessionContext'
 import AccountPage from './pages/Account'
 import AdminPage from './pages/Admin'
+import AlertsPage from './pages/Alerts'
 import RegisterPage from './pages/Register'
 import DirectoryPage from './pages/Directory'
 import EventsPage from './pages/Events'
@@ -61,6 +63,7 @@ function ColorSchemeToggle() {
 
 export default function App() {
   const { me, loading, logout, isAdmin } = useSession()
+  const { alerts } = useAlerts()
   const [opened, { toggle, close }] = useDisclosure()
   const navigate = useNavigate()
   const location = useLocation()
@@ -176,14 +179,31 @@ export default function App() {
           />
         ))}
         {isAdmin && (
-          <NavLink
-            label="Admin"
-            active={location.pathname.startsWith('/admin')}
-            onClick={() => {
-              navigate('/admin')
-              close()
-            }}
-          />
+          <>
+            <NavLink
+              label="Alerts"
+              active={location.pathname.startsWith('/alerts')}
+              rightSection={
+                alerts && alerts.total > 0 ? (
+                  <Badge color="red" size="sm">
+                    {alerts.total}
+                  </Badge>
+                ) : undefined
+              }
+              onClick={() => {
+                navigate('/alerts')
+                close()
+              }}
+            />
+            <NavLink
+              label="Admin"
+              active={location.pathname.startsWith('/admin')}
+              onClick={() => {
+                navigate('/admin')
+                close()
+              }}
+            />
+          </>
         )}
       </AppShell.Navbar>
 
@@ -205,6 +225,7 @@ export default function App() {
           <Route path="/publications/:id" element={<PublicationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/account" element={<AccountPage />} />
+          {isAdmin && <Route path="/alerts" element={<AlertsPage />} />}
           {isAdmin && <Route path="/admin" element={<AdminPage />} />}
           <Route path="*" element={<Navigate to="/directory" replace />} />
         </Routes>

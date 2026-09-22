@@ -3645,3 +3645,133 @@ def test_institution_short_name_conflict(admin):
         admin.patch(f"/api/v1/institutions/{a['id']}", json={"short_name": "CU-A"}).status_code
         == 200
     )
+
+
+def test_admin_alerts(admin):
+    # Only admins see the alerts panel.
+    assert TestClient(app).get("/api/v1/alerts").status_code == 401
+    member, member_pid = _linked_member(
+        admin, given="Al", family="Erts", email="al.erts@example.edu"
+    )
+    assert member.get("/api/v1/alerts").status_code == 403
+
+    # A fresh registration: pending person at a new institution that has no
+    # administrative contact yet.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Nina",
+            "family_name": "New",
+            "email": "nina.new@example.edu",
+            "career_stage": "postdoc",
+            "institution_name": "Alertless University",
+            "institution_is_us": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+
+    alerts = admin.get("/api/v1/alerts").json()
+    pending = {p["person_id"]: p for p in alerts["pending_registrations"]}
+    assert pid in pending
+    assert pending[pid]["detail"] == "Alertless University"
+    # Free-text registration created the institution inactive: it shows up
+    # for review, not (yet) as missing an administrative contact.
+    unreviewed = {i["name"]: i for i in alerts["unreviewed_institutions"]}
+    assert "Alertless University" in unreviewed
+    inst_id = unreviewed["Alertless University"]["institution_id"]
+    assert unreviewed["Alertless University"]["current_members"] == 1
+    assert "Alertless University" not in [
+        i["name"] for i in alerts["institutions_missing_admin_contact"]
+    ]
+    # The nav badge total counts every category.
+    assert alerts["total"] == (
+        len(alerts["pending_registrations"])
+        + len(alerts["unreviewed_institutions"])
+        + len(alerts["institutions_missing_admin_contact"])
+        + len(alerts["unlinked_accounts"])
+        + len(alerts["active_without_affiliation"])
+        + len(alerts["ineligible_voting_members"])
+        + len(alerts["open_author_periods_not_active"])
+        + (1 if alerts["migrations_pending"] else 0)
+    )
+
+    # Approval clears the pending alert; activating the institution moves it
+    # from "review" to "no administrative contact".
+    r = admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"})
+    assert r.status_code == 200, r.text
+    r = admin.patch(f"/api/v1/institutions/{inst_id}", json={"is_active": True})
+    assert r.status_code == 200, r.text
+    alerts = admin.get("/api/v1/alerts").json()
+    assert pid not in [p["person_id"] for p in alerts["pending_registrations"]]
+    assert "Alertless University" not in [i["name"] for i in alerts["unreviewed_institutions"]]
+    assert "Alertless University" in [
+        i["name"] for i in alerts["institutions_missing_admin_contact"]
+    ]
+
+    # Naming an administrative contact clears the institution alert.
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "admin_contact",
+            "institution_id": inst_id,
+            "start_date": "2025-01-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    alerts = admin.get("/api/v1/alerts").json()
+    assert "Alertless University" not in [
+        i["name"] for i in alerts["institutions_missing_admin_contact"]
+    ]
+
+    # An unlinked member sign-in shows up until it is linked to a person.
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "unlinked-orphan", "password": "orphan-pw-123", "role": "member"},
+    )
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    alerts = admin.get("/api/v1/alerts").json()
+    assert "unlinked-orphan" in [u["login"] for u in alerts["unlinked_accounts"]]
+    assert admin.patch(f"/api/v1/auth/users/{uid}", json={"person_id": pid}).status_code == 200
+    alerts = admin.get("/api/v1/alerts").json()
+    assert uid not in [u["user_id"] for u in alerts["unlinked_accounts"]]
+
+    # Ending the only affiliation leaves an active member without a current
+    # institution.
+    affil_id = admin.get(f"/api/v1/people/{pid}").json()["affiliations"][0]["id"]
+    r = admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": str(date.today())}
+    )
+    assert r.status_code == 200, r.text
+    alerts = admin.get("/api/v1/alerts").json()
+    assert pid in [p["person_id"] for p in alerts["active_without_affiliation"]]
+
+    # A stale voting flag (the API clears them on every edit path, so plant
+    # one directly, as a bulk import or manual SQL could) is reported with
+    # the reason.
+    from sqlalchemy import text as sa_text
+
+    with engine.begin() as conn:
+        conn.execute(sa_text("UPDATE people SET is_voting = true WHERE id = :id"), {"id": pid})
+    alerts = admin.get("/api/v1/alerts").json()
+    voting = {p["person_id"]: p for p in alerts["ineligible_voting_members"]}
+    assert pid in voting
+    assert "US institution" in voting[pid]["detail"]
+    with engine.begin() as conn:
+        conn.execute(sa_text("UPDATE people SET is_voting = false WHERE id = :id"), {"id": pid})
+
+    # An open-ended author period on someone who is no longer active.
+    r = admin.post(f"/api/v1/people/{member_pid}/author-periods", json={"start_date": "2025-01-01"})
+    assert r.status_code == 201, r.text
+    alerts = admin.get("/api/v1/alerts").json()
+    assert member_pid not in [
+        p["person_id"] for p in alerts["open_author_periods_not_active"]
+    ]
+    r = admin.post(f"/api/v1/people/{member_pid}/status", json={"status": "alumni"})
+    assert r.status_code == 200, r.text
+    alerts = admin.get("/api/v1/alerts").json()
+    stale = {p["person_id"]: p for p in alerts["open_author_periods_not_active"]}
+    assert member_pid in stale
+    assert stale[member_pid]["detail"] == "status is alumni"

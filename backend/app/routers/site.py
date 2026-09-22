@@ -74,6 +74,20 @@ def _code_revision() -> str | None:
         return None
 
 
+def migration_state(db: Session) -> tuple[str | None, str | None, bool]:
+    """(code revision, database revision, upgrade pending) — also feeds the
+    admin alerts endpoint."""
+    code_rev = _code_revision()
+    try:
+        db_rev = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    except Exception:
+        # Fresh installs get the schema from metadata.create_all and have no
+        # alembic_version table; that's current by construction, not pending.
+        db.rollback()
+        db_rev = None
+    return code_rev, db_rev, bool(code_rev and db_rev and code_rev != db_rev)
+
+
 @router.get("/system", dependencies=[Depends(require_admin)])
 def system_status(db: Session = Depends(get_db)) -> SystemStatus:
     """Self-diagnosis for the admin panel: database size, record counts, and
@@ -90,15 +104,7 @@ def system_status(db: Session = Depends(get_db)) -> SystemStatus:
         ).scalar_one(),
         "talks": db.execute(select(func.count()).select_from(Talk)).scalar_one(),
     }
-    code_rev = _code_revision()
-    try:
-        db_rev = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
-    except Exception:
-        # Fresh installs get the schema from metadata.create_all and have no
-        # alembic_version table; that's current by construction, not pending.
-        db.rollback()
-        db_rev = None
-    pending = bool(code_rev and db_rev and code_rev != db_rev)
+    code_rev, db_rev, pending = migration_state(db)
     return SystemStatus(
         db_size_bytes=db_size,
         counts=counts,

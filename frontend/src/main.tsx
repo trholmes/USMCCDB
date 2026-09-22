@@ -7,6 +7,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import { AlertsProvider } from './auth/AlertsContext'
 import { SessionProvider } from './auth/SessionContext'
 
 // Primary blue matches the validated chart palette (slot 1, #2a78d6).
@@ -27,7 +28,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Notifications position="top-right" />
       <BrowserRouter>
         <SessionProvider>
-          <App />
+          <AlertsProvider>
+            <App />
+          </AlertsProvider>
         </SessionProvider>
       </BrowserRouter>
     </MantineProvider>

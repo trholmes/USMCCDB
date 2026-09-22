@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import User, UserRole
 from app.routers import (
+    alerts,
     auth,
     author_lists,
     backups,
@@ -92,6 +93,7 @@ app.include_router(publications.router, prefix=prefix)
 app.include_router(author_lists.router, prefix=prefix)
 app.include_router(backups.router, prefix=prefix)
 app.include_router(site.router, prefix=prefix)
+app.include_router(alerts.router, prefix=prefix)
 
 
 @app.get("/api/v1/health")
