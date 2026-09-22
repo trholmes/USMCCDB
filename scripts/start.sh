@@ -55,11 +55,13 @@ if [ ! -f .env ]; then
     echo "  BOOTSTRAP ADMIN LOGIN:  username: admin   password: ${adminpass}"
     echo "  (Log in and change it, or create your own accounts and disable it.)"
     echo
-    echo "  Recommended next edits to .env before going live:"
-    echo "    SITE_DOMAIN=db.muoncollider.us     # enables the HTTPS (caddy) container"
+    echo "  Recommended next edits to .env before going live (README: \"Going live\"):"
     echo "    SITE_URL=https://db.muoncollider.us"
     echo "    CONTACT_EMAIL=you@example.edu"
     echo "    ORCID_CLIENT_ID / ORCID_CLIENT_SECRET   # enables ORCID sign-in"
+    echo "  plus ONE of:"
+    echo "    HTTP_PORT=5000                     # behind the host's own TLS proxy (apache)"
+    echo "    SITE_DOMAIN=db.muoncollider.us     # or: bundled HTTPS (caddy) container"
     echo
 fi
 
@@ -75,6 +77,7 @@ compose ${profile_args[@]+"${profile_args[@]}"} up -d --build
 echo
 compose ${profile_args[@]+"${profile_args[@]}"} ps
 port=$(grep -E '^HTTP_PORT=' .env | cut -d= -f2)
+site_url=$(grep -E '^SITE_URL=' .env | cut -d= -f2- | tr -d '[:space:]')
 echo
 if [ -n "${domain}" ]; then
     echo "Going live at https://${domain} (caddy is obtaining the TLS certificate;"
@@ -84,7 +87,16 @@ if [ -n "${domain}" ]; then
     echo "ORCID setup reminder: register a public-API client at"
     echo "  https://orcid.org/developer-tools"
     echo "with redirect URI: https://${domain}/api/v1/auth/orcid/callback"
+elif [ -n "${site_url}" ]; then
+    echo "Serving plain HTTP on localhost:${port:-8080} for the external TLS proxy"
+    echo "in front of ${site_url} (the proxy must forward the domain to that port"
+    echo "and send X-Forwarded-Proto: https — see README, \"Going live\")."
+    echo
+    echo "ORCID setup reminder: register a public-API client at"
+    echo "  https://orcid.org/developer-tools"
+    echo "with redirect URI: ${site_url%/}/api/v1/auth/orcid/callback"
 else
     echo "Running at http://localhost:${port:-8080}."
-    echo "To publish over HTTPS, set SITE_DOMAIN in .env and re-run this script."
+    echo "To publish over HTTPS, set SITE_URL (and SITE_DOMAIN for the bundled"
+    echo "caddy option) in .env and re-run this script — see README, \"Going live\"."
 fi

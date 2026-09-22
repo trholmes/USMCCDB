@@ -64,15 +64,20 @@ services:
     build: ./frontend
     ports:
       # Bound to localhost by default so plain HTTP is never exposed to the
-      # network; the caddy service below fronts it with HTTPS in production.
+      # network; in production it is fronted by TLS — either an external
+      # reverse proxy on the host (e.g. Apache proxying the domain to this
+      # port; set HTTP_PORT to match, 5000 on db.muoncollider.us) or the
+      # caddy service below. See README, "Going live".
       - "${BIND_HOST:-127.0.0.1}:${HTTP_PORT:-8080}:80"
     depends_on:
       - backend
     restart: unless-stopped
 
-  # HTTPS reverse proxy in its own container. Runs only under the "tls"
-  # profile, which scripts/start.sh enables automatically when SITE_DOMAIN is
-  # set in .env. Obtains and renews the Let's Encrypt certificate itself.
+  # Optional HTTPS reverse proxy in its own container. Runs only under the
+  # "tls" profile, which scripts/start.sh enables automatically when
+  # SITE_DOMAIN is set in .env. Obtains and renews the Let's Encrypt
+  # certificate itself. Leave SITE_DOMAIN empty (no caddy) when an external
+  # proxy on the host terminates TLS instead, as on db.muoncollider.us.
   caddy:
     image: docker.io/library/caddy:2
     profiles: ["tls"]
