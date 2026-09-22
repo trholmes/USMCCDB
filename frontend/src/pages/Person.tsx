@@ -846,7 +846,7 @@ export default function PersonPage() {
       {canEditFull && (
         <Group align="flex-start" gap="md">
           {instOpen ? (
-            <Card withBorder w={340}>
+            <Card withBorder w={{ base: '100%', xs: 340 }}>
               <Stack gap="sm">
                 <Title order={5}>Change institution</Title>
                 <Text size="xs" c="dimmed">
@@ -919,7 +919,7 @@ export default function PersonPage() {
           {/* One additional affiliation alongside the primary (issue #3). */}
           {!person.affiliations.some((a) => !a.is_primary && a.end_date === null) &&
             (secOpen ? (
-              <Card withBorder w={340}>
+              <Card withBorder w={{ base: '100%', xs: 340 }}>
                 <Stack gap="sm">
                   <Title order={5}>Add secondary affiliation</Title>
                   <Text size="xs" c="dimmed">
@@ -982,7 +982,7 @@ export default function PersonPage() {
             ))}
 
           {statusOpen ? (
-            <Card withBorder w={340}>
+            <Card withBorder w={{ base: '100%', xs: 340 }}>
               <Stack gap="sm">
                 <Title order={5}>Change status</Title>
                 <Text size="xs" c="dimmed">
@@ -1021,7 +1021,8 @@ export default function PersonPage() {
       )}
 
       <Title order={5}>Affiliations</Title>
-      <Table maw={860}>
+      <Table.ScrollContainer minWidth={600} maw={860}>
+      <Table>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Institution</Table.Th>
@@ -1063,6 +1064,7 @@ export default function PersonPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
       {(roles.length > 0 || isOffice) && (
         <>
@@ -1072,7 +1074,8 @@ export default function PersonPage() {
               No leadership roles recorded.
             </Text>
           ) : (
-            <Table maw={860}>
+            <Table.ScrollContainer minWidth={600} maw={860}>
+            <Table>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Role</Table.Th>
@@ -1121,9 +1124,10 @@ export default function PersonPage() {
                 ))}
               </Table.Tbody>
             </Table>
+            </Table.ScrollContainer>
           )}
           {isOffice && (
-            <Card withBorder w={340}>
+            <Card withBorder w={{ base: '100%', xs: 340 }}>
               <Stack gap="sm">
                 <Title order={6}>Add role</Title>
                 <Select
@@ -1199,7 +1203,8 @@ export default function PersonPage() {
       {canEditFull && events.length > 0 && (
         <>
           <Title order={5}>Membership history</Title>
-          <Table maw={720}>
+          <Table.ScrollContainer minWidth={500} maw={720}>
+          <Table>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Effective</Table.Th>
@@ -1219,6 +1224,7 @@ export default function PersonPage() {
               ))}
             </Table.Tbody>
           </Table>
+          </Table.ScrollContainer>
         </>
       )}
 
@@ -1228,7 +1234,8 @@ export default function PersonPage() {
           No talks recorded. Browse <Link to="/talks">talks & speakers</Link>.
         </Text>
       ) : (
-        <Table maw={860}>
+        <Table.ScrollContainer minWidth={600} maw={860}>
+        <Table>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Date</Table.Th>
@@ -1255,6 +1262,7 @@ export default function PersonPage() {
             ))}
           </Table.Tbody>
         </Table>
+        </Table.ScrollContainer>
       )}
 
       {/* Office-only: authorship periods drive collaboration-wide author-list
@@ -1271,7 +1279,8 @@ export default function PersonPage() {
               Not currently on the author list.
             </Text>
           ) : (
-            <Table maw={720}>
+            <Table.ScrollContainer minWidth={500} maw={720}>
+            <Table>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>From</Table.Th>
@@ -1305,6 +1314,7 @@ export default function PersonPage() {
                 ))}
               </Table.Tbody>
             </Table>
+            </Table.ScrollContainer>
           )}
           <Button size="xs" variant="light" w="fit-content" onClick={() => openApEdit('new')}>
             Add authorship period

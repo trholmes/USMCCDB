@@ -15,8 +15,10 @@ import {
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { PersonSummary, WorkingGroup } from '../api/types'
+import type { CollabRole, PersonSummary, WorkingGroup } from '../api/types'
 import { useSession } from '../auth/SessionContext'
+import PersonSelect from '../components/PersonSelect'
+import { today } from '../dates'
 
 const slugify = (name: string) =>
   name
@@ -30,7 +32,41 @@ export default function WorkingGroupsPage() {
   const [modal, setModal] = useState<WorkingGroup | 'new' | null>(null)
   const [form, setForm] = useState({ name: '', slug: '', description: '', is_active: true })
   const [slugTouched, setSlugTouched] = useState(false)
+  // Person selected in the "Add member" picker of the open accordion panel.
+  const [addPersonId, setAddPersonId] = useState<string | null>(null)
   const { me, isOffice, isAdmin } = useSession()
+
+  // Conveners may manage their own group's membership (mirrors the backend
+  // rule on POST/DELETE /working-groups/{id}/members).
+  const [convenerWgIds, setConvenerWgIds] = useState<number[]>([])
+  useEffect(() => {
+    if (me?.person_id == null || isOffice) {
+      setConvenerWgIds([])
+      return
+    }
+    const t = today()
+    api
+      .get<CollabRole[]>(`/collab-roles?person_id=${me.person_id}&role=convener`)
+      .then((rs) =>
+        setConvenerWgIds(
+          rs
+            .filter((r) => r.start_date <= t && (!r.end_date || r.end_date >= t))
+            .map((r) => r.working_group_id)
+            .filter((x): x is number => x != null),
+        ),
+      )
+      .catch(() => setConvenerWgIds([]))
+  }, [me?.person_id, isOffice])
+
+  const canManage = (wgId: number) => isOffice || convenerWgIds.includes(wgId)
+
+  // One shared directory load for the per-group "Add member" pickers (every
+  // accordion panel stays mounted, so self-loading pickers would each fetch).
+  const [people, setPeople] = useState<PersonSummary[]>([])
+  useEffect(() => {
+    if (!isOffice && convenerWgIds.length === 0) return
+    api.get<PersonSummary[]>('/people').then(setPeople).catch(() => setPeople([]))
+  }, [isOffice, convenerWgIds])
 
   const load = useCallback(() => {
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
@@ -66,6 +102,31 @@ export default function WorkingGroupsPage() {
       await api.delete(`/working-groups/${wgId}/members/${me.person_id}`)
       notifications.show({ message: 'Left the group.' })
       loadMembers(wgId)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const addMember = async (wgId: number) => {
+    if (!addPersonId) return
+    try {
+      await api.post(`/working-groups/${wgId}/members`, { person_id: Number(addPersonId) })
+      notifications.show({ message: 'Member added.' })
+      setAddPersonId(null)
+      loadMembers(wgId)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const removeMember = async (wg: WorkingGroup, p: PersonSummary) => {
+    if (!window.confirm(`Remove ${p.given_name} ${p.family_name} from "${wg.name}"?`)) return
+    try {
+      await api.delete(`/working-groups/${wg.id}/members/${p.id}`)
+      notifications.show({ message: 'Member removed.' })
+      loadMembers(wg.id)
       load()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -136,7 +197,12 @@ export default function WorkingGroupsPage() {
         <Title order={3}>Working groups</Title>
         {isOffice && <Button onClick={() => open('new')}>Add working group</Button>}
       </Group>
-      <Accordion onChange={(v) => v && loadMembers(Number(v))}>
+      <Accordion
+        onChange={(v) => {
+          setAddPersonId(null)
+          if (v) loadMembers(Number(v))
+        }}
+      >
         {wgs.map((wg) => (
           <Accordion.Item key={wg.id} value={String(wg.id)}>
             <Accordion.Control>
@@ -173,6 +239,22 @@ export default function WorkingGroupsPage() {
                   </Button>
                 )}
               </Group>
+              {canManage(wg.id) && (
+                <Group gap="xs" mb="sm" align="flex-end">
+                  <PersonSelect
+                    people={people}
+                    value={addPersonId}
+                    onChange={setAddPersonId}
+                    placeholder="Add a person to this group…"
+                    excludeIds={(members[wg.id] ?? []).map((p) => p.id)}
+                    w={{ base: '100%', xs: 280 }}
+                  />
+                  <Button size="xs" disabled={!addPersonId} onClick={() => addMember(wg.id)}>
+                    Add member
+                  </Button>
+                </Group>
+              )}
+              <Table.ScrollContainer minWidth={500}>
               <Table>
                 <Table.Tbody>
                   {(members[wg.id] ?? []).map((p) => (
@@ -182,10 +264,25 @@ export default function WorkingGroupsPage() {
                       </Table.Td>
                       <Table.Td>{p.career_stage}</Table.Td>
                       <Table.Td>{p.email}</Table.Td>
+                      {canManage(wg.id) && (
+                        <Table.Td>
+                          {p.id !== me?.person_id && (
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              color="red"
+                              onClick={() => removeMember(wg, p)}
+                            >
+                              Remove
+                            </Button>
+                          )}
+                        </Table.Td>
+                      )}
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
               </Table>
+              </Table.ScrollContainer>
             </Accordion.Panel>
           </Accordion.Item>
         ))}

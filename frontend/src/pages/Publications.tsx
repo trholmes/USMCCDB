@@ -134,7 +134,8 @@ export default function PublicationsPage() {
         />
       </Group>
       <PageCount shown={paged.length} count={count} noun="publications" />
-      <Table striped highlightOnHover>
+      <Table.ScrollContainer minWidth={800}>
+<Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Code" k="code" sort={sort} toggle={toggle} />
@@ -162,6 +163,7 @@ export default function PublicationsPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
       <PaginationBar page={page} total={total} setPage={setPage} />
 
       <Modal opened={modal} onClose={() => setModal(false)} title="Add a publication">

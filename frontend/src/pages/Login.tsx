@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Center,
+  Collapse,
   Divider,
   PasswordInput,
   Stack,
@@ -38,6 +39,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [capsLock, setCapsLock] = useState(false)
   const [busy, setBusy] = useState(false)
+  // With ORCID sign-in available the local-account form stays collapsed
+  // until asked for — most members never need it.
+  const [localOpen, setLocalOpen] = useState(false)
   const [config, setConfig] = useState<AuthConfig | null>(null)
   const [site, setSite] = useState<SiteSettings | null>(null)
   const { refresh } = useSession()
@@ -76,7 +80,7 @@ export default function LoginPage() {
 
   return (
     <Center mih="100vh" p="md">
-      <Stack w={380}>
+      <Stack w={{ base: '100%', xs: 380 }}>
         <SiteBanner />
       <Card withBorder shadow="sm" p="xl">
         <Stack>
@@ -104,32 +108,48 @@ export default function LoginPage() {
               >
                 Sign in with ORCID
               </Button>
-              <Divider label="or use a local account" />
+              <Divider
+                label={
+                  <Anchor
+                    component="button"
+                    type="button"
+                    size="xs"
+                    c="dimmed"
+                    onClick={() => setLocalOpen((o) => !o)}
+                  >
+                    or use a local account
+                  </Anchor>
+                }
+              />
             </>
           )}
 
-          <form onSubmit={submit}>
-            <Stack gap="sm">
-              <TextInput
-                label="Username"
-                value={username}
-                onChange={(e) => setUsername(e.currentTarget.value)}
-                required
-              />
-              <PasswordInput
-                label="Password"
-                value={password}
-                onChange={(e) => setPassword(e.currentTarget.value)}
-                onKeyDown={(e) => setCapsLock(e.getModifierState('CapsLock'))}
-                onKeyUp={(e) => setCapsLock(e.getModifierState('CapsLock'))}
-                error={capsLock ? 'Caps Lock is on' : undefined}
-                required
-              />
-              <Button type="submit" loading={busy}>
-                Sign in
-              </Button>
-            </Stack>
-          </form>
+          {/* Without ORCID a local account is the only way in, so the form
+              can't be collapsed away. */}
+          <Collapse in={localOpen || !config?.orcid_enabled}>
+            <form onSubmit={submit}>
+              <Stack gap="sm">
+                <TextInput
+                  label="Username"
+                  value={username}
+                  onChange={(e) => setUsername(e.currentTarget.value)}
+                  required
+                />
+                <PasswordInput
+                  label="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.currentTarget.value)}
+                  onKeyDown={(e) => setCapsLock(e.getModifierState('CapsLock'))}
+                  onKeyUp={(e) => setCapsLock(e.getModifierState('CapsLock'))}
+                  error={capsLock ? 'Caps Lock is on' : undefined}
+                  required
+                />
+                <Button type="submit" loading={busy}>
+                  Sign in
+                </Button>
+              </Stack>
+            </form>
+          </Collapse>
 
           <Text size="sm" c="dimmed">
             Not a member yet? <Anchor href="/register">Register to join.</Anchor>

@@ -108,7 +108,8 @@ export default function EventsPage() {
         <Title order={3}>Conferences & events</Title>
         {isOffice && <Button onClick={openCreate}>Add event</Button>}
       </Group>
-      <Table striped highlightOnHover>
+      <Table.ScrollContainer minWidth={700}>
+<Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
@@ -159,6 +160,7 @@ export default function EventsPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
 
       <Modal
         opened={modal}

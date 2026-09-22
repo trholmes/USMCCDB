@@ -253,7 +253,7 @@ export default function TalksPage() {
           placeholder="Search title, conference, venue or speaker…"
           value={q}
           onChange={(e) => setQ(e.currentTarget.value)}
-          w={260}
+          w={{ base: '100%', sm: 260 }}
         />
         <MultiSelect
           data={[
@@ -265,7 +265,7 @@ export default function TalksPage() {
           clearable
           searchable
           placeholder={eventFilter.length ? undefined : 'All conferences'}
-          w={230}
+          w={{ base: '100%', sm: 230 }}
         />
         <MultiSelect
           data={TALK_TYPES}
@@ -273,7 +273,7 @@ export default function TalksPage() {
           onChange={setTypeFilter}
           clearable
           placeholder={typeFilter.length ? undefined : 'All types'}
-          w={180}
+          w={{ base: '100%', sm: 180 }}
         />
         <MultiSelect
           data={['open', 'nominations', 'assigned', 'given', 'cancelled']}
@@ -281,12 +281,13 @@ export default function TalksPage() {
           onChange={setStatusFilter}
           clearable
           placeholder={statusFilter.length ? undefined : 'All statuses'}
-          w={190}
+          w={{ base: '100%', sm: 190 }}
         />
       </Group>
 
       <PageCount shown={paged.length} count={count} noun="talks" />
-      <Table striped highlightOnHover>
+      <Table.ScrollContainer minWidth={800}>
+<Table striped highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <SortableTh label="Date" k="date" sort={sort} toggle={toggle} />
@@ -336,6 +337,7 @@ export default function TalksPage() {
           ))}
         </Table.Tbody>
       </Table>
+      </Table.ScrollContainer>
       <PaginationBar page={page} total={total} setPage={setPage} />
 
       <Modal
@@ -448,7 +450,7 @@ export default function TalksPage() {
                     }))}
                     value={nominee}
                     onChange={setNominee}
-                    w={260}
+                    w={{ base: '100%', xs: 260 }}
                   />
                   <Button
                     size="xs"
