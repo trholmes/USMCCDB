@@ -2579,6 +2579,50 @@ def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
     assert _no_session_cookie(r)
 
 
+def test_orcid_admin_without_membership(admin, monkeypatch):
+    """An ORCID sign-in provisions a pending person; an admin can make the
+    login office/admin and drop that person, leaving a non-member account."""
+    orcid_id = "0000-0003-4444-5555"
+    stranger, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
+    assert r.headers["location"] == "/register?welcome=orcid"
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid_id)
+    pid = admin.get("/api/v1/people", params={"q": orcid_id}).json()[0]["id"]
+
+    # A member-role login must not lose its person: that would bypass the
+    # approval gate.
+    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
+    assert r.status_code == 400, r.text
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 200
+
+    assert admin.patch(f"/api/v1/auth/users/{uid}", json={"role": "admin"}).status_code == 200
+    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
+    assert r.status_code == 200, r.text
+    assert r.json()["person_id"] is None
+    assert r.json()["role"] == "admin"
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 404
+    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+
+    # A fresh sign-in reuses the login — no new pending person, no
+    # registration redirect — and has admin access.
+    again, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
+    assert r.headers["location"] == "/"
+    assert again.get("/api/v1/auth/users").status_code == 200
+    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+
+    # Nothing left to remove.
+    assert admin.delete(f"/api/v1/auth/users/{uid}/person").status_code == 400
+
+
+def test_remove_user_person_refuses_approved_member(admin):
+    _, pid = _linked_member(admin, given="Kee", family="Pme", email="keep.me@example.edu")
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == pid)
+    admin.patch(f"/api/v1/auth/users/{uid}", json={"role": "office"})
+    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
+    assert r.status_code == 409, r.text
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 200
+    assert admin.delete("/api/v1/auth/users/999999/person").status_code == 404
+
+
 def test_orcid_links_existing_approved_member(admin, monkeypatch):
     import app.services.email as email_mod
 

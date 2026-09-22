@@ -113,6 +113,33 @@ export default function AdminPage() {
     setManage(null)
   }
 
+  // An unapproved registration (typically provisioned by a first ORCID
+  // sign-in) that an office/admin login can shed to stay a non-member.
+  const linkedPerson = manage?.person_id ? people.find((p) => p.id === manage.person_id) : undefined
+  const removablePerson =
+    linkedPerson && ['pending', 'rejected'].includes(linkedPerson.status) ? linkedPerson : undefined
+
+  const removePerson = async () => {
+    if (!manage || !removablePerson) return
+    if (
+      !window.confirm(
+        `Delete the ${removablePerson.status} person record ` +
+          `'${removablePerson.given_name} ${removablePerson.family_name}'?\n\n` +
+          `The login '${loginLabel(manage)}' stays, but no longer belongs to a ` +
+          'collaboration member. This cannot be undone.',
+      )
+    )
+      return
+    try {
+      await api.delete(`/auth/users/${manage.id}/person`)
+      notifications.show({ message: 'Person record removed' })
+      setManage(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
   const resetPassword = async (u: User) => {
     if (!window.confirm(`Reset the password of '${loginLabel(u)}' to a temporary one?`)) return
     try {
@@ -306,6 +333,26 @@ export default function AdminPage() {
           >
             Link person
           </Button>
+          {removablePerson && (
+            <>
+              <Text size="xs" c="dimmed">
+                The linked person is an unapproved ({removablePerson.status}) registration —
+                usually created by the first ORCID sign-in. To keep this login as an office or
+                admin account without a collaboration membership, remove that record.
+                {manage?.role === 'member' && ' Give the account the office or admin role first.'}
+              </Text>
+              <Button
+                w="fit-content"
+                size="xs"
+                color="red"
+                variant="light"
+                onClick={removePerson}
+                disabled={manage?.role === 'member'}
+              >
+                Remove person record
+              </Button>
+            </>
+          )}
           <Divider label="Merge accounts" />
           <Select
             label="Merge another account into this one"

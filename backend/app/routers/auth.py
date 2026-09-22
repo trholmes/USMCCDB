@@ -265,6 +265,42 @@ def merge_users(
     return UserOut.model_validate(keep)
 
 
+@router.delete("/users/{user_id}/person")
+def remove_user_person(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _actor: User = Depends(require_admin),
+) -> UserOut:
+    """Delete the unapproved person record linked to a login, keeping the
+    login. For someone who signed in with ORCID (which provisions a pending
+    registration) but needs only an office/admin account, not a membership.
+
+    Only pending/rejected records can go this way: approved members carry
+    history that must not vanish with a click. And the account must hold a
+    privileged role first — a member-role login without a person would slip
+    past the membership-approval gate (membership_block_reason)."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    if user.person_id is None:
+        raise HTTPException(400, "This account has no linked person")
+    if user.role == UserRole.member:
+        raise HTTPException(
+            400, "Give the account the office or admin role before removing its person"
+        )
+    person = db.get(Person, user.person_id)
+    if person is not None:
+        if person.status not in (MemberStatus.pending, MemberStatus.rejected):
+            raise HTTPException(
+                409, "Only an unapproved (pending or rejected) registration can be removed"
+            )
+        db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
+    user.person_id = None
+    db.commit()
+    db.refresh(user)
+    return UserOut.model_validate(user)
+
+
 @router.post("/users/{user_id}/reset-password")
 def reset_password(
     user_id: int,
