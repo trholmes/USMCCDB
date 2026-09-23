@@ -5,7 +5,9 @@ Guidance for AI agents (and new contributors) working in this repo.
 ## What this is
 
 Membership / speakers / publications / author-list database for the US Muon
-Collider Collaboration (Fence-inspired, self-hosted). Design doc: `docs/PLAN.md`.
+Collider Collaboration (Fence-inspired, self-hosted). Design doc: `docs/PLAN.md`;
+roles and permissions: `docs/ROLES.md`; every email the system sends:
+`docs/NOTIFICATIONS.md` — update both when the rules or the mail change.
 
 - **backend/** — FastAPI + SQLAlchemy 2 + Alembic, PostgreSQL. Routers in
   `app/routers/`, models in `app/models/`, Pydantic schemas in `app/schemas/`,
@@ -117,6 +119,11 @@ itself, so the database just has to exist.
   fields change.
 - Status and membership changes are recorded append-only in
   `membership_events`; don't mutate history.
+- Notification mail is composed in-request by `app/services/notifications.py`
+  (audience helpers → `Message`) and queued with `notifications.queue`; every
+  send is recorded in `email_log` (Admin → Email). Each kind is catalogued in
+  `docs/NOTIFICATIONS.md`. `ADMIN_EMAIL` is the database-admin listserv;
+  `CONTACT_EMAIL` is the address members see.
 - API tests live in `backend/tests/test_api.py` and exercise the real HTTP
   API via `TestClient` (module-scoped, tables dropped/recreated per run).
 - Commit messages: single imperative summary line, optional body.
