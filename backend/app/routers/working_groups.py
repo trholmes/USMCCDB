@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import CollabRole, CollabRoleType, Person, User, WorkingGroup, WorkingGroupMember
-from app.models.membership import DETAIL_REQUIRED_ROLES
+from app.models.membership import (
+    AREA_CONSTRAINED_ROLES,
+    DETAIL_REQUIRED_ROLES,
+    REPRESENTATIVE_AREAS,
+)
 from app.schemas.membership import (
     CollabRoleCreate,
     CollabRoleOut,
@@ -201,6 +205,22 @@ def list_collab_roles(
     return [CollabRoleOut.model_validate(r) for r in roles]
 
 
+def _normalize_area(role: CollabRoleType, detail: str | None) -> str | None:
+    """Representatives and deputies stand for one of the fixed Leadership
+    Council areas (issue #159): accept any capitalization of a known area
+    and reject anything else. Other roles keep their free-text detail."""
+    if role not in AREA_CONSTRAINED_ROLES or detail is None:
+        return detail
+    canonical = {a.lower(): a for a in REPRESENTATIVE_AREAS}
+    area = canonical.get(detail.strip().lower())
+    if area is None:
+        raise HTTPException(
+            422,
+            f"{role.value} area must be one of: {', '.join(REPRESENTATIVE_AREAS)}",
+        )
+    return area
+
+
 @router.post("/collab-roles", status_code=201)
 def create_collab_role(
     body: CollabRoleCreate,
@@ -216,7 +236,9 @@ def create_collab_role(
         raise HTTPException(422, f"{body.role.value} role requires institution_id")
     if body.role in DETAIL_REQUIRED_ROLES and body.detail is None:
         raise HTTPException(422, f"{body.role.value} role requires detail")
-    role = CollabRole(**body.model_dump())
+    data = body.model_dump()
+    data["detail"] = _normalize_area(body.role, body.detail)
+    role = CollabRole(**data)
     db.add(role)
     db.commit()
     db.refresh(role)
@@ -240,6 +262,8 @@ def update_collab_role(
         and updates.get("detail", role.detail) is None
     ):
         raise HTTPException(422, f"{role.role.value} role requires detail")
+    if "detail" in updates:
+        updates["detail"] = _normalize_area(role.role, updates["detail"])
     for field, value in updates.items():
         setattr(role, field, value)
     db.commit()

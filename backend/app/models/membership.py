@@ -91,6 +91,16 @@ DETAIL_REQUIRED_ROLES = (
     CollabRoleType.other,
 )
 
+# The Leadership Council areas a representative (or deputy) stands for
+# (issue #159). collab_roles.detail for these two roles must be one of these,
+# case-normalized on the way in; the other detail roles stay free text.
+# Mirrored in frontend/src/constants.ts.
+REPRESENTATIVE_AREAS = ("Accelerator", "Experimental", "Theory", "Communications")
+AREA_CONSTRAINED_ROLES = (
+    CollabRoleType.representative,
+    CollabRoleType.deputy_representative,
+)
+
 
 class Person(TimestampedBase):
     __tablename__ = "people"

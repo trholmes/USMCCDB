@@ -19,6 +19,7 @@ import { api } from '../api/client'
 import type { CollabRole, Institution, WorkingGroup } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import PersonSelect from '../components/PersonSelect'
+import RoleDetailInput from '../components/RoleDetailInput'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import { COLLAB_ROLES, collabRoleLabel } from '../constants'
@@ -290,16 +291,11 @@ export default function LeadershipPage() {
                 w={{ base: '100%', xs: 260 }}
               />
             </Group>
-            {roleDef?.needsDetail && (
-              <TextInput
-                label={roleDef.value === 'other' ? 'Title' : 'Area'}
-                description={
-                  roleDef.value === 'other'
-                    ? 'Full title as it should appear (e.g. DEI Committee Chair).'
-                    : 'Qualifier, e.g. Accelerator, Experimental, Outreach, Target.'
-                }
+            {roleType && (
+              <RoleDetailInput
+                role={roleType}
                 value={roleDetail}
-                onChange={(e) => setRoleDetail(e.currentTarget.value)}
+                onChange={setRoleDetail}
                 maw={340}
               />
             )}
@@ -381,13 +377,11 @@ export default function LeadershipPage() {
                 ? ` — ${roleEdit.person.preferred_name || roleEdit.person.given_name} ${roleEdit.person.family_name}`
                 : ''}
             </Text>
-            {COLLAB_ROLES.find((d) => d.value === roleEdit.role)?.needsDetail && (
-              <TextInput
-                label={roleEdit.role === 'other' ? 'Title' : 'Area'}
-                value={roleForm.detail}
-                onChange={(e) => setRoleForm({ ...roleForm, detail: e.currentTarget.value })}
-              />
-            )}
+            <RoleDetailInput
+              role={roleEdit.role}
+              value={roleForm.detail}
+              onChange={(v) => setRoleForm({ ...roleForm, detail: v })}
+            />
             <TextInput
               label="Start date"
               type="date"

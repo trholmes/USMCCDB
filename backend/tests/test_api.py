@@ -1477,6 +1477,50 @@ def test_collab_roles_lifecycle(admin):
     assert rep.status_code == 201, rep.text
     assert rep.json()["detail"] == "Accelerator"
 
+    # Representatives stand for one of the fixed Leadership Council areas
+    # (issue #159): any capitalization of a known area is normalized…
+    dep = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "deputy_representative",
+            "detail": " theory ",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert dep.status_code == 201, dep.text
+    assert dep.json()["detail"] == "Theory"
+    # …anything else is refused, on create and on edit alike…
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "representative",
+            "detail": "Outreach",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert r.status_code == 422 and "Accelerator" in r.json()["detail"]
+    dep_id = dep.json()["id"]
+    assert admin.patch(
+        f"/api/v1/collab-roles/{dep_id}", json={"detail": "Physics"}
+    ).status_code == 422
+    r = admin.patch(f"/api/v1/collab-roles/{dep_id}", json={"detail": "communications"})
+    assert r.status_code == 200 and r.json()["detail"] == "Communications"
+    # …while the free-text detail roles are untouched.
+    lead = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "area_lead",
+            "detail": "Target",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert lead.status_code == 201, lead.text
+    for rid in (dep_id, lead.json()["id"]):
+        assert admin.delete(f"/api/v1/collab-roles/{rid}").status_code == 204
+
     # Scoped roles keep their existing requirements.
     assert admin.post(
         "/api/v1/collab-roles",

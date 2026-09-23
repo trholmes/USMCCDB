@@ -135,6 +135,13 @@ export const COLLAB_ROLES: CollabRoleDef[] = [
   { value: 'other', label: 'Other (free-form title)', template: '{detail}', needsDetail: true },
 ]
 
+// Leadership Council areas a representative / deputy representative stands
+// for (mirrors REPRESENTATIVE_AREAS and AREA_CONSTRAINED_ROLES in
+// backend/app/models/membership.py, issue #159). The detail of these roles
+// must be one of the areas; other detail roles stay free text.
+export const REPRESENTATIVE_AREAS = ['Accelerator', 'Experimental', 'Theory', 'Communications']
+export const AREA_CONSTRAINED_ROLES = ['representative', 'deputy_representative']
+
 // Printed title for a role instance ("Accelerator Representative"); falls
 // back to the raw value for anything unknown.
 export const collabRoleLabel = (role: string, detail?: string | null): string => {
