@@ -1,3 +1,6 @@
+import base64
+import binascii
+import re
 from datetime import UTC, datetime, date, timedelta
 from pathlib import Path
 
@@ -65,6 +68,9 @@ from app.services.email import send_email
 
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
+# Inline (base64) photo on the registration form; the form downsizes before
+# sending, so this is generous.
+MAX_REGISTRATION_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_CHUNK_BYTES = 1024 * 1024
 
 
@@ -262,6 +268,9 @@ def register(
         enforce(registration_limiter(), request)
 
     email = body.email.lower()
+    # Validate the optional photo up front so a bad one fails the request
+    # before any record is created.
+    photo_bytes = _decode_registration_photo(body.photo) if body.photo else None
 
     person: Person | None = None
     if registrant is not None and registrant.person_id is not None:
@@ -370,6 +379,9 @@ def register(
                 start_date=datetime.now(UTC).date(),
             )
         )
+
+    if photo_bytes is not None:
+        _store_photo(person, photo_bytes)
 
     db.flush()  # sessions don't autoflush — the notification queries need the rows
     msg = notifications.registration_submitted(db, person)
@@ -682,6 +694,15 @@ async def upload_photo(
     content = b"".join(chunks)
     if not _photo_signature_ok(file.content_type or "", content[:16]):
         raise HTTPException(422, "File content does not match the declared image type")
+    _store_photo(person, content)
+    db.commit()
+    db.refresh(person)
+    return PersonSummary.model_validate(person)
+
+
+def _store_photo(person: Person, content: bytes) -> None:
+    """Normalize and write a person's photo, replacing any previous file.
+    Sets person.photo_file; the caller commits."""
     # Normalize on the way in: uniform format, bounded size, metadata (incl.
     # EXIF GPS) stripped (issue #137).
     try:
@@ -692,14 +713,33 @@ async def upload_photo(
     photos.mkdir(parents=True, exist_ok=True)
     # Fixed name per person, timestamped to bust caches on replacement.
     old = person.photo_file
-    name = f"{person_id}-{int(datetime.now(UTC).timestamp())}{photo_service.EXT}"
+    name = f"{person.id}-{int(datetime.now(UTC).timestamp())}{photo_service.EXT}"
     (photos / name).write_bytes(content)
     person.photo_file = name
-    db.commit()
     if old and old != name and (photos / old).is_file():
         (photos / old).unlink()
-    db.refresh(person)
-    return PersonSummary.model_validate(person)
+
+
+def _decode_registration_photo(data_url: str) -> bytes:
+    """The registration form sends its optional photo inline as a data URL
+    (issue #165): a form registrant has no session afterwards, and the
+    endpoint's neutral acknowledgement carries no person id to upload
+    against. Same type and magic-byte checks as the upload endpoint."""
+    match = re.fullmatch(r"data:(image/[a-z]+);base64,([A-Za-z0-9+/=\s]+)", data_url.strip())
+    if match is None:
+        raise HTTPException(422, "photo must be a base64 data URL of an image")
+    content_type, payload = match.group(1), match.group(2)
+    if content_type not in PHOTO_TYPES:
+        raise HTTPException(422, f"Unsupported photo type; use one of {sorted(PHOTO_TYPES)}")
+    try:
+        content = base64.b64decode(payload, validate=False)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, "photo is not valid base64")
+    if len(content) > MAX_REGISTRATION_PHOTO_BYTES:
+        raise HTTPException(413, "Photo too large (max 3 MB)")
+    if not _photo_signature_ok(content_type, content[:16]):
+        raise HTTPException(422, "Photo content does not match the declared image type")
+    return content
 
 
 @router.delete("/{person_id}/photo", status_code=204)

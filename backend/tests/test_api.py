@@ -1222,6 +1222,55 @@ def test_photo_upload_and_serve(admin, tmp_path_factory):
     assert admin.get(f"/api/v1/people/{person['id']}/photo").status_code == 404
 
 
+def test_registration_accepts_inline_photo(admin, tmp_path_factory, monkeypatch):
+    """The public form may send a photo inline as a base64 data URL (issue
+    #165): stored like an upload, served once the registration is approved;
+    bad payloads fail the registration before any record is created."""
+    import base64
+    from io import BytesIO
+
+    import app.services.email as email_mod
+    from PIL import Image
+
+    from app.config import get_settings
+
+    os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+
+    buf = BytesIO()
+    Image.new("RGB", (900, 600), "blue").save(buf, format="PNG")
+    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    anon = TestClient(app)
+    base = {
+        "given_name": "Pho",
+        "family_name": "Tographer",
+        "email": "pho.tographer@example.edu",
+        "career_stage": "postdoc",
+    }
+    # Garbage that claims to be an image: refused, nothing created.
+    r = anon.post(
+        "/api/v1/people/register",
+        json={**base, "photo": "data:image/png;base64," + base64.b64encode(b"nope").decode()},
+    )
+    assert r.status_code == 422, r.text
+    assert not [
+        p for p in admin.get("/api/v1/people").json() if p["email"] == base["email"]
+    ]
+    assert anon.post(
+        "/api/v1/people/register", json={**base, "photo": "https://example.edu/me.png"}
+    ).status_code == 422
+
+    r = anon.post("/api/v1/people/register", json={**base, "photo": data_url})
+    assert r.status_code == 201, r.text
+    person = next(p for p in admin.get("/api/v1/people").json() if p["email"] == base["email"])
+    assert person["photo_file"].endswith(".webp")
+    served = admin.get(f"/api/v1/people/{person['id']}/photo")
+    assert served.status_code == 200
+    assert served.content[:4] == b"RIFF"
+
+
 def test_photo_upload_rejects_bad_content(admin, tmp_path_factory, monkeypatch):
     os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
     from app.config import get_settings
