@@ -1,9 +1,12 @@
 import {
   Autocomplete,
+  Avatar,
   Button,
   Card,
   Center,
   Checkbox,
+  FileInput,
+  Group,
   MultiSelect,
   NumberInput,
   Select,
@@ -17,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
+import { ACCEPTED_PHOTO_TYPES, preparePhoto } from '../photos'
 
 interface InstitutionPublic {
   id: number
@@ -48,12 +52,30 @@ export default function RegisterPage() {
   // "Too uncertain to estimate" for the research-time question: an answer is
   // required, but this checkbox satisfies it (submits a null percentage).
   const [percentUncertain, setPercentUncertain] = useState(false)
+  // Optional photo, downsized client-side and sent inline (issue #165).
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photo, setPhoto] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const [insts, setInsts] = useState<InstitutionPublic[]>([])
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+
+  const pickPhoto = async (file: File | null) => {
+    setPhotoFile(file)
+    if (!file) {
+      setPhoto(null)
+      return
+    }
+    try {
+      setPhoto(await preparePhoto(file))
+    } catch (err: any) {
+      setPhotoFile(null)
+      setPhoto(null)
+      notifications.show({ color: 'red', message: err.message || 'Could not read the photo' })
+    }
+  }
 
   useEffect(() => {
     api.get<InstitutionPublic[]>('/institutions/public').then(setInsts).catch(() => setInsts([]))
@@ -119,6 +141,7 @@ export default function RegisterPage() {
         institution_is_us:
           instMatch || !form.institution_name.trim() ? null : form.institution_is_us === 'us',
         research_areas: joinList(form.research_areas),
+        photo,
       })
       setDone(true)
     } catch (err: any) {
@@ -224,8 +247,8 @@ export default function RegisterPage() {
               )}
               <div>
                 <NumberInput
-                  label="Research time on USMCC (%)"
-                  description="Fraction of your research time devoted to the USMCC."
+                  label="Research time on µC (%)"
+                  description="Fraction of your research time devoted to the muon collider."
                   min={0}
                   max={100}
                   required={!percentUncertain}
@@ -243,6 +266,19 @@ export default function RegisterPage() {
                   }}
                 />
               </div>
+              <Group align="flex-end" gap="sm" wrap="nowrap">
+                <Avatar src={photo} size={64} radius="xl" />
+                <FileInput
+                  label="Photo"
+                  description="Please add a photo — it appears next to your name in the directory."
+                  placeholder="Choose an image…"
+                  accept={ACCEPTED_PHOTO_TYPES}
+                  value={photoFile}
+                  onChange={pickPhoto}
+                  clearable
+                  style={{ flex: 1 }}
+                />
+              </Group>
               <div>
                 <Text size="sm" fw={700}>
                   Register as a voting member

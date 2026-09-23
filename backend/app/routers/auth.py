@@ -35,7 +35,6 @@ from app.security import (
 )
 from app.services import notifications
 from app.services import orcid as orcid_svc
-from app.services.email import send_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -512,9 +511,9 @@ async def orcid_callback(
         db.commit()
         db.refresh(user)
         if conflict is not None:
-            msg = notifications.orcid_link_conflict(db, conflict, person, orcid_id)
-            if msg:
-                background.add_task(send_email, *msg)
+            notifications.queue(
+                background, notifications.orcid_link_conflict(db, conflict, person, orcid_id)
+            )
 
     if not user.is_active:
         return bounce("/login?error=account_disabled")

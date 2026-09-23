@@ -1,10 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import CollabRole, CollabRoleType, Person, User, WorkingGroup, WorkingGroupMember
-from app.models.membership import DETAIL_REQUIRED_ROLES
+from app.models.membership import (
+    AREA_CONSTRAINED_ROLES,
+    DETAIL_REQUIRED_ROLES,
+    REPRESENTATIVE_AREAS,
+)
 from app.schemas.membership import (
     CollabRoleCreate,
     CollabRoleOut,
@@ -15,6 +21,7 @@ from app.schemas.membership import (
     WorkingGroupOut,
     WorkingGroupUpdate,
 )
+from app.services import notifications
 from app.security import (
     can_manage_working_groups,
     get_current_user,
@@ -201,14 +208,32 @@ def list_collab_roles(
     return [CollabRoleOut.model_validate(r) for r in roles]
 
 
+def _normalize_area(role: CollabRoleType, detail: str | None) -> str | None:
+    """Representatives and deputies stand for one of the fixed Leadership
+    Council areas (issue #159): accept any capitalization of a known area
+    and reject anything else. Other roles keep their free-text detail."""
+    if role not in AREA_CONSTRAINED_ROLES or detail is None:
+        return detail
+    canonical = {a.lower(): a for a in REPRESENTATIVE_AREAS}
+    area = canonical.get(detail.strip().lower())
+    if area is None:
+        raise HTTPException(
+            422,
+            f"{role.value} area must be one of: {', '.join(REPRESENTATIVE_AREAS)}",
+        )
+    return area
+
+
 @router.post("/collab-roles", status_code=201)
 def create_collab_role(
     body: CollabRoleCreate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CollabRoleOut:
     _require_collab_role_editor(user, body.role)
-    if db.get(Person, body.person_id) is None:
+    person = db.get(Person, body.person_id)
+    if person is None:
         raise HTTPException(404, "Person not found")
     if body.role.value == "convener" and body.working_group_id is None:
         raise HTTPException(422, "convener role requires working_group_id")
@@ -216,8 +241,18 @@ def create_collab_role(
         raise HTTPException(422, f"{body.role.value} role requires institution_id")
     if body.role in DETAIL_REQUIRED_ROLES and body.detail is None:
         raise HTTPException(422, f"{body.role.value} role requires detail")
-    role = CollabRole(**body.model_dump())
+    data = body.model_dump()
+    data["detail"] = _normalize_area(body.role, body.detail)
+    role = CollabRole(**data)
     db.add(role)
+    if role.role == CollabRoleType.convener:
+        wg = db.get(WorkingGroup, role.working_group_id)
+        if wg is None:
+            raise HTTPException(404, "Working group not found")
+        if role.end_date is None or role.end_date >= date.today():
+            notifications.queue(
+                background, notifications.convener_changed(db, person, wg, "added", user)
+            )
     db.commit()
     db.refresh(role)
     return CollabRoleOut.model_validate(role)
@@ -227,6 +262,7 @@ def create_collab_role(
 def update_collab_role(
     role_id: int,
     body: CollabRoleUpdate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CollabRoleOut:
@@ -240,8 +276,21 @@ def update_collab_role(
         and updates.get("detail", role.detail) is None
     ):
         raise HTTPException(422, f"{role.role.value} role requires detail")
+    if "detail" in updates:
+        updates["detail"] = _normalize_area(role.role, updates["detail"])
+    was_open = role.end_date is None or role.end_date >= date.today()
     for field, value in updates.items():
         setattr(role, field, value)
+    # Closing a convener's term (end date set to today or earlier) tells the
+    # leadership and the person, like a removal (issue #166).
+    now_open = role.end_date is None or role.end_date >= date.today()
+    if role.role == CollabRoleType.convener and was_open and not now_open:
+        notifications.queue(
+            background,
+            notifications.convener_changed(
+                db, role.person, role.working_group, "term ended", user
+            ),
+        )
     db.commit()
     db.refresh(role)
     return CollabRoleOut.model_validate(role)
@@ -249,11 +298,21 @@ def update_collab_role(
 
 @router.delete("/collab-roles/{role_id}", status_code=204)
 def delete_collab_role(
-    role_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    role_id: int,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> None:
     role = db.get(CollabRole, role_id)
     if role is None:
         raise HTTPException(404, "Role not found")
     _require_collab_role_editor(user, role.role)
+    if role.role == CollabRoleType.convener and (
+        role.end_date is None or role.end_date >= date.today()
+    ):
+        notifications.queue(
+            background,
+            notifications.convener_changed(db, role.person, role.working_group, "removed", user),
+        )
     db.delete(role)
     db.commit()

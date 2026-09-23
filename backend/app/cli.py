@@ -579,7 +579,7 @@ def seed_demo():
             (3, CollabRoleType.representative, "Accelerator", date(2025, 1, 1), None, None),
             (7, CollabRoleType.representative, "Experimental", date(2025, 1, 1), None, None),
             (2, CollabRoleType.deputy_representative, "Experimental", date(2025, 6, 1), None, None),
-            (13, CollabRoleType.coordinator, "Communications", date(2025, 1, 1), None, None),
+            (13, CollabRoleType.representative, "Communications", date(2025, 1, 1), None, None),
             (9, CollabRoleType.area_lead, "Target", date(2025, 3, 1), None, None),
             (6, CollabRoleType.lsg_member, None, date(2024, 6, 1), None, None),
             (5, CollabRoleType.convener, None, date(2024, 9, 1), None, acc_wg.id),

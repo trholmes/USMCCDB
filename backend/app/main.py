@@ -11,6 +11,7 @@ from app.routers import (
     auth,
     author_lists,
     backups,
+    email_log,
     institutions,
     people,
     publications,
@@ -94,6 +95,7 @@ app.include_router(author_lists.router, prefix=prefix)
 app.include_router(backups.router, prefix=prefix)
 app.include_router(site.router, prefix=prefix)
 app.include_router(alerts.router, prefix=prefix)
+app.include_router(email_log.router, prefix=prefix)
 
 
 @app.get("/api/v1/health")

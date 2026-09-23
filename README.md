@@ -23,7 +23,8 @@ ORCID sign-in.
 - **Membership** — people, institutions, dated affiliations, voting-member flag,
   career stage, working groups, leadership roles, member photos, and an
   register → approve workflow with a full audit trail. The directory exports
-  its (filtered) email addresses as a single string, listserv ADD lines, or CSV.
+  its (filtered) email addresses (admins only) as a single string, listserv ADD
+  lines, or CSV.
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
   seminar/outreach, invited vs. contributed) with links to the talk page,
   slides, and recording, member nominations, office assignment, and
@@ -148,14 +149,25 @@ approve. Set `ORCID_HOST=sandbox.orcid.org` to test against the ORCID sandbox.
 Everything email-related is already built in — the only setup is pointing the
 backend at an SMTP server. When configured, the instance sends:
 
-- **Registration notifications** — when someone submits a membership
-  registration (via the form or ORCID sign-up), everyone who can approve it
-  is emailed: the office plus the Administrative Institutional Contacts of
-  the person's institution. Suspected duplicate registrations notify the
-  office too.
-- **Publication workflow** — the office (`CONTACT_EMAIL`) is notified when
-  someone requests collaboration review, reviewers are notified when the
-  office assigns them, and a paper's contacts are notified of status changes.
+- **Membership** — everyone who can approve a new registration (the database
+  admins plus the Administrative Institutional Contacts of the person's
+  institution) is emailed when one arrives; the registrant hears back when
+  approved or rejected, and when the office changes their status later.
+  Suspected duplicate registrations and ORCID sign-in conflicts go to the
+  admins.
+- **Speakers bureau** — the speakers committee is told of new nominations and
+  assigned speakers are told of their talk.
+- **Working groups** — the leadership and the person are told when a
+  convener is named or their term ends.
+- **Publication workflow** — the admins and the leadership are notified when
+  someone requests collaboration review, reviewers are notified when they are
+  assigned, and a paper's contacts are notified of status changes.
+
+Set `ADMIN_EMAIL` to a listserv for the people running the database; it
+falls back to `CONTACT_EMAIL`, which stays the address members see. The full
+catalogue — every message, its trigger and audience — is
+[`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md), and **Admin → Email** logs
+every send with its outcome and has a "send me a test email" button.
 
 Configuration in `.env` (then re-run `./scripts/start.sh`):
 

@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_tls: str = "starttls"  # starttls | ssl | none
     email_from: str = ""  # falls back to CONTACT_EMAIL
+    # Where notifications for the database admins go (a dedicated listserv,
+    # issue #166); falls back to CONTACT_EMAIL, which stays the address shown
+    # to members on the login page.
+    admin_email: str = ""
 
     @property
     def orcid_enabled(self) -> bool:
@@ -50,6 +54,10 @@ class Settings(BaseSettings):
     @property
     def email_enabled(self) -> bool:
         return bool(self.smtp_host)
+
+    @property
+    def admin_notify_email(self) -> str:
+        return self.admin_email or self.contact_email
 
 
 @lru_cache

@@ -1222,6 +1222,55 @@ def test_photo_upload_and_serve(admin, tmp_path_factory):
     assert admin.get(f"/api/v1/people/{person['id']}/photo").status_code == 404
 
 
+def test_registration_accepts_inline_photo(admin, tmp_path_factory, monkeypatch):
+    """The public form may send a photo inline as a base64 data URL (issue
+    #165): stored like an upload, served once the registration is approved;
+    bad payloads fail the registration before any record is created."""
+    import base64
+    from io import BytesIO
+
+    import app.services.email as email_mod
+    from PIL import Image
+
+    from app.config import get_settings
+
+    os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+
+    buf = BytesIO()
+    Image.new("RGB", (900, 600), "blue").save(buf, format="PNG")
+    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    anon = TestClient(app)
+    base = {
+        "given_name": "Pho",
+        "family_name": "Tographer",
+        "email": "pho.tographer@example.edu",
+        "career_stage": "postdoc",
+    }
+    # Garbage that claims to be an image: refused, nothing created.
+    r = anon.post(
+        "/api/v1/people/register",
+        json={**base, "photo": "data:image/png;base64," + base64.b64encode(b"nope").decode()},
+    )
+    assert r.status_code == 422, r.text
+    assert not [
+        p for p in admin.get("/api/v1/people").json() if p["email"] == base["email"]
+    ]
+    assert anon.post(
+        "/api/v1/people/register", json={**base, "photo": "https://example.edu/me.png"}
+    ).status_code == 422
+
+    r = anon.post("/api/v1/people/register", json={**base, "photo": data_url})
+    assert r.status_code == 201, r.text
+    person = next(p for p in admin.get("/api/v1/people").json() if p["email"] == base["email"])
+    assert person["photo_file"].endswith(".webp")
+    served = admin.get(f"/api/v1/people/{person['id']}/photo")
+    assert served.status_code == 200
+    assert served.content[:4] == b"RIFF"
+
+
 def test_photo_upload_rejects_bad_content(admin, tmp_path_factory, monkeypatch):
     os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("photos"))
     from app.config import get_settings
@@ -1477,6 +1526,50 @@ def test_collab_roles_lifecycle(admin):
     assert rep.status_code == 201, rep.text
     assert rep.json()["detail"] == "Accelerator"
 
+    # Representatives stand for one of the fixed Leadership Council areas
+    # (issue #159): any capitalization of a known area is normalized…
+    dep = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "deputy_representative",
+            "detail": " theory ",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert dep.status_code == 201, dep.text
+    assert dep.json()["detail"] == "Theory"
+    # …anything else is refused, on create and on edit alike…
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "representative",
+            "detail": "Outreach",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert r.status_code == 422 and "Accelerator" in r.json()["detail"]
+    dep_id = dep.json()["id"]
+    assert admin.patch(
+        f"/api/v1/collab-roles/{dep_id}", json={"detail": "Physics"}
+    ).status_code == 422
+    r = admin.patch(f"/api/v1/collab-roles/{dep_id}", json={"detail": "communications"})
+    assert r.status_code == 200 and r.json()["detail"] == "Communications"
+    # …while the free-text detail roles are untouched.
+    lead = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "area_lead",
+            "detail": "Target",
+            "start_date": "2025-01-01",
+        },
+    )
+    assert lead.status_code == 201, lead.text
+    for rid in (dep_id, lead.json()["id"]):
+        assert admin.delete(f"/api/v1/collab-roles/{rid}").status_code == 204
+
     # Scoped roles keep their existing requirements.
     assert admin.post(
         "/api/v1/collab-roles",
@@ -1719,9 +1812,12 @@ def test_member_publication_flow(admin, monkeypatch):
     )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "collab_review"
-    assert [(m["To"], m["Subject"]) for m in sent] == [
-        ("office@example.edu", "Collaboration review requested: A Democratized Paper")
-    ]
+    # Review requests go to the admin list plus the leadership (issue #166);
+    # whoever holds a Council position in this run is included too.
+    assert len(sent) == 1
+    assert sent[0]["Subject"] == "Collaboration review requested: A Democratized Paper"
+    assert "office@example.edu" in sent[0]["To"]
+    assert "erin.editor@example.edu" not in sent[0]["To"]  # the requester knows
     assert "Erin Editor" in sent[0].get_content()
 
     # Suggested acknowledgment: generic until the office assigns reviewers.
@@ -4295,3 +4391,219 @@ def test_merge_keeps_more_privileged_new_role(admin):
     assert r.status_code == 200, r.text
     assert r.json()["role"] == "leadership"
     assert r.json()["username"] == "merge-lead"
+
+
+def test_notification_routing_and_email_log(admin, monkeypatch):
+    """Issue #166: registrants hear back on approval / rejection, office-made
+    status changes tell the member, nominations reach the speakers committee,
+    assigned speakers and new conveners are told, the admin list can be a
+    separate address from CONTACT_EMAIL, and every send lands in the admin
+    email log."""
+    import app.services.email as email_mod
+
+    from app.config import get_settings
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    monkeypatch.setenv("ADMIN_EMAIL", "db-admins@example.edu")
+    get_settings.cache_clear()
+    try:
+        # --- Registration: the admin list (not CONTACT_EMAIL) is asked to review.
+        r = admin.post(
+            "/api/v1/people/register",
+            json={
+                "given_name": "Nadia",
+                "family_name": "Newcomer",
+                "email": "nadia.newcomer@example.edu",
+                "career_stage": "postdoc",
+            },
+        )
+        assert r.status_code == 201, r.text
+        pid = r.json()["id"]
+        assert len(sent) == 1
+        assert "db-admins@example.edu" in sent[0]["To"]
+        assert "office@example.edu" not in sent[0]["To"]
+
+        # Approval tells the registrant how to get in.
+        sent.clear()
+        assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+        assert [(m["To"], m["Subject"]) for m in sent] == [
+            ("nadia.newcomer@example.edu", "Your USMCC membership has been approved")
+        ]
+        assert "Sign in with your ORCID iD" in sent[0].get_content()
+
+        # An office-made change afterwards tells the member…
+        sent.clear()
+        assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "inactive"}).status_code == 200
+        assert [(m["To"], m["Subject"]) for m in sent] == [
+            ("nadia.newcomer@example.edu", "Your USMCC membership status is now inactive")
+        ]
+        # …a member's own change tells nobody.
+        nadia, _ = _linked_member(
+            admin, given="Only", family="Placeholder", email="only.placeholder@example.edu"
+        )
+        # (Give Nadia a login of her own instead of the helper's throwaway.)
+        assert admin.post(
+            "/api/v1/auth/users",
+            json={"username": "nadia", "password": "member-pw-123", "role": "member", "person_id": pid},
+        ).status_code == 201
+        nadia = TestClient(app)
+        assert nadia.post(
+            "/api/v1/auth/login", json={"username": "nadia", "password": "member-pw-123"}
+        ).status_code == 200
+        sent.clear()
+        assert nadia.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+        assert sent == []
+
+        # Rejection is neutral and never quotes the office's note.
+        rej = admin.post(
+            "/api/v1/people/register",
+            json={
+                "given_name": "Rob",
+                "family_name": "Refused",
+                "email": "rob.refused@example.edu",
+                "career_stage": "other",
+            },
+        ).json()
+        sent.clear()
+        assert admin.post(
+            f"/api/v1/people/{rej['id']}/status",
+            json={"status": "rejected", "note": "INTERNAL: not a physicist"},
+        ).status_code == 200
+        assert [(m["To"], m["Subject"]) for m in sent] == [
+            ("rob.refused@example.edu", "Your USMCC membership registration")
+        ]
+        assert "INTERNAL" not in sent[0].get_content()
+
+        # --- Speakers bureau: a speakers-committee account (no position row)
+        # hears about nominations; the nominator does not; the assigned
+        # speaker is told.
+        committee, committee_pid = _linked_member(
+            admin, given="Sam", family="Speakers", email="sam.speakers@example.edu"
+        )
+        committee_user = next(
+            u for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == committee_pid
+        )
+        assert admin.patch(
+            f"/api/v1/auth/users/{committee_user['id']}", json={"role": "speakers_committee"}
+        ).status_code == 200
+        event = admin.post("/api/v1/events", json={"name": "Notify Workshop"}).json()
+        talk = admin.post(
+            "/api/v1/talks", json={"title": "Notified Talk", "event_id": event["id"]}
+        ).json()
+        sent.clear()
+        nom = nadia.post(f"/api/v1/talks/{talk['id']}/nominations", json={"person_id": pid})
+        assert nom.status_code == 201, nom.text
+        assert len(sent) == 1
+        assert "sam.speakers@example.edu" in sent[0]["To"]
+        assert "nadia.newcomer@example.edu" not in sent[0]["To"]
+        assert sent[0]["Subject"] == "Speaker nomination: Nadia Newcomer for Notified Talk"
+
+        sent.clear()
+        assert committee.patch(
+            f"/api/v1/nominations/{nom.json()['id']}", json={"status": "assigned"}
+        ).status_code == 200
+        assert [(m["To"], m["Subject"]) for m in sent] == [
+            ("nadia.newcomer@example.edu", "You have been assigned a talk: Notified Talk")
+        ]
+        # Re-saving the same speaker on the talk sends nothing; a new one is told.
+        sent.clear()
+        assert admin.patch(
+            f"/api/v1/talks/{talk['id']}", json={"speaker_person_id": pid}
+        ).status_code == 200
+        assert sent == []
+        assert admin.patch(
+            f"/api/v1/talks/{talk['id']}", json={"speaker_person_id": committee_pid}
+        ).status_code == 200
+        assert [m["To"] for m in sent] == ["sam.speakers@example.edu"]
+
+        # --- Working groups: a new convener is announced to the leadership
+        # (role account or Council position) and to the person.
+        lead, lead_pid = _linked_member(
+            admin, given="Lena", family="Leader", email="lena.leader@example.edu"
+        )
+        lead_user = next(
+            u for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == lead_pid
+        )
+        assert admin.patch(
+            f"/api/v1/auth/users/{lead_user['id']}", json={"role": "leadership"}
+        ).status_code == 200
+        wg = admin.post(
+            "/api/v1/working-groups", json={"name": "Notify WG", "slug": "notify-wg"}
+        ).json()
+        sent.clear()
+        role = admin.post(
+            "/api/v1/collab-roles",
+            json={
+                "person_id": pid,
+                "role": "convener",
+                "working_group_id": wg["id"],
+                "start_date": "2026-01-01",
+            },
+        )
+        assert role.status_code == 201, role.text
+        assert len(sent) == 1
+        assert sent[0]["Subject"] == "New convener for Notify WG: Nadia Newcomer"
+        for addr in ("lena.leader@example.edu", "nadia.newcomer@example.edu"):
+            assert addr in sent[0]["To"]
+        # Ending the term (patch) and removing (delete) both announce; a
+        # date-only edit that keeps the term open does not.
+        sent.clear()
+        assert admin.patch(
+            f"/api/v1/collab-roles/{role.json()['id']}", json={"start_date": "2025-12-01"}
+        ).status_code == 200
+        assert sent == []
+        assert admin.patch(
+            f"/api/v1/collab-roles/{role.json()['id']}", json={"end_date": "2026-01-31"}
+        ).status_code == 200
+        assert [m["Subject"] for m in sent] == ["Ended convener for Notify WG: Nadia Newcomer"]
+        sent.clear()
+        assert admin.delete(f"/api/v1/collab-roles/{role.json()['id']}").status_code == 204
+        assert sent == []  # already closed — nothing to announce
+
+        # --- The email log: admin-only, newest first, filterable, and the
+        # test-email button records its send like any other.
+        assert nadia.get("/api/v1/email-log").status_code == 403
+        page = admin.get("/api/v1/email-log?limit=5").json()
+        assert page["total"] >= 8
+        assert len(page["items"]) == 5
+        assert page["items"][0]["kind"] == "convener_changed"
+        assert page["items"][0]["status"] == "sent"
+        assert page["items"][0]["person_name"] == "Nadia Newcomer"
+        assert page["items"][0]["actor_login"] == "testadmin"
+        assert "registration_approved" in page["kinds"]
+        approved = admin.get(
+            "/api/v1/email-log?kind=registration_approved&q=nadia.newcomer"
+        ).json()
+        assert approved["total"] == 1
+        assert approved["items"][0]["recipients"] == "nadia.newcomer@example.edu"
+        assert "welcome" in approved["items"][0]["body"]
+        assert admin.get("/api/v1/email-log?q=rob.refused").json()["total"] == 1
+
+        # The bootstrap admin has no person → no address to test with.
+        assert admin.post("/api/v1/email-log/test").status_code == 400
+        sent.clear()
+        # An admin with a person can; the send is logged.
+        lead_admin = next(
+            u for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == lead_pid
+        )
+        assert admin.patch(
+            f"/api/v1/auth/users/{lead_admin['id']}", json={"role": "admin"}
+        ).status_code == 200
+        r = lead.post("/api/v1/email-log/test")
+        assert r.status_code == 202, r.text
+        assert r.json()["sent_to"] == ["lena.leader@example.edu"]
+        assert [m["Subject"] for m in sent] == ["USMCC database test email"]
+        latest = admin.get("/api/v1/email-log?kind=test").json()["items"][0]
+        assert latest["status"] == "sent" and latest["actor_login"] == "lena.leader"
+
+        # A delivery failure is logged as such, with the error.
+        def boom(msg):
+            raise RuntimeError("SMTP said no")
+
+        monkeypatch.setattr(email_mod, "_deliver", boom)
+        assert lead.post("/api/v1/email-log/test").status_code == 202
+        latest = admin.get("/api/v1/email-log?status=failed").json()["items"][0]
+        assert latest["kind"] == "test" and "SMTP said no" in latest["error"]
+    finally:
+        get_settings.cache_clear()

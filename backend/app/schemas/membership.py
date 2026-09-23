@@ -229,6 +229,10 @@ class PersonRegistration(BaseModel):
     research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
+    # Optional member photo as a base64 data URL (data:image/jpeg;base64,…),
+    # issue #165 — see _decode_registration_photo in routers/people.py. The
+    # length bound is on the encoded string (~3 MB decoded).
+    photo: str | None = Field(default=None, max_length=4_200_000)
 
     @field_validator("email")
     @classmethod

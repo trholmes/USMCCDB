@@ -35,6 +35,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_TLS: ${SMTP_TLS:-starttls}
       EMAIL_FROM: ${EMAIL_FROM:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       # Shown in the admin Backups panel (the schedule itself lives in the
       # backup container below).
       BACKUP_HOUR: ${BACKUP_HOUR:-02}

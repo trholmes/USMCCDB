@@ -26,6 +26,7 @@ import { USER_ROLES } from '../constants'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import AdminBackups from './AdminBackups'
+import AdminEmails from './AdminEmails'
 import AdminSite from './AdminSite'
 import AdminSystem from './AdminSystem'
 
@@ -210,6 +211,7 @@ export default function AdminPage() {
         <Tabs.Tab value="accounts">User accounts</Tabs.Tab>
         <Tabs.Tab value="site">Site settings</Tabs.Tab>
         <Tabs.Tab value="system">System</Tabs.Tab>
+        <Tabs.Tab value="emails">Email</Tabs.Tab>
         <Tabs.Tab value="backups">Backups</Tabs.Tab>
       </Tabs.List>
 
@@ -219,6 +221,10 @@ export default function AdminPage() {
 
       <Tabs.Panel value="system">
         <AdminSystem />
+      </Tabs.Panel>
+
+      <Tabs.Panel value="emails">
+        <AdminEmails />
       </Tabs.Panel>
 
       <Tabs.Panel value="backups">
