@@ -23,7 +23,8 @@ ORCID sign-in.
 - **Membership** — people, institutions, dated affiliations, voting-member flag,
   career stage, working groups, leadership roles, member photos, and an
   register → approve workflow with a full audit trail. The directory exports
-  its (filtered) email addresses as a single string, listserv ADD lines, or CSV.
+  its (filtered) email addresses (admins only) as a single string, listserv ADD
+  lines, or CSV.
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
   seminar/outreach, invited vs. contributed) with links to the talk page,
   slides, and recording, member nominations, office assignment, and

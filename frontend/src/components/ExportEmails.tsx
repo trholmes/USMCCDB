@@ -6,6 +6,8 @@ import type { PersonSummary } from '../api/types'
 // Export the directory's currently filtered people as email lists (issue
 // #139). Built client-side from the same rows the table shows, so every
 // filter — including the free-text search — applies to the export too.
+// Rendered for admins only (issue #162): individual addresses stay visible
+// to every member in the table, but bulk extraction is an admin tool.
 
 const FORMATS = [
   { value: 'comma', label: 'Single string (comma-separated)' },

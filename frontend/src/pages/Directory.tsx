@@ -41,7 +41,7 @@ export default function DirectoryPage() {
   const [areas, setAreas] = useState<string[]>([])
   const [voting, setVoting] = useState<string | null>(null)
   const navigate = useNavigate()
-  const { isOffice } = useSession()
+  const { isOffice, isAdmin } = useSession()
 
   useEffect(() => {
     api.get<PersonSummary[]>('/people').then(setPeople).catch(() => setPeople([]))
@@ -86,7 +86,7 @@ export default function DirectoryPage() {
       <Group justify="space-between" mb="md">
         <Title order={3}>Member directory</Title>
         <Group gap="xs">
-          <ExportEmails people={filtered} />
+          {isAdmin && <ExportEmails people={filtered} />}
           <TextInput
             placeholder="Search name or email…"
             value={q}
