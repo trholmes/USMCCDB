@@ -62,7 +62,7 @@ export default function TalksPage() {
   const [eventFilter, setEventFilter] = useState<string[]>([])
   const [typeFilter, setTypeFilter] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<string[]>([])
-  const { me, isOffice } = useSession()
+  const { me, canManageTalks } = useSession()
   const navigate = useNavigate()
 
   const load = useCallback(() => {
@@ -113,7 +113,7 @@ export default function TalksPage() {
     // speaker to themselves; office users start blank (open talks).
     setForm({
       ...emptyForm,
-      speaker_person_id: !isOffice && me?.person_id ? String(me.person_id) : '',
+      speaker_person_id: !canManageTalks && me?.person_id ? String(me.person_id) : '',
     })
     setEditing(null)
     setCreateOpen(true)
@@ -355,7 +355,7 @@ export default function TalksPage() {
                   {whereGiven(detail)} {detail.date ? `— ${detail.date}` : ''}
                 </Text>
               </Group>
-              {(isOffice || me?.user.id === detail.created_by_user_id) && (
+              {(canManageTalks || me?.user.id === detail.created_by_user_id) && (
                 <Group gap={4}>
                   <Button size="compact-xs" variant="subtle" onClick={() => openEdit(detail)}>
                     Edit
@@ -418,12 +418,12 @@ export default function TalksPage() {
                   </Text>
                   <Group gap="xs">
                     <StatusBadge status={n.status} />
-                    {isOffice && n.status !== 'assigned' && (
+                    {canManageTalks && n.status !== 'assigned' && (
                       <Button size="compact-xs" onClick={() => setNomStatus(n.id, 'assigned')}>
                         Assign
                       </Button>
                     )}
-                    {(isOffice ||
+                    {(canManageTalks ||
                       me?.person_id === n.person.id ||
                       me?.user.id === n.nominated_by_user_id) &&
                       n.status === 'nominated' && (

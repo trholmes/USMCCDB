@@ -1,4 +1,4 @@
-from app.models.auth import LoginEvent, User, UserRole
+from app.models.auth import LoginEvent, RoleSuggestionDismissal, User, UserRole
 from app.models.authorlist import AuthorList
 from app.models.site import SiteSetting
 from app.models.membership import (

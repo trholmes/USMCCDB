@@ -15,7 +15,14 @@ from app.schemas.membership import (
     WorkingGroupOut,
     WorkingGroupUpdate,
 )
-from app.security import get_current_user, is_convener_of, is_office, require_admin, require_office
+from app.security import (
+    can_manage_working_groups,
+    get_current_user,
+    is_convener_of,
+    is_office,
+    require_admin,
+    require_leadership,
+)
 
 router = APIRouter(tags=["membership"])
 
@@ -39,7 +46,7 @@ def list_wgs(
     return [_wg_out(db, wg) for wg in wgs]
 
 
-@router.post("/working-groups", dependencies=[Depends(require_office)], status_code=201)
+@router.post("/working-groups", dependencies=[Depends(require_leadership)], status_code=201)
 def create_wg(body: WorkingGroupCreate, db: Session = Depends(get_db)) -> WorkingGroupOut:
     if db.execute(
         select(WorkingGroup).where(WorkingGroup.slug == body.slug)
@@ -52,7 +59,7 @@ def create_wg(body: WorkingGroupCreate, db: Session = Depends(get_db)) -> Workin
     return _wg_out(db, wg)
 
 
-@router.patch("/working-groups/{wg_id}", dependencies=[Depends(require_office)])
+@router.patch("/working-groups/{wg_id}", dependencies=[Depends(require_leadership)])
 def update_wg(wg_id: int, body: WorkingGroupUpdate, db: Session = Depends(get_db)) -> WorkingGroupOut:
     wg = db.get(WorkingGroup, wg_id)
     if wg is None:
@@ -109,9 +116,10 @@ def add_wg_member(
     person = db.get(Person, body.person_id)
     if person is None:
         raise HTTPException(404, "Person not found")
-    # Members may join a WG themselves; adding others needs convener/office.
+    # Members may join a WG themselves; adding others needs convener /
+    # leadership / office.
     if body.person_id != user.person_id and not (
-        is_office(user) or is_convener_of(db, user, wg_id)
+        can_manage_working_groups(user) or is_convener_of(db, user, wg_id)
     ):
         raise HTTPException(403, "Only conveners or the office can add other people")
     exists = db.execute(
@@ -135,7 +143,7 @@ def remove_wg_member(
     user: User = Depends(get_current_user),
 ) -> None:
     if person_id != user.person_id and not (
-        is_office(user) or is_convener_of(db, user, wg_id)
+        can_manage_working_groups(user) or is_convener_of(db, user, wg_id)
     ):
         raise HTTPException(403, "Only conveners or the office can remove other people")
     membership = db.execute(
@@ -150,7 +158,20 @@ def remove_wg_member(
     db.commit()
 
 
-# --- Collaboration roles (office) ---------------------------------------------
+# --- Collaboration roles (office; leadership for conveners) -------------------
+
+
+def _require_collab_role_editor(user: User, role: CollabRoleType) -> None:
+    """Office manages every position. Leadership accounts (representatives
+    and deputies, issue #167) may name and end working-group conveners —
+    part of setting up a working group — but not other positions: conveners
+    grant no access beyond the group, whereas e.g. an administrative contact
+    can edit members and approve registrations."""
+    if is_office(user):
+        return
+    if can_manage_working_groups(user) and role == CollabRoleType.convener:
+        return
+    raise HTTPException(403, "Insufficient permissions")
 
 
 @router.get("/collab-roles")
@@ -180,8 +201,13 @@ def list_collab_roles(
     return [CollabRoleOut.model_validate(r) for r in roles]
 
 
-@router.post("/collab-roles", dependencies=[Depends(require_office)], status_code=201)
-def create_collab_role(body: CollabRoleCreate, db: Session = Depends(get_db)) -> CollabRoleOut:
+@router.post("/collab-roles", status_code=201)
+def create_collab_role(
+    body: CollabRoleCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CollabRoleOut:
+    _require_collab_role_editor(user, body.role)
     if db.get(Person, body.person_id) is None:
         raise HTTPException(404, "Person not found")
     if body.role.value == "convener" and body.working_group_id is None:
@@ -197,13 +223,17 @@ def create_collab_role(body: CollabRoleCreate, db: Session = Depends(get_db)) ->
     return CollabRoleOut.model_validate(role)
 
 
-@router.patch("/collab-roles/{role_id}", dependencies=[Depends(require_office)])
+@router.patch("/collab-roles/{role_id}")
 def update_collab_role(
-    role_id: int, body: CollabRoleUpdate, db: Session = Depends(get_db)
+    role_id: int,
+    body: CollabRoleUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> CollabRoleOut:
     role = db.get(CollabRole, role_id)
     if role is None:
         raise HTTPException(404, "Role not found")
+    _require_collab_role_editor(user, role.role)
     updates = body.model_dump(exclude_unset=True)
     if (
         role.role in DETAIL_REQUIRED_ROLES
@@ -217,10 +247,13 @@ def update_collab_role(
     return CollabRoleOut.model_validate(role)
 
 
-@router.delete("/collab-roles/{role_id}", dependencies=[Depends(require_office)], status_code=204)
-def delete_collab_role(role_id: int, db: Session = Depends(get_db)) -> None:
+@router.delete("/collab-roles/{role_id}", status_code=204)
+def delete_collab_role(
+    role_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> None:
     role = db.get(CollabRole, role_id)
     if role is None:
         raise HTTPException(404, "Role not found")
+    _require_collab_role_editor(user, role.role)
     db.delete(role)
     db.commit()

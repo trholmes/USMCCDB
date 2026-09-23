@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary, User } from '../api/types'
+import { USER_ROLES } from '../constants'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import AdminBackups from './AdminBackups'
@@ -232,7 +233,9 @@ export default function AdminPage() {
         <Text size="sm" c="dimmed">
           Local accounts sign in with username + password. ORCID users appear here
           automatically after their first sign-in. Roles: <b>admin</b> (everything),{' '}
-          <b>office</b> (approve members, manage speakers & publications), <b>member</b>.
+          <b>office</b> (approve members, institutions, all roles), <b>leadership</b>{' '}
+          (representatives & deputies: working groups, publications, talks),{' '}
+          <b>speakers_committee</b> (talks & events), <b>member</b>.
         </Text>
       </Card>
 
@@ -276,7 +279,7 @@ export default function AdminPage() {
               </Table.Td>
               <Table.Td>
                 <Select
-                  data={['admin', 'office', 'member']}
+                  data={USER_ROLES.map((r) => r.value)}
                   value={u.role}
                   onChange={(v) => v && update(u.id, { role: v })}
                   disabled={u.id === me?.user.id}
@@ -339,7 +342,7 @@ export default function AdminPage() {
                 The linked person is an unapproved ({removablePerson.status}) registration —
                 usually created by the first ORCID sign-in. To keep this login as an office or
                 admin account without a collaboration membership, remove that record.
-                {manage?.role === 'member' && ' Give the account the office or admin role first.'}
+                {manage?.role === 'member' && ' Give the account a role other than member first.'}
               </Text>
               <Button
                 w="fit-content"
@@ -442,7 +445,7 @@ export default function AdminPage() {
           />
           <Select
             label="Role"
-            data={['admin', 'office', 'member']}
+            data={USER_ROLES.map((r) => ({ value: r.value, label: `${r.label} — ${r.description}` }))}
             value={form.role}
             onChange={(v) => setForm({ ...form, role: v ?? 'member' })}
           />

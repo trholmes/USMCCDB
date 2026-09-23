@@ -32,7 +32,7 @@ from app.security import (
     get_current_user,
     get_optional_user,
     is_convener_of,
-    is_office,
+    can_manage_publications,
 )
 from app.services import notifications
 from app.services.email import send_email
@@ -187,7 +187,7 @@ def update_publication(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not (
-        is_office(user)
+        can_manage_publications(user)
         or _is_contact(db, user, pub_id)
         or is_convener_of(db, user, pub.working_group_id)
     ):
@@ -216,7 +216,7 @@ def change_status(
     pub = db.get(Publication, pub_id)
     if pub is None:
         raise HTTPException(404, "Publication not found")
-    if not is_office(user):
+    if not can_manage_publications(user):
         # Contacts and WG conveners may request collaboration review and revoke
         # that request; everything else (submitted, published, other backwards
         # moves) stays with the office.
@@ -261,7 +261,7 @@ def change_status(
 
 def _can_manage_people(db: Session, user: User, pub: Publication) -> bool:
     return (
-        is_office(user)
+        can_manage_publications(user)
         or _is_contact(db, user, pub.id)
         or is_convener_of(db, user, pub.working_group_id)
     )
@@ -280,7 +280,7 @@ def add_person(
         raise HTTPException(404, "Publication not found")
     if not _can_manage_people(db, user, pub):
         raise HTTPException(403, "Only contacts, conveners, or the office can add people")
-    if body.role == PublicationPersonRole.reviewer and not is_office(user):
+    if body.role == PublicationPersonRole.reviewer and not can_manage_publications(user):
         raise HTTPException(403, "Only the office can assign reviewers")
     person = db.get(Person, body.person_id)
     if person is None:
@@ -326,7 +326,7 @@ def add_people(
         raise HTTPException(404, "Publication not found")
     if not _can_manage_people(db, user, pub):
         raise HTTPException(403, "Only contacts, conveners, or the office can add people")
-    if body.role == PublicationPersonRole.reviewer and not is_office(user):
+    if body.role == PublicationPersonRole.reviewer and not can_manage_publications(user):
         raise HTTPException(403, "Only the office can assign reviewers")
     person_ids = list(dict.fromkeys(body.person_ids))  # dedupe, keep order
     people = {
@@ -399,7 +399,7 @@ def remove_person(
     pub = db.get(Publication, pub_id)
     if not _can_manage_people(db, user, pub):
         raise HTTPException(403, "Only contacts, conveners, or the office can remove people")
-    if pp.role == PublicationPersonRole.reviewer and not is_office(user):
+    if pp.role == PublicationPersonRole.reviewer and not can_manage_publications(user):
         raise HTTPException(403, "Only the office can remove reviewers")
     db.delete(pp)
     db.commit()

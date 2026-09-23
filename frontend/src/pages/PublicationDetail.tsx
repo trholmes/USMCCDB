@@ -64,7 +64,7 @@ export default function PublicationDetailPage() {
     target_journal: '',
     abstract: '',
   })
-  const { me, isOffice } = useSession()
+  const { me, canManagePubs } = useSession()
 
   const load = useCallback(() => {
     api
@@ -95,7 +95,7 @@ export default function PublicationDetailPage() {
   const isContact =
     me?.person_id != null &&
     pub.people.some((pp) => pp.role === 'contact' && pp.person.id === me.person_id)
-  const canManage = isOffice || isContact
+  const canManage = canManagePubs || isContact
 
   const changeStatus = async (status: string | null) => {
     if (!status) return
@@ -296,7 +296,7 @@ export default function PublicationDetailPage() {
               Revoke review request
             </Button>
           )}
-          {isOffice && (
+          {canManagePubs && (
             <Select placeholder="Change status…" data={STATUSES} onChange={changeStatus} w={{ base: '100%', xs: 170 }} />
           )}
         </Group>
@@ -373,7 +373,7 @@ export default function PublicationDetailPage() {
                     ))}
                 </Table.Td>
                 <Table.Td>
-                  {canManage && (pp.role !== 'reviewer' || isOffice) && (
+                  {canManage && (pp.role !== 'reviewer' || canManagePubs) && (
                     <ActionIcon
                       variant="subtle"
                       color="red"
@@ -404,7 +404,7 @@ export default function PublicationDetailPage() {
               w={{ base: '100%', xs: 340 }}
             />
             <Select
-              data={isOffice ? OFFICE_ROLES : MEMBER_ROLES}
+              data={canManagePubs ? OFFICE_ROLES : MEMBER_ROLES}
               value={rolePick}
               onChange={setRolePick}
               w={{ base: '100%', xs: 170 }}
