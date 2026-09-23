@@ -46,6 +46,34 @@ export interface LoginEvent {
   login: string | null
 }
 
+export interface EmailLogEntry {
+  id: number
+  kind: string
+  recipients: string
+  subject: string
+  body: string
+  status: 'sent' | 'failed' | 'disabled'
+  error: string | null
+  context: string | null
+  person_id: number | null
+  actor_user_id: number | null
+  created_at: string
+  person_name: string | null
+  actor_login: string | null
+}
+
+export interface EmailLogPage {
+  items: EmailLogEntry[]
+  total: number
+  kinds: string[]
+}
+
+export interface EmailTestResult {
+  sent_to: string[]
+  email_enabled: boolean
+  detail: string
+}
+
 export interface Institution {
   id: number
   name: string

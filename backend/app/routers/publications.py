@@ -35,7 +35,6 @@ from app.security import (
     can_manage_publications,
 )
 from app.services import notifications
-from app.services.email import send_email
 
 router = APIRouter(prefix="/publications", tags=["publications"])
 
@@ -248,14 +247,11 @@ def change_status(
     db.commit()
     # Compose emails now (the session closes before background tasks run),
     # deliver after the response.
-    for msg in (
-        notifications.review_requested(db, pub, user)
-        if body.status == PublicationStatus.collab_review
-        else None,
-        notifications.status_changed(db, pub, from_status, body.status.value, user),
-    ):
-        if msg is not None:
-            background.add_task(send_email, *msg)
+    if body.status == PublicationStatus.collab_review:
+        notifications.queue(background, notifications.review_requested(db, pub, user))
+    notifications.queue(
+        background, notifications.status_changed(db, pub, from_status, body.status.value, user)
+    )
     return PublicationOut.model_validate(_load_pub(db, pub_id))
 
 
@@ -304,9 +300,7 @@ def add_person(
     db.commit()
     db.refresh(pp)
     if body.role == PublicationPersonRole.reviewer:
-        msg = notifications.reviewer_assigned(db, pub, person, user)
-        if msg is not None:
-            background.add_task(send_email, *msg)
+        notifications.queue(background, notifications.reviewer_assigned(db, pub, person, user))
     return PubPersonOut.model_validate(pp)
 
 
@@ -356,9 +350,10 @@ def add_people(
     for pp in added:
         db.refresh(pp)
         if body.role == PublicationPersonRole.reviewer:
-            msg = notifications.reviewer_assigned(db, pub, people[pp.person_id], user)
-            if msg is not None:
-                background.add_task(send_email, *msg)
+            notifications.queue(
+                background,
+                notifications.reviewer_assigned(db, pub, people[pp.person_id], user),
+            )
     return [PubPersonOut.model_validate(pp) for pp in added]
 
 

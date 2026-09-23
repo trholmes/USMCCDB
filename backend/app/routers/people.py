@@ -64,7 +64,6 @@ from app.security import (
 )
 from app.services import notifications
 from app.services import photos as photo_service
-from app.services.email import send_email
 
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
@@ -285,11 +284,12 @@ def register(
     if clash is not None:
         if office_caller:
             raise HTTPException(409, "A record with this email already exists")
-        msg = notifications.registration_duplicate(
-            db, clash, f"{body.given_name} {body.family_name}", email
+        notifications.queue(
+            background,
+            notifications.registration_duplicate(
+                db, clash, f"{body.given_name} {body.family_name}", email
+            ),
         )
-        if msg:
-            background.add_task(send_email, *msg)
         return _registration_ack()
 
     # Charter voting rules are checked at registration so a registrant cannot
@@ -384,9 +384,7 @@ def register(
         _store_photo(person, photo_bytes)
 
     db.flush()  # sessions don't autoflush — the notification queries need the rows
-    msg = notifications.registration_submitted(db, person)
-    if msg:
-        background.add_task(send_email, *msg)
+    notifications.queue(background, notifications.registration_submitted(db, person))
     db.commit()
     db.refresh(person)
     if office_caller:
@@ -568,6 +566,7 @@ def update_person(
 def change_status(
     person_id: int,
     body: StatusChange,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     actor: User = Depends(get_current_user),
 ) -> PersonSummary:
@@ -607,6 +606,7 @@ def change_status(
             note=body.note,
         )
     )
+    from_status = person.status
     person.status = body.status
     person.status_changed_at = datetime.now(UTC)
     # Voting membership can't be held while not active — keep the invariant
@@ -621,6 +621,20 @@ def change_status(
         # flag requested at registration (or gone stale while away) is
         # dropped rather than granted unchecked (issue #51).
         person.is_voting = False
+    # Tell the person (issue #166): the pending decisions have their own
+    # messages; any other office-made change gets the generic one, and a
+    # member's own change tells nobody.
+    if from_status == MemberStatus.pending and body.status == MemberStatus.active:
+        notifications.queue(background, notifications.registration_approved(db, person, actor))
+    elif from_status == MemberStatus.pending and body.status == MemberStatus.rejected:
+        notifications.queue(background, notifications.registration_rejected(db, person, actor))
+    elif actor.person_id != person.id:
+        notifications.queue(
+            background,
+            notifications.membership_status_changed(
+                db, person, from_status.value, body.status.value, actor
+            ),
+        )
     db.commit()
     db.refresh(person)
     return PersonSummary.model_validate(person)

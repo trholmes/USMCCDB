@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import case, extract, func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -28,6 +28,7 @@ from app.schemas.speakers import (
     TalkUpdate,
 )
 from app.security import can_manage_talks, get_current_user, require_speakers_committee
+from app.services import notifications
 
 router = APIRouter(tags=["speakers"])
 
@@ -162,6 +163,7 @@ def create_talk(
 def update_talk(
     talk_id: int,
     body: TalkUpdate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TalkOut:
@@ -171,8 +173,16 @@ def update_talk(
     _require_talk_editor(user, talk)
     data = body.model_dump(exclude_unset=True)
     _check_talk_refs(db, data)
+    previous_speaker = talk.speaker_person_id
     for field, value in data.items():
         setattr(talk, field, value)
+    db.flush()
+    # A speaker set directly on the talk (rather than through a nomination)
+    # is told the same way (issue #166); reassignments to the same person
+    # or clearing the speaker send nothing.
+    if talk.speaker_person_id is not None and talk.speaker_person_id != previous_speaker:
+        speaker = db.get(Person, talk.speaker_person_id)
+        notifications.queue(background, notifications.speaker_assigned(db, talk, speaker, user))
     db.commit()
     return TalkOut.model_validate(_load_talk(db, talk_id))
 
@@ -198,6 +208,7 @@ def delete_talk(
 def nominate(
     talk_id: int,
     body: NominationCreate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> NominationOut:
@@ -206,7 +217,8 @@ def nominate(
         raise HTTPException(404, "Talk not found")
     if talk.status in (TalkStatus.given, TalkStatus.cancelled):
         raise HTTPException(400, f"Talk is {talk.status.value}; nominations are closed")
-    if db.get(Person, body.person_id) is None:
+    nominee = db.get(Person, body.person_id)
+    if nominee is None:
         raise HTTPException(404, "Person not found")
     exists = db.execute(
         select(Nomination).where(
@@ -224,6 +236,7 @@ def nominate(
     db.add(nom)
     if talk.status == TalkStatus.open:
         talk.status = TalkStatus.nominations
+    notifications.queue(background, notifications.nomination_submitted(db, talk, nominee, user))
     db.commit()
     db.refresh(nom)
     return NominationOut.model_validate(nom)
@@ -233,6 +246,7 @@ def nominate(
 def update_nomination(
     nomination_id: int,
     body: NominationUpdate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> NominationOut:
@@ -250,6 +264,11 @@ def update_nomination(
         nom.note = body.note
     if body.status == NominationStatus.assigned:
         talk = db.get(Talk, nom.talk_id)
+        if previous_status != NominationStatus.assigned:
+            notifications.queue(
+                background,
+                notifications.speaker_assigned(db, talk, db.get(Person, nom.person_id), user),
+            )
         talk.speaker_person_id = nom.person_id
         talk.status = TalkStatus.assigned
         # Any other assigned nominations for this talk drop back to shortlisted.

@@ -1,5 +1,6 @@
 from app.models.auth import LoginEvent, RoleSuggestionDismissal, User, UserRole
 from app.models.authorlist import AuthorList
+from app.models.notifications import EmailLog
 from app.models.site import SiteSetting
 from app.models.membership import (
     Affiliation,
@@ -32,7 +33,7 @@ from app.models.speakers import (
 )
 
 __all__ = [
-    "User", "UserRole", "AuthorList", "LoginEvent", "SiteSetting",
+    "User", "UserRole", "AuthorList", "LoginEvent", "SiteSetting", "EmailLog",
     "Person", "Institution", "Affiliation", "WorkingGroup", "WorkingGroupMember",
     "CollabRole", "CollabRoleType", "MembershipEvent", "AuthorPeriod",
     "CareerStage", "MemberStatus",
