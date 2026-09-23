@@ -266,7 +266,10 @@ export default function PersonPage() {
     }
     changed('preferred_name', form.preferred_name || null, person.preferred_name)
     changed('email', form.email, person.email)
-    changed('orcid', form.orcid || null, person.orcid)
+    // ORCID iDs are office-editable only — set by an authenticated ORCID
+    // sign-in or by the office, never self-asserted (the sign-in auto-link
+    // trusts this field).
+    if (isOffice) changed('orcid', form.orcid || null, person.orcid)
     changed('career_stage', form.career_stage, person.career_stage)
     changed('professional_title', form.professional_title || null, person.professional_title)
     changed('department', form.department || null, person.department)
@@ -675,8 +678,13 @@ export default function PersonPage() {
             />
             <TextInput
               label="ORCID iD"
+              description={
+                isOffice
+                  ? undefined
+                  : 'Linked automatically when you sign in with ORCID; contact the office to change it.'
+              }
               value={form.orcid}
-              disabled={!canEditFull}
+              disabled={!isOffice}
               onChange={(e) => setForm({ ...form, orcid: e.currentTarget.value })}
             />
             <Select

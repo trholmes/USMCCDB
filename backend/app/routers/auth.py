@@ -2,7 +2,7 @@ import hmac
 import secrets
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from sqlalchemy import select
@@ -32,7 +32,9 @@ from app.security import (
     require_admin,
     set_session_cookie,
 )
+from app.services import notifications
 from app.services import orcid as orcid_svc
+from app.services.email import send_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -349,6 +351,7 @@ def orcid_login(request: Request) -> RedirectResponse:
 @router.get("/orcid/callback")
 async def orcid_callback(
     request: Request,
+    background: BackgroundTasks,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -386,6 +389,10 @@ async def orcid_callback(
     # 1. Existing login with this ORCID iD.
     user = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
 
+    # A directory person already carrying this ORCID iD whose login could not
+    # take the link — resolved by the office instead of guessed at here.
+    conflict: Person | None = None
+
     if user is None:
         # 2. Directory member with this ORCID iD: link automatically. If the
         # person already signs in with a local account, attach the ORCID to
@@ -403,13 +410,18 @@ async def orcid_callback(
                 db.add(user)
                 db.commit()
                 db.refresh(user)
-            elif existing.orcid is None:
+            elif existing.orcid is None and existing.role == UserRole.member:
                 existing.orcid = orcid_id
                 user = existing
                 db.commit()
-            # else: the person's account already carries a *different* ORCID
-            # iD — ambiguous records; fall through to the unknown-ORCID path
-            # so the office sorts it out instead of guessing here.
+            else:
+                # The person's account already carries a *different* ORCID iD
+                # (ambiguous records), or it is an office/admin account — a
+                # directory match alone must not hand out a privileged
+                # session (a mistyped iD on such a record would otherwise
+                # sign a stranger into it). Take the unknown-ORCID path below
+                # and tell the office instead of guessing here.
+                conflict = person
 
     if user is None:
         # 3. Unknown ORCID: create a pending person + login, send to the
@@ -423,7 +435,10 @@ async def orcid_callback(
             given_name=given or "Unknown",
             family_name=family or orcid_id,
             email=f"{orcid_id}@orcid.placeholder",  # replaced when they complete the form
-            orcid=orcid_id,
+            # On a conflict the directory person keeps the iD (unique
+            # column); the authenticated iD lives on the login, and the
+            # office reconciles the two records.
+            orcid=None if conflict is not None else orcid_id,
             status=MemberStatus.pending,
         )
         db.add(person)
@@ -433,6 +448,10 @@ async def orcid_callback(
         db.add(user)
         db.commit()
         db.refresh(user)
+        if conflict is not None:
+            msg = notifications.orcid_link_conflict(db, conflict, person, orcid_id)
+            if msg:
+                background.add_task(send_email, *msg)
 
     if not user.is_active:
         return bounce("/login?error=account_disabled")

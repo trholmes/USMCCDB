@@ -83,11 +83,13 @@ def _photo_signature_ok(content_type: str, head: bytes) -> bool:
 
 router = APIRouter(prefix="/people", tags=["membership"])
 
-# Fields a member may edit on their own profile.
+# Fields a member may edit on their own profile. orcid is NOT self-editable:
+# the ORCID sign-in auto-link trusts Person.orcid, so a self-asserted iD
+# would let a member capture someone else's first ORCID sign-in — iDs are
+# set only by an authenticated ORCID sign-in or by the office.
 SELF_EDITABLE = {
     "preferred_name",
     "email",
-    "orcid",
     "career_stage",
     "professional_title",
     "department",
@@ -251,8 +253,10 @@ def register(
     Non-office callers always get the same neutral acknowledgement: a
     submission matching an existing record creates nothing and is reported
     to the office instead — distinct duplicate errors would let anonymous
-    callers probe which emails/ORCID iDs belong to members (issue #62).
-    Office/admin callers keep the informative 409 and the created record."""
+    callers probe which emails belong to members (issue #62). Office/admin
+    callers keep the informative 409 and the created record. The form takes
+    no ORCID iD: an iD reaches a person record only through an authenticated
+    ORCID sign-in or office entry, never as a self-asserted claim."""
     office_caller = registrant is not None and is_office(registrant)
     if not office_caller:
         enforce(registration_limiter(), request)
@@ -269,18 +273,11 @@ def register(
     if person is not None:
         email_clash = email_clash.where(Person.id != person.id)
     clash = db.execute(email_clash).scalar_one_or_none()
-    clash_field = "email"
-    if clash is None and body.orcid:
-        orcid_clash = select(Person).where(Person.orcid == body.orcid)
-        if person is not None:
-            orcid_clash = orcid_clash.where(Person.id != person.id)
-        clash = db.execute(orcid_clash).scalar_one_or_none()
-        clash_field = "ORCID iD"
     if clash is not None:
         if office_caller:
-            raise HTTPException(409, f"A record with this {clash_field} already exists")
+            raise HTTPException(409, "A record with this email already exists")
         msg = notifications.registration_duplicate(
-            db, clash, f"{body.given_name} {body.family_name}", email, body.orcid
+            db, clash, f"{body.given_name} {body.family_name}", email
         )
         if msg:
             background.add_task(send_email, *msg)
@@ -327,7 +324,6 @@ def register(
             family_name=body.family_name,
             preferred_name=body.preferred_name,
             email=email,
-            orcid=body.orcid,
             career_stage=body.career_stage,
             professional_title=body.professional_title,
             department=body.department,

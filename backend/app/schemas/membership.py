@@ -211,7 +211,9 @@ class PersonRegistration(BaseModel):
     family_name: str = Field(min_length=1, max_length=120)
     preferred_name: str | None = None
     email: EmailStr
-    orcid: str | None = Field(default=None, pattern=ORCID_RE)
+    # No orcid field: an ORCID iD reaches a person record only through an
+    # authenticated ORCID sign-in or office entry — a self-asserted iD on the
+    # public form would feed the sign-in auto-link with unverified claims.
     career_stage: CareerStage = CareerStage.other
     # Charter institutional info: professional title in the organization,
     # department, and percent of research time devoted to the USMCC.

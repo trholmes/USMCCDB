@@ -25,9 +25,9 @@ interface InstitutionPublic {
   is_us: boolean
 }
 
-// Mirrors the backend's ORCID_RE (schemas/membership.py) so a typo fails
-// on the field instead of as a page-level 422.
-const ORCID_FORM_RE = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/
+// The form takes no ORCID iD: an iD reaches a person record only through an
+// authenticated ORCID sign-in or office entry, never as a self-typed claim
+// (it would feed the sign-in auto-link with unverified data).
 
 export default function RegisterPage() {
   const [form, setForm] = useState({
@@ -36,7 +36,6 @@ export default function RegisterPage() {
     family_name: '',
     preferred_name: '',
     email: '',
-    orcid: '',
     career_stage: 'other',
     usmcc_percent: '' as number | string,
     institution_name: '',
@@ -80,11 +79,6 @@ export default function RegisterPage() {
         ? false
         : null
 
-  const orcidError =
-    form.orcid.trim() && !ORCID_FORM_RE.test(form.orcid.trim().toUpperCase())
-      ? 'Enter your ORCID as 0000-0000-0000-0000, or leave it blank.'
-      : null
-
   // Charter voting rules the form can check itself (mirrors the backend
   // validation on /people/register): students are not eligible, and voting
   // requires a US institution — so an institution must be given at all.
@@ -107,7 +101,7 @@ export default function RegisterPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const error = orcidError || instUsError || votingError
+    const error = instUsError || votingError
     if (error) {
       notifications.show({ color: 'red', message: error })
       return
@@ -118,7 +112,6 @@ export default function RegisterPage() {
         ...form,
         middle_name: form.middle_name || null,
         preferred_name: form.preferred_name || null,
-        orcid: form.orcid.trim().toUpperCase() || null,
         usmcc_percent:
           percentUncertain || form.usmcc_percent === '' ? null : Number(form.usmcc_percent),
         institution_id: instMatch?.id ?? null,
@@ -195,12 +188,6 @@ export default function RegisterPage() {
                 required
                 value={form.email}
                 onChange={(e) => set('email', e.currentTarget.value)}
-              />
-              <TextInput
-                label="ORCID iD (0000-0000-0000-0000)"
-                value={form.orcid}
-                onChange={(e) => set('orcid', e.currentTarget.value)}
-                error={orcidError}
               />
               <Select
                 label="Position"
