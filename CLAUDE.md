@@ -91,13 +91,14 @@ itself, so the database just has to exist.
   `_close_primary` in `app/routers/people.py`).
 - At most one open primary affiliation per person (partial unique index);
   author periods must not overlap (EXCLUDE constraint, needs `btree_gist`).
-- Roles: `admin` / `office` / `leadership` / `speakers` / `member`, each
+- Roles: `admin` / `office` / `leadership` / `speakers_committee` / `member`, each
   holding every permission of the ones below it (`ROLE_RANK` in
   `app/models/auth.py`; `has_role` / `can_manage_talks` /
-  `can_manage_working_groups` in `app/security.py`). `speakers` (speakers
+  `can_manage_working_groups` in `app/security.py`). `speakers_committee` (speakers
   committee) edits any talk, event or nomination; `leadership` (Leadership
   Council representatives and deputies) additionally manages working groups,
-  their members and convener roles. Roles are assigned explicitly by an admin
+  their members and convener roles, and any publication and author list
+  (`can_manage_publications`). Roles are assigned explicitly by an admin
   — a person's leadership positions (`collab_roles`) never grant them; the
   admin alerts panel only *suggests* a change (`_role_suggestions` in
   `app/routers/alerts.py`, issue #167). Members may edit only the

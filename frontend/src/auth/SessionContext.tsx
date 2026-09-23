@@ -12,6 +12,8 @@ interface Session {
   // Leadership Council representatives / deputies (or office): working
   // groups, their members and conveners (issue #167).
   canManageWGs: boolean
+  // Same accounts: any publication, its people, status and author lists.
+  canManagePubs: boolean
   // Speakers committee (or leadership / office): any talk, event, nomination.
   canManageTalks: boolean
 }
@@ -24,6 +26,7 @@ const SessionContext = createContext<Session>({
   isOffice: false,
   isAdmin: false,
   canManageWGs: false,
+  canManagePubs: false,
   canManageTalks: false,
 })
 
@@ -60,7 +63,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         isOffice: !!me && me.permissions.includes('office'),
         isAdmin: !!me && me.permissions.includes('admin'),
         canManageWGs: !!me && me.permissions.includes('leadership'),
-        canManageTalks: !!me && me.permissions.includes('speakers'),
+        canManagePubs: !!me && me.permissions.includes('leadership'),
+        canManageTalks: !!me && me.permissions.includes('speakers_committee'),
       }}
     >
       {children}

@@ -32,7 +32,16 @@ class RoleSuggestionAlert(BaseModel):
     current_role: str
     suggested_role: str
     # The positions behind the suggestion ("Accelerator Representative"), or
-    # why a demotion is suggested ("no active leadership position").
+    # why a demotion is suggested ("Chair ended 2026-06-30").
+    detail: str
+
+
+class RoleSuggestionDismiss(BaseModel):
+    """Reject one suggestion as currently shown; it comes back if the
+    person's positions (and so the detail) change."""
+
+    user_id: int
+    suggested_role: str
     detail: str
 
 

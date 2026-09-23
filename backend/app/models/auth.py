@@ -1,7 +1,16 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Enum, ForeignKey, String
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import TimestampedBase
@@ -21,10 +30,11 @@ class UserRole(str, enum.Enum):
     # below.
     office = "office"
     # Leadership Council representatives and deputy representatives: working
-    # groups and their conveners, plus everything the speakers committee can do.
+    # groups and their conveners, publications and author lists, plus
+    # everything the speakers committee can do.
     leadership = "leadership"
     # Speakers committee: full edit access to talks, events and nominations.
-    speakers = "speakers"
+    speakers_committee = "speakers_committee"
     member = "member"
 
 
@@ -32,7 +42,7 @@ class UserRole(str, enum.Enum):
 # privileged role when merging accounts.
 ROLE_RANK = {
     UserRole.member: 0,
-    UserRole.speakers: 1,
+    UserRole.speakers_committee: 1,
     UserRole.leadership: 2,
     UserRole.office: 3,
     UserRole.admin: 4,
@@ -77,3 +87,24 @@ class LoginEvent(TimestampedBase):
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     username_attempted: Mapped[str | None] = mapped_column(String(80))
     ip: Mapped[str | None] = mapped_column(String(64))
+
+
+class RoleSuggestionDismissal(TimestampedBase):
+    """A role suggestion from the alerts panel that an admin rejected (issue
+    #167): the account keeps its role and the alert stays quiet — until the
+    person's positions change, which changes `detail` and raises it again.
+    Rows go with the account."""
+
+    __tablename__ = "role_suggestion_dismissals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "suggested_role", "detail", name="uq_role_suggestion_dismissal"),
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    suggested_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    detail: Mapped[str] = mapped_column(String(500), nullable=False)
+    dismissed_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )

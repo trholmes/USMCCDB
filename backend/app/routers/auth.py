@@ -123,7 +123,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) ->
     person = db.get(Person, user.person_id) if user.person_id else None
     # Every role at or below the account's own: the frontend gates on
     # membership ("office" in permissions), so a leadership account also
-    # carries "speakers" and "member".
+    # carries "speakers_committee" and "member".
     permissions = [r.value for r in UserRole if ROLE_RANK[r] <= ROLE_RANK[user.role]]
     return MeOut(
         user=UserOut.model_validate(user),

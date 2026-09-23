@@ -3837,9 +3837,9 @@ def test_speakers_role_manages_talks_only(admin):
     """Speakers committee accounts (issue #167) edit any talk, event and
     nomination but nothing else beyond a member."""
     speaker, _spid, _ = _role_account(
-        admin, given="Sia", family="Speakers", email="sia.speakers@example.edu", role="speakers"
+        admin, given="Sia", family="Speakers", email="sia.speakers@example.edu", role="speakers_committee"
     )
-    assert speaker.get("/api/v1/auth/me").json()["permissions"] == ["speakers", "member"]
+    assert speaker.get("/api/v1/auth/me").json()["permissions"] == ["speakers_committee", "member"]
     member, mpid = _linked_member(
         admin, given="Tom", family="Talkgiver", email="tom.talkgiver@example.edu"
     )
@@ -3888,7 +3888,7 @@ def test_leadership_role_manages_working_groups(admin):
     lead, lpid, _ = _role_account(
         admin, given="Rep", family="Resentative", email="rep.resentative@example.edu", role="leadership"
     )
-    assert lead.get("/api/v1/auth/me").json()["permissions"] == ["leadership", "speakers", "member"]
+    assert lead.get("/api/v1/auth/me").json()["permissions"] == ["leadership", "speakers_committee", "member"]
     member, mpid = _linked_member(
         admin, given="Wanda", family="Worker", email="wanda.worker@example.edu"
     )
@@ -3933,6 +3933,22 @@ def test_leadership_role_manages_working_groups(admin):
     assert lead.post("/api/v1/events", json={"name": "Leadership Retreat"}).status_code == 201
     talk = member.post("/api/v1/talks", json={"title": "WG talk", "venue": "X", "speaker_person_id": mpid}).json()
     assert lead.patch(f"/api/v1/talks/{talk['id']}", json={"working_group_id": wg["id"]}).status_code == 200
+
+    # Publications: full control, including status changes, reviewers and
+    # author-list previews, on a paper somebody else opened.
+    pub = member.post(
+        "/api/v1/publications", json={"title": "A Paper by Wanda", "pub_type": "paper"}
+    )
+    assert pub.status_code == 201, pub.text
+    pub = pub.json()
+    assert lead.patch(f"/api/v1/publications/{pub['id']}", json={"title": "A Paper (edited)"}).status_code == 200
+    assert lead.post(
+        f"/api/v1/publications/{pub['id']}/people", json={"person_id": lpid, "role": "reviewer"}
+    ).status_code == 201
+    r = lead.post(f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"})
+    assert r.status_code == 200, r.text
+    assert lead.post("/api/v1/author-lists/preview", json={"cutoff_date": "2026-01-01"}).status_code == 200
+    assert member.post("/api/v1/author-lists/preview", json={"cutoff_date": "2026-01-01"}).status_code == 403
 
     # Not the office: no moderation, institutions, affiliations, or accounts.
     assert lead.post(f"/api/v1/people/{mpid}/status", json={"status": "inactive"}).status_code == 403
@@ -3997,14 +4013,14 @@ def test_role_suggestion_alerts(admin):
     # … and a leadership/speakers account whose position ended is flagged for
     # demotion, naming the position; one with no position history too.
     spk, spid, suid = _role_account(
-        admin, given="Ex", family="Speaker", email="ex.speaker@example.edu", role="speakers"
+        admin, given="Ex", family="Speaker", email="ex.speaker@example.edu", role="speakers_committee"
     )
     assert admin.post(
         "/api/v1/collab-roles",
         json={"person_id": spid, "role": "speakers_comm", "start_date": "2024-01-01", "end_date": "2025-06-30"},
     ).status_code == 201
     s = suggestion_for(suid)
-    assert (s["current_role"], s["suggested_role"]) == ("speakers", "member")
+    assert (s["current_role"], s["suggested_role"]) == ("speakers_committee", "member")
     assert s["detail"] == "Speakers Committee ended 2025-06-30"
     _, _, nuid = _role_account(
         admin, given="No", family="Position", email="no.position@example.edu", role="leadership"
@@ -4018,13 +4034,62 @@ def test_role_suggestion_alerts(admin):
     ).status_code == 201
     assert admin.patch(f"/api/v1/auth/users/{suid}", json={"role": "leadership"}).status_code == 200
     s = suggestion_for(suid)
-    assert (s["current_role"], s["suggested_role"]) == ("leadership", "speakers")
+    assert (s["current_role"], s["suggested_role"]) == ("leadership", "speakers_committee")
     assert s["detail"] == "current position: Speakers Committee"
 
-    # Office and admin accounts are never flagged for demotion — they are
-    # given for other reasons.
+    # Office and admin accounts with no position history are never flagged —
+    # they are given for other reasons …
+    _, _, ouid = _role_account(
+        admin, given="Off", family="Ice", email="off.ice@example.edu", role="office"
+    )
+    assert suggestion_for(ouid) is None
+    # … but an ex-chair still holding admin is, naming the ended term; and so
+    # is an office account whose only remaining position is a lesser one.
     assert admin.patch(f"/api/v1/auth/users/{suid}", json={"role": "office"}).status_code == 200
-    assert suggestion_for(suid) is None
+    s = suggestion_for(suid)
+    assert (s["current_role"], s["suggested_role"]) == ("office", "speakers_committee")
+    exc, xpid, xuid = _role_account(
+        admin, given="Ex", family="Chair", email="ex.chair@example.edu", role="admin"
+    )
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": xpid, "role": "chair", "start_date": "2024-01-01", "end_date": "2025-12-31"},
+    ).status_code == 201
+    s = suggestion_for(xuid)
+    assert (s["current_role"], s["suggested_role"]) == ("admin", "member")
+    assert s["detail"] == "Chair ended 2025-12-31"
+
+    # The admin may reject a suggestion: it stays quiet (the account keeps its
+    # role) until the person's positions change again.
+    r = admin.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": xuid, "suggested_role": "member", "detail": s["detail"]},
+    )
+    assert r.status_code == 204, r.text
+    assert suggestion_for(xuid) is None
+    assert admin.get("/api/v1/auth/users").json() and any(
+        u["id"] == xuid and u["role"] == "admin" for u in admin.get("/api/v1/auth/users").json()
+    )
+    assert admin.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": xuid, "suggested_role": "member", "detail": s["detail"]},
+    ).status_code == 204  # idempotent
+    assert admin.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": 999999, "suggested_role": "member", "detail": "x"},
+    ).status_code == 404
+    # A new (later-ending) term changes the detail and raises it again.
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": xpid, "role": "vice_chair", "start_date": "2026-01-01", "end_date": "2026-03-31"},
+    ).status_code == 201
+    s = suggestion_for(xuid)
+    assert s is not None and s["detail"] == "Vice Chair ended 2026-03-31"
+    # Only admins dismiss.
+    assert exc.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": xuid, "suggested_role": "member", "detail": s["detail"]},
+    ).status_code == 204  # exc is an admin account itself
     # Inactive accounts are left alone.
     assert admin.patch(f"/api/v1/auth/users/{nuid}", json={"is_active": False}).status_code == 200
     assert suggestion_for(nuid) is None
@@ -4032,7 +4097,7 @@ def test_role_suggestion_alerts(admin):
 
 def test_merge_keeps_more_privileged_new_role(admin):
     """Account merge picks the higher of the two roles across the full
-    ladder — leadership outranks speakers."""
+    ladder — leadership outranks speakers_committee."""
     r = admin.post(
         "/api/v1/auth/users",
         json={"username": "merge-lead", "password": "merge-pw-123", "role": "leadership"},
@@ -4045,7 +4110,7 @@ def test_merge_keeps_more_privileged_new_role(admin):
         conn.execute(
             sa_text(
                 "INSERT INTO users (orcid, role, is_active, created_at, updated_at) "
-                "VALUES ('0000-0002-9999-1234', 'speakers', true, now(), now())"
+                "VALUES ('0000-0002-9999-1234', 'speakers_committee', true, now(), now())"
             )
         )
     other = next(u for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-9999-1234")

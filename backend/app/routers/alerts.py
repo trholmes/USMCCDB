@@ -4,7 +4,7 @@ so an alert disappears the moment the underlying problem is fixed."""
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from app.models import (
     Institution,
     MemberStatus,
     Person,
+    RoleSuggestionDismissal,
     User,
     UserRole,
 )
@@ -29,6 +30,7 @@ from app.schemas.alerts import (
     InstitutionAlert,
     PersonAlert,
     RoleSuggestionAlert,
+    RoleSuggestionDismiss,
 )
 from app.security import require_admin
 
@@ -165,13 +167,15 @@ ROLE_FOR_POSITION = {
     CollabRoleType.vice_chair: UserRole.admin,
     CollabRoleType.representative: UserRole.leadership,
     CollabRoleType.deputy_representative: UserRole.leadership,
-    CollabRoleType.speakers_comm: UserRole.speakers,
+    CollabRoleType.speakers_comm: UserRole.speakers_committee,
 }
 # Roles that exist only because of such a position: an account still holding
-# one after the position ended is flagged for demotion. Admin and office are
-# not — they are also given for other reasons (site administration, the
-# collaboration office).
-POSITION_ONLY_ROLES = (UserRole.leadership, UserRole.speakers)
+# one is flagged for demotion as soon as no active position warrants it, even
+# with no position history. Admin and office accounts are also given for
+# other reasons (site administration, the collaboration office), so they are
+# flagged only once a position they held — an ex-chair — has ended; the admin
+# can apply or dismiss the suggestion.
+POSITION_ONLY_ROLES = (UserRole.leadership, UserRole.speakers_committee)
 
 
 def _position_title(role: CollabRole) -> str:
@@ -189,9 +193,10 @@ def _position_title(role: CollabRole) -> str:
 def _role_suggestions(db: Session, today) -> list[RoleSuggestionAlert]:
     """Accounts whose role is below what an active leadership position calls
     for (a representative signed in but is still a plain member), and
-    position-only roles whose position has ended. Only people who have a
-    sign-in are listed — the suggestion is about the account, and there is
-    nothing to apply before their first login."""
+    elevated roles whose position has ended. Only people who have a sign-in
+    are listed — the suggestion is about the account, and there is nothing
+    to apply before their first login. Suggestions an admin dismissed (same
+    account, role and detail) are left out."""
     positions = (
         db.execute(
             select(CollabRole, User)
@@ -226,31 +231,8 @@ def _role_suggestions(db: Session, today) -> list[RoleSuggestionAlert]:
             )
         )
 
-    for user, held in active_by_user.values():
-        warranted = max((ROLE_FOR_POSITION[p.role] for p in held), key=ROLE_RANK.__getitem__)
-        titles = ", ".join(_position_title(p) for p in held)
-        if ROLE_RANK[warranted] > ROLE_RANK[user.role]:
-            suggest(user, warranted, titles)
-        elif user.role in POSITION_ONLY_ROLES and ROLE_RANK[warranted] < ROLE_RANK[user.role]:
-            suggest(user, warranted, f"current position: {titles}")
-
-    # Position-only roles with no active qualifying position at all.
-    stale = (
-        db.execute(
-            select(User)
-            .where(
-                User.is_active.is_(True),
-                User.role.in_(POSITION_ONLY_ROLES),
-                User.person_id.isnot(None),
-                User.id.notin_(active_by_user.keys()),
-            )
-            .order_by(User.id)
-        )
-        .scalars()
-        .all()
-    )
-    for user in stale:
-        last = db.execute(
+    def last_ended_position(user: User) -> CollabRole | None:
+        return db.execute(
             select(CollabRole)
             .where(
                 CollabRole.person_id == user.person_id,
@@ -261,13 +243,84 @@ def _role_suggestions(db: Session, today) -> list[RoleSuggestionAlert]:
             .order_by(CollabRole.end_date.desc(), CollabRole.id.desc())
             .limit(1)
         ).scalar_one_or_none()
-        detail = (
-            f"{_position_title(last)} ended {last.end_date.isoformat()}"
-            if last is not None
-            else "no active leadership position"
+
+    for user, held in active_by_user.values():
+        warranted = max((ROLE_FOR_POSITION[p.role] for p in held), key=ROLE_RANK.__getitem__)
+        titles = ", ".join(_position_title(p) for p in held)
+        if ROLE_RANK[warranted] > ROLE_RANK[user.role]:
+            suggest(user, warranted, titles)
+        elif ROLE_RANK[warranted] < ROLE_RANK[user.role] and (
+            user.role in POSITION_ONLY_ROLES or last_ended_position(user) is not None
+        ):
+            # Still holds a lesser position — e.g. the ex-chair who stays on
+            # the speakers committee.
+            suggest(user, warranted, f"current position: {titles}")
+
+    # Elevated roles with no active qualifying position at all.
+    stale = (
+        db.execute(
+            select(User)
+            .where(
+                User.is_active.is_(True),
+                User.role != UserRole.member,
+                User.person_id.isnot(None),
+                User.id.notin_(active_by_user.keys()),
+            )
+            .order_by(User.id)
         )
+        .scalars()
+        .all()
+    )
+    for user in stale:
+        last = last_ended_position(user)
+        if last is not None:
+            detail = f"{_position_title(last)} ended {last.end_date.isoformat()}"
+        elif user.role in POSITION_ONLY_ROLES:
+            detail = "no active leadership position"
+        else:
+            continue  # admin / office without position history: not ours to judge
         suggest(user, UserRole.member, detail)
-    return out
+
+    dismissed = set(
+        db.execute(
+            select(
+                RoleSuggestionDismissal.user_id,
+                RoleSuggestionDismissal.suggested_role,
+                RoleSuggestionDismissal.detail,
+            )
+        ).all()
+    )
+    return [s for s in out if (s.user_id, s.suggested_role, s.detail) not in dismissed]
+
+
+@router.post("/role-suggestions/dismiss", status_code=204)
+def dismiss_role_suggestion(
+    body: RoleSuggestionDismiss,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> None:
+    """Reject a role suggestion: the account keeps its role and this exact
+    suggestion stops showing. A change in the person's positions changes the
+    detail text and raises it again."""
+    if db.get(User, body.user_id) is None:
+        raise HTTPException(404, "User not found")
+    exists = db.execute(
+        select(RoleSuggestionDismissal.id).where(
+            RoleSuggestionDismissal.user_id == body.user_id,
+            RoleSuggestionDismissal.suggested_role == body.suggested_role,
+            RoleSuggestionDismissal.detail == body.detail,
+        )
+    ).first()
+    if exists is None:
+        db.add(
+            RoleSuggestionDismissal(
+                user_id=body.user_id,
+                suggested_role=body.suggested_role,
+                detail=body.detail[:500],
+                dismissed_by_user_id=actor.id,
+            )
+        )
+        db.commit()
 
 
 def _active_without_affiliation(db: Session) -> list[PersonAlert]:

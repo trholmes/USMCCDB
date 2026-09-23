@@ -45,7 +45,7 @@ ORCID sign-in.
 - **Sign-in** — ORCID OAuth for members (free public ORCID API) plus local
   username/password accounts; admins can create as many local accounts as
   needed. Roles: `admin`, `office`, `leadership` (Leadership Council
-  representatives and deputies: working groups, conveners, talks), `speakers`
+  representatives and deputies: working groups, publications, talks), `speakers_committee`
   (speakers committee: talks and events), `member` (+ working-group conveners
   and administrative institutional contacts with scoped rights). Roles are
   assigned by an admin; the alerts panel suggests one when a person's
@@ -340,7 +340,7 @@ Everything else is configured while the instance runs, in **Admin** (visible
 to admin accounts):
 
 - **User accounts** — create local username/password accounts, set roles
-  (`admin` / `office` / `leadership` / `speakers` / `member`), link logins to
+  (`admin` / `office` / `leadership` / `speakers_committee` / `member`), link logins to
   directory records, merge a
   member's local + ORCID accounts, **reset a locked-out local account's
   password** (shows a one-time temporary password), search, and delete logins.

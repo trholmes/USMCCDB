@@ -233,7 +233,9 @@ export default function AdminPage() {
         <Text size="sm" c="dimmed">
           Local accounts sign in with username + password. ORCID users appear here
           automatically after their first sign-in. Roles: <b>admin</b> (everything),{' '}
-          <b>office</b> (approve members, manage speakers & publications), <b>member</b>.
+          <b>office</b> (approve members, institutions, all roles), <b>leadership</b>{' '}
+          (representatives & deputies: working groups, publications, talks),{' '}
+          <b>speakers_committee</b> (talks & events), <b>member</b>.
         </Text>
       </Card>
 

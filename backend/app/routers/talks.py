@@ -27,7 +27,7 @@ from app.schemas.speakers import (
     TalkStatRow,
     TalkUpdate,
 )
-from app.security import can_manage_talks, get_current_user, require_speakers
+from app.security import can_manage_talks, get_current_user, require_speakers_committee
 
 router = APIRouter(tags=["speakers"])
 
@@ -52,7 +52,7 @@ def list_events(
     return [_event_out(db, e) for e in events]
 
 
-@router.post("/events", dependencies=[Depends(require_speakers)], status_code=201)
+@router.post("/events", dependencies=[Depends(require_speakers_committee)], status_code=201)
 def create_event(body: EventCreate, db: Session = Depends(get_db)) -> EventOut:
     event = Event(**body.model_dump())
     db.add(event)
@@ -61,7 +61,7 @@ def create_event(body: EventCreate, db: Session = Depends(get_db)) -> EventOut:
     return _event_out(db, event)
 
 
-@router.patch("/events/{event_id}", dependencies=[Depends(require_speakers)])
+@router.patch("/events/{event_id}", dependencies=[Depends(require_speakers_committee)])
 def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)) -> EventOut:
     event = db.get(Event, event_id)
     if event is None:
@@ -73,7 +73,7 @@ def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)
     return _event_out(db, event)
 
 
-@router.delete("/events/{event_id}", dependencies=[Depends(require_speakers)], status_code=204)
+@router.delete("/events/{event_id}", dependencies=[Depends(require_speakers_committee)], status_code=204)
 def delete_event(event_id: int, db: Session = Depends(get_db)) -> None:
     event = db.get(Event, event_id)
     if event is None:

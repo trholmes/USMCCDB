@@ -78,11 +78,11 @@ function RoleSuggestionRow({
   const { me } = useSession()
   const [busy, setBusy] = useState(false)
   const demotion = item.suggested_role === 'member'
-  const apply = async () => {
+  const run = async (action: () => Promise<unknown>, message: string) => {
     setBusy(true)
     try {
-      await api.patch(`/auth/users/${item.user_id}`, { role: item.suggested_role })
-      notifications.show({ message: `${item.name} is now ${item.suggested_role}` })
+      await action()
+      notifications.show({ message })
       onApplied()
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
@@ -90,6 +90,23 @@ function RoleSuggestionRow({
       setBusy(false)
     }
   }
+  const apply = () =>
+    run(
+      () => api.patch(`/auth/users/${item.user_id}`, { role: item.suggested_role }),
+      `${item.name} is now ${item.suggested_role}`,
+    )
+  // Rejecting keeps the role and silences this suggestion until the person's
+  // positions change.
+  const dismiss = () =>
+    run(
+      () =>
+        api.post('/alerts/role-suggestions/dismiss', {
+          user_id: item.user_id,
+          suggested_role: item.suggested_role,
+          detail: item.detail,
+        }),
+      `Suggestion for ${item.name} dismissed`,
+    )
   return (
     <Group gap="xs" wrap="nowrap" justify="space-between">
       <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
@@ -118,6 +135,9 @@ function RoleSuggestionRow({
           onClick={apply}
         >
           Apply
+        </Button>
+        <Button size="compact-xs" variant="subtle" color="gray" disabled={busy} onClick={dismiss}>
+          Dismiss
         </Button>
       </Group>
     </Group>
@@ -197,7 +217,7 @@ export default function AlertsPage() {
       <Section
         title="Account roles to review"
         count={alerts.role_suggestions.length}
-        description="Leadership positions come with database permissions — chair and vice chair as admin, representatives and deputies as leadership, the speakers committee as speakers — but positions never change an account by themselves. These sign-ins hold a role that doesn't match the person's current positions: apply the suggestion, or leave it and the alert stays."
+        description="Leadership positions come with database permissions — chair and vice chair as admin, representatives and deputies as leadership, the speakers committee as speakers_committee — but positions never change an account by themselves. These sign-ins hold a role that doesn't match the person's current positions (including admins whose term as chair has ended). Apply the suggestion, or dismiss it to keep the role — it comes back only if the person's positions change."
       >
         {alerts.role_suggestions.map((s) => (
           <RoleSuggestionRow key={s.user_id} item={s} onApplied={refresh} />

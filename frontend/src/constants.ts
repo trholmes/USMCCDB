@@ -18,7 +18,7 @@ export const careerStageLabel = (value: string | null | undefined): string =>
 
 // Account roles, most to least privileged (mirrors UserRole / ROLE_RANK in
 // backend/app/models/auth.py). Each role holds every permission of the ones
-// below it. `leadership` and `speakers` (issue #167) are assigned explicitly
+// below it. `leadership` and `speakers_committee` (issue #167) are assigned explicitly
 // by an admin — the alerts panel suggests them from a person's leadership
 // positions but never applies them.
 export const USER_ROLES = [
@@ -27,9 +27,13 @@ export const USER_ROLES = [
   {
     value: 'leadership',
     label: 'leadership',
-    description: 'Representatives & deputies: working groups, conveners, talks',
+    description: 'Representatives & deputies: working groups, publications, talks',
   },
-  { value: 'speakers', label: 'speakers', description: 'Speakers committee: talks & events' },
+  {
+    value: 'speakers_committee',
+    label: 'speakers_committee',
+    description: 'Speakers committee: talks & events',
+  },
   { value: 'member', label: 'member', description: 'Own profile, own talks, publications' },
 ]
 

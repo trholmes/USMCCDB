@@ -175,7 +175,9 @@ require_office = require_role(UserRole.office)  # office or admin
 # and their conveners, plus everything the speakers committee may do.
 require_leadership = require_role(UserRole.office, UserRole.leadership)
 # Speakers committee: full edit access to talks, events and nominations.
-require_speakers = require_role(UserRole.office, UserRole.leadership, UserRole.speakers)
+require_speakers_committee = require_role(
+    UserRole.office, UserRole.leadership, UserRole.speakers_committee
+)
 
 
 def has_role(user: User, role: UserRole) -> bool:
@@ -192,9 +194,15 @@ def can_manage_working_groups(user: User) -> bool:
     return has_role(user, UserRole.leadership)
 
 
+def can_manage_publications(user: User) -> bool:
+    """Edit any publication, its status, people and reviewers, and build
+    author lists — not just publications one is a contact of."""
+    return has_role(user, UserRole.leadership)
+
+
 def can_manage_talks(user: User) -> bool:
     """Edit any talk, event or nomination — not just one's own."""
-    return has_role(user, UserRole.speakers)
+    return has_role(user, UserRole.speakers_committee)
 
 
 def is_convener_of(db: Session, user: User, working_group_id: int | None) -> bool:
