@@ -32,6 +32,7 @@ import type {
   WorkingGroup,
 } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
+import RoleDetailInput from '../components/RoleDetailInput'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
 import {
@@ -117,6 +118,9 @@ export default function PersonPage() {
   const [statusOpen, setStatusOpen] = useState(false)
   const [newStatus, setNewStatus] = useState<string | null>(null)
   const [statusDate, setStatusDate] = useState(today())
+  // Research time on µC, editable alongside the status (issue #161): the
+  // moment someone's involvement changes is when the percentage moves too.
+  const [statusPercent, setStatusPercent] = useState<number | string>('')
   const [statusBusy, setStatusBusy] = useState(false)
 
   // Collaboration roles (leadership positions; office-managed).
@@ -414,16 +418,38 @@ export default function PersonPage() {
     }
   }
 
+  const openStatusForm = () => {
+    setStatusPercent(person.usmcc_percent ?? '')
+    setStatusOpen(true)
+  }
+
   const closeStatusForm = () => {
     setStatusOpen(false)
     setNewStatus(null)
     setStatusDate(today())
+    setStatusPercent('')
   }
 
+  const percentValue = statusPercent === '' ? null : Number(statusPercent)
+  const percentChanged = percentValue !== (person?.usmcc_percent ?? null)
+
+  // Status and research time are independent: either alone, or both, can be
+  // submitted from the same card.
   const submitStatus = async () => {
-    if (!newStatus) return
+    if (!newStatus && !percentChanged) return
     setStatusBusy(true)
-    const ok = await postStatus(newStatus, statusDate)
+    let ok = true
+    if (percentChanged) {
+      try {
+        await api.patch(`/people/${person.id}`, { usmcc_percent: percentValue })
+        notifications.show({ message: 'Research time updated' })
+        if (!newStatus) load()
+      } catch (err: any) {
+        notifications.show({ color: 'red', message: err.message })
+        ok = false
+      }
+    }
+    if (ok && newStatus) ok = await postStatus(newStatus, statusDate)
     setStatusBusy(false)
     if (ok) closeStatusForm()
   }
@@ -712,8 +738,8 @@ export default function PersonPage() {
               onChange={(e) => setForm({ ...form, department: e.currentTarget.value })}
             />
             <NumberInput
-              label="Research time on USMCC (%)"
-              description="Fraction of your research time devoted to the USMCC."
+              label="Research time on µC (%)"
+              description="Fraction of your research time devoted to the muon collider."
               min={0}
               max={100}
               value={usmccPercent}
@@ -811,7 +837,7 @@ export default function PersonPage() {
             )}
             {person.usmcc_percent != null && (
               <Text size="sm">
-                <b>Research time on USMCC:</b> {person.usmcc_percent}%
+                <b>Research time on µC:</b> {person.usmcc_percent}%
               </Text>
             )}
             {person.acknowledgement_text && (
@@ -1001,8 +1027,9 @@ export default function PersonPage() {
               <Stack gap="sm">
                 <Title order={5}>Change status</Title>
                 <Text size="xs" c="dimmed">
-                  Update your membership status as of a date. The change is recorded in your
-                  membership history.
+                  Update your membership status as of a date, and/or the share of your research
+                  time on the muon collider. Status changes are recorded in your membership
+                  history.
                 </Text>
                 <Select
                   label="New status"
@@ -1010,16 +1037,30 @@ export default function PersonPage() {
                   data={SELF_STATUSES}
                   value={newStatus}
                   onChange={setNewStatus}
+                  clearable
                 />
                 <TextInput
                   label="Effective date"
                   type="date"
                   value={statusDate}
                   onChange={(e) => setStatusDate(e.currentTarget.value)}
+                  disabled={!newStatus}
+                />
+                <NumberInput
+                  label="Research time on µC (%)"
+                  description="Leave empty if too uncertain to estimate."
+                  min={0}
+                  max={100}
+                  value={statusPercent}
+                  onChange={setStatusPercent}
                 />
                 <Group>
-                  <Button onClick={submitStatus} loading={statusBusy} disabled={!newStatus}>
-                    Update status
+                  <Button
+                    onClick={submitStatus}
+                    loading={statusBusy}
+                    disabled={!newStatus && !percentChanged}
+                  >
+                    {newStatus ? 'Update status' : 'Update research time'}
                   </Button>
                   <Button variant="subtle" onClick={closeStatusForm}>
                     Cancel
@@ -1028,7 +1069,7 @@ export default function PersonPage() {
               </Stack>
             </Card>
           ) : (
-            <Button variant="default" onClick={() => setStatusOpen(true)}>
+            <Button variant="default" onClick={openStatusForm}>
               Change status…
             </Button>
           )}
@@ -1155,17 +1196,8 @@ export default function PersonPage() {
                   onChange={setRoleType}
                   searchable
                 />
-                {roleDef?.needsDetail && (
-                  <TextInput
-                    label={roleDef.value === 'other' ? 'Title' : 'Area'}
-                    description={
-                      roleDef.value === 'other'
-                        ? 'Full title as it should appear (e.g. DEI Committee Chair).'
-                        : 'Qualifier, e.g. Accelerator, Experimental, Outreach, Target.'
-                    }
-                    value={roleDetail}
-                    onChange={(e) => setRoleDetail(e.currentTarget.value)}
-                  />
+                {roleType && (
+                  <RoleDetailInput role={roleType} value={roleDetail} onChange={setRoleDetail} />
                 )}
                 {roleDef?.needsWG && (
                   <Select

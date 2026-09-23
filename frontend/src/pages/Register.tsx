@@ -224,8 +224,8 @@ export default function RegisterPage() {
               )}
               <div>
                 <NumberInput
-                  label="Research time on USMCC (%)"
-                  description="Fraction of your research time devoted to the USMCC."
+                  label="Research time on µC (%)"
+                  description="Fraction of your research time devoted to the muon collider."
                   min={0}
                   max={100}
                   required={!percentUncertain}
