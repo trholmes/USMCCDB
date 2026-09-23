@@ -86,7 +86,7 @@ export default function PersonPage() {
   const [usmccPercent, setUsmccPercent] = useState<number | string>('')
   const [voting, setVoting] = useState(false)
   const [researchAreas, setResearchAreas] = useState<string[]>([])
-  const { me, isOffice } = useSession()
+  const { me, isOffice, canManageWGs } = useSession()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
 
@@ -194,9 +194,16 @@ export default function PersonPage() {
   useEffect(loadRoles, [loadRoles])
 
   useEffect(() => {
-    if (!isOffice) return // list feeds the add-role form only
+    if (!canManageWGs) return // list feeds the add-role form only
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
-  }, [isOffice])
+  }, [canManageWGs])
+
+  // Office manages every role; leadership accounts (representatives and
+  // deputies) only working-group conveners — mirrors _require_collab_role_editor.
+  const canEditRole = (role: string) => isOffice || (canManageWGs && role === 'convener')
+  const rolePickerData = COLLAB_ROLES.filter(
+    (r) => !r.hidden && (isOffice || r.value === 'convener'),
+  ).map((r) => ({ value: r.value, label: r.label }))
 
   const uploadPhoto = async (file: File | undefined) => {
     if (!file || !person) return
@@ -1074,7 +1081,7 @@ export default function PersonPage() {
       </Table>
       </Table.ScrollContainer>
 
-      {(roles.length > 0 || isOffice) && (
+      {(roles.length > 0 || canManageWGs) && (
         <>
           <Title order={5}>Collaboration roles</Title>
           {roles.length === 0 ? (
@@ -1090,7 +1097,7 @@ export default function PersonPage() {
                   <Table.Th>Scope</Table.Th>
                   <Table.Th>From</Table.Th>
                   <Table.Th>To</Table.Th>
-                  {isOffice && <Table.Th />}
+                  {canManageWGs && <Table.Th />}
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -1102,30 +1109,32 @@ export default function PersonPage() {
                     </Table.Td>
                     <Table.Td>{r.start_date}</Table.Td>
                     <Table.Td>{r.end_date ?? 'present'}</Table.Td>
-                    {isOffice && (
+                    {canManageWGs && (
                       <Table.Td>
-                        <Group gap="xs" justify="flex-end" wrap="nowrap">
-                          {!r.end_date && (
-                            <Button size="compact-xs" variant="light" onClick={() => endRole(r.id)}>
-                              End today
+                        {canEditRole(r.role) && (
+                          <Group gap="xs" justify="flex-end" wrap="nowrap">
+                            {!r.end_date && (
+                              <Button size="compact-xs" variant="light" onClick={() => endRole(r.id)}>
+                                End today
+                              </Button>
+                            )}
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              onClick={() => openRoleEdit(r)}
+                            >
+                              Edit
                             </Button>
-                          )}
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            onClick={() => openRoleEdit(r)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            color="red"
-                            onClick={() => deleteRole(r.id)}
-                          >
-                            Delete
-                          </Button>
-                        </Group>
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              color="red"
+                              onClick={() => deleteRole(r.id)}
+                            >
+                              Delete
+                            </Button>
+                          </Group>
+                        )}
                       </Table.Td>
                     )}
                   </Table.Tr>
@@ -1134,17 +1143,14 @@ export default function PersonPage() {
             </Table>
             </Table.ScrollContainer>
           )}
-          {isOffice && (
+          {canManageWGs && (
             <Card withBorder w={{ base: '100%', xs: 340 }}>
               <Stack gap="sm">
-                <Title order={6}>Add role</Title>
+                <Title order={6}>{isOffice ? 'Add role' : 'Add working group convener'}</Title>
                 <Select
                   label="Role"
                   placeholder="Select role…"
-                  data={COLLAB_ROLES.filter((r) => !r.hidden).map((r) => ({
-                    value: r.value,
-                    label: r.label,
-                  }))}
+                  data={rolePickerData}
                   value={roleType}
                   onChange={setRoleType}
                   searchable

@@ -44,8 +44,12 @@ ORCID sign-in.
   and **INSPIRE/arXiv `authors.xml`**.
 - **Sign-in** — ORCID OAuth for members (free public ORCID API) plus local
   username/password accounts; admins can create as many local accounts as
-  needed. Roles: `admin`, `office`, `member` (+ working-group conveners with
-  scoped rights).
+  needed. Roles: `admin`, `office`, `leadership` (Leadership Council
+  representatives and deputies: working groups, publications, talks), `speakers_committee`
+  (speakers committee: talks and events), `member` (+ working-group conveners
+  and administrative institutional contacts with scoped rights). Roles are
+  assigned by an admin; the alerts panel suggests one when a person's
+  leadership position and their account disagree.
 - **Interconnected, Glance-style** — every page cross-links: directory rows →
   institution pages (with their member lists) → profiles → the person's talks
   and back; speaker and stats entries click through to people. Every listing
@@ -76,7 +80,7 @@ backup sidecar.
 That is a complete working instance. To take it from "running" to "fully set
 up", work through the sections below in order:
 
-1. **[Domain + HTTPS](#going-live-at-dbmuoncolliderus)** — `SITE_DOMAIN` turns on the Caddy TLS container.
+1. **[Domain + HTTPS](#going-live-at-dbmuoncolliderus)** — behind the host's existing web server, or `SITE_DOMAIN` turns on the bundled Caddy TLS container.
 2. **[ORCID sign-in](#orcid-sign-in)** — so members sign in with their ORCID iD instead of local accounts.
 3. **[Email notifications](#email-notifications)** — registration and publication-workflow mail.
 4. **[Import existing data](#initializing-a-new-instance-from-the-existing-spreadsheets)** and **[member photos](#member-photos)**.
@@ -87,13 +91,43 @@ Each step is optional and independent — skip what you don't need.
 
 ### Going live at db.muoncollider.us
 
+Either way, first set in `.env`:
+
+```
+SITE_URL=https://db.muoncollider.us
+CONTACT_EMAIL=you@example.edu
+```
+
+then pick **one** of the two HTTPS setups below and re-run
+`./scripts/start.sh`.
+
+**Option A — behind the host's existing web server (the production setup).**
+The production server keeps running Apache (it also handles the Let's
+Encrypt certificate), configured to reverse-proxy
+`https://db.muoncollider.us` to `localhost:5000`. Match that in `.env`:
+
+```
+HTTP_PORT=5000    # the localhost port the host's proxy forwards to
+SITE_DOMAIN=      # leave EMPTY — no caddy container
+```
+
+nginx stays bound to `127.0.0.1:5000` (plain HTTP, never exposed to the
+network) and Apache terminates TLS in front of it. The proxy vhost must:
+
+- forward `/` to `http://127.0.0.1:5000/` (`ProxyPass` + `ProxyPassReverse`,
+  ideally with `ProxyPreserveHost On`);
+- send `X-Forwarded-Proto: https` (with mod_headers:
+  `RequestHeader set X-Forwarded-Proto "https"`) so the session cookie gets
+  its `Secure` flag — if the proxy config can't be changed, set
+  `COOKIE_SECURE=true` in `.env` instead;
+- allow large request bodies and slow responses for the admin restore flow,
+  which uploads `.dump` files (Apache ≥ 2.4.54 caps `LimitRequestBody` at
+  1 GiB by default; set `ProxyTimeout 120` or higher).
+
+**Option B — bundled Caddy (nothing else listening on ports 80/443).**
+
 1. Point the domain's DNS **A record** at your server; open ports **80 + 443**.
-2. In `.env`, set:
-   ```
-   SITE_DOMAIN=db.muoncollider.us
-   SITE_URL=https://db.muoncollider.us
-   CONTACT_EMAIL=you@example.edu
-   ```
+2. In `.env`, set `SITE_DOMAIN=db.muoncollider.us`.
 3. `./scripts/start.sh` again. Caddy starts in its own container, obtains a
    Let's Encrypt certificate automatically, and renews it forever.
 
@@ -306,7 +340,8 @@ Everything else is configured while the instance runs, in **Admin** (visible
 to admin accounts):
 
 - **User accounts** — create local username/password accounts, set roles
-  (`admin` / `office` / `member`), link logins to directory records, merge a
+  (`admin` / `office` / `leadership` / `speakers_committee` / `member`), link logins to
+  directory records, merge a
   member's local + ORCID accounts, **reset a locked-out local account's
   password** (shows a one-time temporary password), search, and delete logins.
 - **Site settings** — an **announcement banner** (info/warning/critical, shown
@@ -450,7 +485,10 @@ IMAGE_TAG=main docker compose -f docker-compose.yml -f docker-compose.release.ym
 
 ```
                     ┌──────────────┐
-   https://…:443 ──▶│ caddy        │   automatic TLS (Let's Encrypt)
+   https://…:443 ──▶│ caddy — or an│   TLS termination (bundled caddy does
+                    │ external     │   Let's Encrypt itself; in production
+                    │ proxy on the │   the host's Apache terminates TLS and
+                    │ host (apache)│   proxies to nginx on localhost:5000)
                     └──────┬───────┘
                            ▼ :80
                     ┌──────────────┐     ┌──────────────┐

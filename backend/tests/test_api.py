@@ -2579,6 +2579,50 @@ def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
     assert _no_session_cookie(r)
 
 
+def test_orcid_admin_without_membership(admin, monkeypatch):
+    """An ORCID sign-in provisions a pending person; an admin can make the
+    login office/admin and drop that person, leaving a non-member account."""
+    orcid_id = "0000-0003-4444-5555"
+    stranger, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
+    assert r.headers["location"] == "/register?welcome=orcid"
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid_id)
+    pid = admin.get("/api/v1/people", params={"q": orcid_id}).json()[0]["id"]
+
+    # A member-role login must not lose its person: that would bypass the
+    # approval gate.
+    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
+    assert r.status_code == 400, r.text
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 200
+
+    assert admin.patch(f"/api/v1/auth/users/{uid}", json={"role": "admin"}).status_code == 200
+    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
+    assert r.status_code == 200, r.text
+    assert r.json()["person_id"] is None
+    assert r.json()["role"] == "admin"
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 404
+    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+
+    # A fresh sign-in reuses the login — no new pending person, no
+    # registration redirect — and has admin access.
+    again, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
+    assert r.headers["location"] == "/"
+    assert again.get("/api/v1/auth/users").status_code == 200
+    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+
+    # Nothing left to remove.
+    assert admin.delete(f"/api/v1/auth/users/{uid}/person").status_code == 400
+
+
+def test_remove_user_person_refuses_approved_member(admin):
+    _, pid = _linked_member(admin, given="Kee", family="Pme", email="keep.me@example.edu")
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == pid)
+    admin.patch(f"/api/v1/auth/users/{uid}", json={"role": "office"})
+    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
+    assert r.status_code == 409, r.text
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 200
+    assert admin.delete("/api/v1/auth/users/999999/person").status_code == 404
+
+
 def test_orcid_links_existing_approved_member(admin, monkeypatch):
     import app.services.email as email_mod
 
@@ -3797,6 +3841,7 @@ def test_admin_alerts(admin):
         + len(alerts["unreviewed_institutions"])
         + len(alerts["institutions_missing_admin_contact"])
         + len(alerts["unlinked_accounts"])
+        + len(alerts["role_suggestions"])
         + len(alerts["active_without_affiliation"])
         + len(alerts["ineligible_voting_members"])
         + len(alerts["open_author_periods_not_active"])
@@ -3882,3 +3927,301 @@ def test_admin_alerts(admin):
     stale = {p["person_id"]: p for p in alerts["open_author_periods_not_active"]}
     assert member_pid in stale
     assert stale[member_pid]["detail"] == "status is alumni"
+
+
+def _role_account(admin, *, given, family, email, role):
+    """Active person + an account with the given role linked to them; returns
+    the logged-in client and the person id."""
+    client, pid = _linked_member(admin, given=given, family=family, email=email)
+    users = admin.get("/api/v1/auth/users").json()
+    uid = next(u["id"] for u in users if u["person_id"] == pid)
+    r = admin.patch(f"/api/v1/auth/users/{uid}", json={"role": role})
+    assert r.status_code == 200, r.text
+    return client, pid, uid
+
+
+def test_speakers_role_manages_talks_only(admin):
+    """Speakers committee accounts (issue #167) edit any talk, event and
+    nomination but nothing else beyond a member."""
+    speaker, _spid, _ = _role_account(
+        admin, given="Sia", family="Speakers", email="sia.speakers@example.edu", role="speakers_committee"
+    )
+    assert speaker.get("/api/v1/auth/me").json()["permissions"] == ["speakers_committee", "member"]
+    member, mpid = _linked_member(
+        admin, given="Tom", family="Talkgiver", email="tom.talkgiver@example.edu"
+    )
+
+    # Events: members may not, the speakers committee may.
+    assert member.post("/api/v1/events", json={"name": "Nope"}).status_code == 403
+    r = speaker.post("/api/v1/events", json={"name": "Speakers Workshop"})
+    assert r.status_code == 201, r.text
+    event = r.json()
+    assert speaker.patch(f"/api/v1/events/{event['id']}", json={"location": "Chicago"}).status_code == 200
+
+    # Any talk, including one a member added.
+    talk = member.post(
+        "/api/v1/talks",
+        json={"title": "Member seminar", "venue": "Home U", "speaker_person_id": mpid},
+    ).json()
+    r = speaker.patch(f"/api/v1/talks/{talk['id']}", json={"event_id": event["id"], "status": "given"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "given"
+
+    # Nominations on a talk somebody else opened.
+    open_talk = admin.post("/api/v1/talks", json={"title": "Plenary slot", "event_id": event["id"]}).json()
+    nom = speaker.post(f"/api/v1/talks/{open_talk['id']}/nominations", json={"person_id": mpid})
+    assert nom.status_code == 201, nom.text
+    r = speaker.patch(f"/api/v1/nominations/{nom.json()['id']}", json={"status": "assigned"})
+    assert r.status_code == 200, r.text
+    assert member.patch(f"/api/v1/nominations/{nom.json()['id']}", json={"status": "shortlisted"}).status_code == 403
+
+    # Nothing beyond talks: no working groups, roles, institutions, people
+    # moderation, or account listing.
+    assert speaker.post("/api/v1/working-groups", json={"name": "WG", "slug": "spk-wg"}).status_code == 403
+    assert speaker.post(
+        "/api/v1/collab-roles", json={"person_id": mpid, "role": "chair", "start_date": "2026-01-01"}
+    ).status_code == 403
+    assert speaker.post("/api/v1/institutions", json={"name": "Nope U"}).status_code == 403
+    assert speaker.post(f"/api/v1/people/{mpid}/status", json={"status": "inactive"}).status_code == 403
+    assert speaker.get("/api/v1/auth/users").status_code == 403
+    assert speaker.get("/api/v1/alerts").status_code == 403
+    assert speaker.delete(f"/api/v1/events/{event['id']}").status_code == 204
+
+
+def test_leadership_role_manages_working_groups(admin):
+    """Leadership accounts (representatives / deputies, issue #167): working
+    groups, their members and conveners, plus everything speakers can do —
+    but no other positions and no membership moderation."""
+    lead, lpid, _ = _role_account(
+        admin, given="Rep", family="Resentative", email="rep.resentative@example.edu", role="leadership"
+    )
+    assert lead.get("/api/v1/auth/me").json()["permissions"] == ["leadership", "speakers_committee", "member"]
+    member, mpid = _linked_member(
+        admin, given="Wanda", family="Worker", email="wanda.worker@example.edu"
+    )
+
+    r = lead.post("/api/v1/working-groups", json={"name": "Targetry", "slug": "targetry"})
+    assert r.status_code == 201, r.text
+    wg = r.json()
+    assert lead.patch(f"/api/v1/working-groups/{wg['id']}", json={"description": "Targets"}).status_code == 200
+    # Adding somebody else to a group (members may only add themselves).
+    assert member.post(f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": lpid}).status_code == 403
+    assert lead.post(f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": mpid}).status_code == 201
+    assert lead.delete(f"/api/v1/working-groups/{wg['id']}/members/{mpid}").status_code == 204
+    # Deleting a group stays admin-only.
+    assert lead.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 403
+
+    # Conveners yes; any other position no.
+    r = lead.post(
+        "/api/v1/collab-roles",
+        json={"person_id": mpid, "role": "convener", "working_group_id": wg["id"], "start_date": "2026-01-01"},
+    )
+    assert r.status_code == 201, r.text
+    convener_role = r.json()
+    assert lead.patch(f"/api/v1/collab-roles/{convener_role['id']}", json={"end_date": "2026-12-31"}).status_code == 200
+    assert lead.post(
+        "/api/v1/collab-roles",
+        json={"person_id": mpid, "role": "speakers_comm", "start_date": "2026-01-01"},
+    ).status_code == 403
+    inst = admin.post("/api/v1/institutions", json={"name": "Lead Lab"}).json()
+    assert lead.post(
+        "/api/v1/collab-roles",
+        json={"person_id": mpid, "role": "admin_contact", "institution_id": inst["id"], "start_date": "2026-01-01"},
+    ).status_code == 403
+    office_role = admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": mpid, "role": "lsg_member", "start_date": "2026-01-01"},
+    ).json()
+    assert lead.patch(f"/api/v1/collab-roles/{office_role['id']}", json={"end_date": "2026-06-30"}).status_code == 403
+    assert lead.delete(f"/api/v1/collab-roles/{office_role['id']}").status_code == 403
+    assert lead.delete(f"/api/v1/collab-roles/{convener_role['id']}").status_code == 204
+
+    # Talks and events come with the role.
+    assert lead.post("/api/v1/events", json={"name": "Leadership Retreat"}).status_code == 201
+    talk = member.post("/api/v1/talks", json={"title": "WG talk", "venue": "X", "speaker_person_id": mpid}).json()
+    assert lead.patch(f"/api/v1/talks/{talk['id']}", json={"working_group_id": wg["id"]}).status_code == 200
+
+    # Publications: full control, including status changes, reviewers and
+    # author-list previews, on a paper somebody else opened.
+    pub = member.post(
+        "/api/v1/publications", json={"title": "A Paper by Wanda", "pub_type": "paper"}
+    )
+    assert pub.status_code == 201, pub.text
+    pub = pub.json()
+    assert lead.patch(f"/api/v1/publications/{pub['id']}", json={"title": "A Paper (edited)"}).status_code == 200
+    assert lead.post(
+        f"/api/v1/publications/{pub['id']}/people", json={"person_id": lpid, "role": "reviewer"}
+    ).status_code == 201
+    r = lead.post(f"/api/v1/publications/{pub['id']}/status", json={"status": "collab_review"})
+    assert r.status_code == 200, r.text
+    assert lead.post("/api/v1/author-lists/preview", json={"cutoff_date": "2026-01-01"}).status_code == 200
+    assert member.post("/api/v1/author-lists/preview", json={"cutoff_date": "2026-01-01"}).status_code == 403
+
+    # Not the office: no moderation, institutions, affiliations, or accounts.
+    assert lead.post(f"/api/v1/people/{mpid}/status", json={"status": "inactive"}).status_code == 403
+    assert lead.post("/api/v1/institutions", json={"name": "Nope U"}).status_code == 403
+    assert lead.get("/api/v1/auth/users").status_code == 403
+
+
+def test_role_suggestion_alerts(admin):
+    """Leadership positions never change an account by themselves (issue
+    #167): the alerts panel suggests the matching role and the admin applies
+    it — and flags position-only roles once the position has ended."""
+
+    def suggestion_for(uid):
+        alerts = admin.get("/api/v1/alerts").json()
+        assert alerts["total"] >= len(alerts["role_suggestions"])
+        return next((s for s in alerts["role_suggestions"] if s["user_id"] == uid), None)
+
+    # A deputy representative signs in as a plain member: suggested leadership.
+    dep, dpid = _linked_member(admin, given="Dee", family="Puty", email="dee.puty@example.edu")
+    duid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == dpid)
+    assert suggestion_for(duid) is None
+    pos = admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": dpid, "role": "deputy_representative", "detail": "Theory", "start_date": "2026-01-01"},
+    )
+    assert pos.status_code == 201, pos.text
+    # The position alone grants nothing.
+    assert dep.post("/api/v1/working-groups", json={"name": "Theory WG", "slug": "theory-wg"}).status_code == 403
+    s = suggestion_for(duid)
+    assert s is not None
+    assert (s["current_role"], s["suggested_role"]) == ("member", "leadership")
+    assert s["detail"] == "Deputy Theory Representative"
+    assert s["person_id"] == dpid and s["login"] == "dee.puty"
+    # Applying the suggestion (what the panel's button does) clears it and
+    # unlocks the permissions.
+    assert admin.patch(f"/api/v1/auth/users/{duid}", json={"role": "leadership"}).status_code == 200
+    assert suggestion_for(duid) is None
+    assert dep.post("/api/v1/working-groups", json={"name": "Theory WG", "slug": "theory-wg"}).status_code == 201
+
+    # The chair, already office, is nudged towards admin; two positions list both.
+    chair, cpid, cuid = _role_account(
+        admin, given="Cha", family="Irperson", email="cha.irperson@example.edu", role="office"
+    )
+    for role in ("chair", "speakers_comm"):
+        assert admin.post(
+            "/api/v1/collab-roles", json={"person_id": cpid, "role": role, "start_date": "2026-01-01"}
+        ).status_code == 201
+    s = suggestion_for(cuid)
+    assert (s["current_role"], s["suggested_role"]) == ("office", "admin")
+    assert s["detail"] == "Chair, Speakers Committee"
+
+    # A future-dated or ended position does not count …
+    fut, fpid, fuid = _role_account(
+        admin, given="Fu", family="Ture", email="fu.ture@example.edu", role="member"
+    )
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": fpid, "role": "representative", "detail": "Accelerator", "start_date": "2999-01-01"},
+    ).status_code == 201
+    assert suggestion_for(fuid) is None
+
+    # … and a leadership/speakers account whose position ended is flagged for
+    # demotion, naming the position; one with no position history too.
+    spk, spid, suid = _role_account(
+        admin, given="Ex", family="Speaker", email="ex.speaker@example.edu", role="speakers_committee"
+    )
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": spid, "role": "speakers_comm", "start_date": "2024-01-01", "end_date": "2025-06-30"},
+    ).status_code == 201
+    s = suggestion_for(suid)
+    assert (s["current_role"], s["suggested_role"]) == ("speakers_committee", "member")
+    assert s["detail"] == "Speakers Committee ended 2025-06-30"
+    _, _, nuid = _role_account(
+        admin, given="No", family="Position", email="no.position@example.edu", role="leadership"
+    )
+    s = suggestion_for(nuid)
+    assert (s["suggested_role"], s["detail"]) == ("member", "no active leadership position")
+    # A leadership account whose only active position is on the speakers
+    # committee is suggested the narrower role.
+    assert admin.post(
+        "/api/v1/collab-roles", json={"person_id": spid, "role": "speakers_comm", "start_date": "2026-01-01"}
+    ).status_code == 201
+    assert admin.patch(f"/api/v1/auth/users/{suid}", json={"role": "leadership"}).status_code == 200
+    s = suggestion_for(suid)
+    assert (s["current_role"], s["suggested_role"]) == ("leadership", "speakers_committee")
+    assert s["detail"] == "current position: Speakers Committee"
+
+    # Office and admin accounts with no position history are never flagged —
+    # they are given for other reasons …
+    _, _, ouid = _role_account(
+        admin, given="Off", family="Ice", email="off.ice@example.edu", role="office"
+    )
+    assert suggestion_for(ouid) is None
+    # … but an ex-chair still holding admin is, naming the ended term; and so
+    # is an office account whose only remaining position is a lesser one.
+    assert admin.patch(f"/api/v1/auth/users/{suid}", json={"role": "office"}).status_code == 200
+    s = suggestion_for(suid)
+    assert (s["current_role"], s["suggested_role"]) == ("office", "speakers_committee")
+    exc, xpid, xuid = _role_account(
+        admin, given="Ex", family="Chair", email="ex.chair@example.edu", role="admin"
+    )
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": xpid, "role": "chair", "start_date": "2024-01-01", "end_date": "2025-12-31"},
+    ).status_code == 201
+    s = suggestion_for(xuid)
+    assert (s["current_role"], s["suggested_role"]) == ("admin", "member")
+    assert s["detail"] == "Chair ended 2025-12-31"
+
+    # The admin may reject a suggestion: it stays quiet (the account keeps its
+    # role) until the person's positions change again.
+    r = admin.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": xuid, "suggested_role": "member", "detail": s["detail"]},
+    )
+    assert r.status_code == 204, r.text
+    assert suggestion_for(xuid) is None
+    assert admin.get("/api/v1/auth/users").json() and any(
+        u["id"] == xuid and u["role"] == "admin" for u in admin.get("/api/v1/auth/users").json()
+    )
+    assert admin.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": xuid, "suggested_role": "member", "detail": s["detail"]},
+    ).status_code == 204  # idempotent
+    assert admin.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": 999999, "suggested_role": "member", "detail": "x"},
+    ).status_code == 404
+    # A new (later-ending) term changes the detail and raises it again.
+    assert admin.post(
+        "/api/v1/collab-roles",
+        json={"person_id": xpid, "role": "vice_chair", "start_date": "2026-01-01", "end_date": "2026-03-31"},
+    ).status_code == 201
+    s = suggestion_for(xuid)
+    assert s is not None and s["detail"] == "Vice Chair ended 2026-03-31"
+    # Only admins dismiss.
+    assert exc.post(
+        "/api/v1/alerts/role-suggestions/dismiss",
+        json={"user_id": xuid, "suggested_role": "member", "detail": s["detail"]},
+    ).status_code == 204  # exc is an admin account itself
+    # Inactive accounts are left alone.
+    assert admin.patch(f"/api/v1/auth/users/{nuid}", json={"is_active": False}).status_code == 200
+    assert suggestion_for(nuid) is None
+
+
+def test_merge_keeps_more_privileged_new_role(admin):
+    """Account merge picks the higher of the two roles across the full
+    ladder — leadership outranks speakers_committee."""
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "merge-lead", "password": "merge-pw-123", "role": "leadership"},
+    )
+    assert r.status_code == 201, r.text
+    keep = r.json()
+    from sqlalchemy import text as sa_text
+
+    with engine.begin() as conn:
+        conn.execute(
+            sa_text(
+                "INSERT INTO users (orcid, role, is_active, created_at, updated_at) "
+                "VALUES ('0000-0002-9999-1234', 'speakers_committee', true, now(), now())"
+            )
+        )
+    other = next(u for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-9999-1234")
+    r = admin.post(f"/api/v1/auth/users/{other['id']}/merge/{keep['id']}")
+    assert r.status_code == 200, r.text
+    assert r.json()["role"] == "leadership"
+    assert r.json()["username"] == "merge-lead"

@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary, User } from '../api/types'
+import { USER_ROLES } from '../constants'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import AdminBackups from './AdminBackups'
@@ -111,6 +112,33 @@ export default function AdminPage() {
     await update(manage.id, { person_id: Number(personPick) })
     notifications.show({ message: 'Account linked to person' })
     setManage(null)
+  }
+
+  // An unapproved registration (typically provisioned by a first ORCID
+  // sign-in) that an office/admin login can shed to stay a non-member.
+  const linkedPerson = manage?.person_id ? people.find((p) => p.id === manage.person_id) : undefined
+  const removablePerson =
+    linkedPerson && ['pending', 'rejected'].includes(linkedPerson.status) ? linkedPerson : undefined
+
+  const removePerson = async () => {
+    if (!manage || !removablePerson) return
+    if (
+      !window.confirm(
+        `Delete the ${removablePerson.status} person record ` +
+          `'${removablePerson.given_name} ${removablePerson.family_name}'?\n\n` +
+          `The login '${loginLabel(manage)}' stays, but no longer belongs to a ` +
+          'collaboration member. This cannot be undone.',
+      )
+    )
+      return
+    try {
+      await api.delete(`/auth/users/${manage.id}/person`)
+      notifications.show({ message: 'Person record removed' })
+      setManage(null)
+      load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
   }
 
   const resetPassword = async (u: User) => {
@@ -205,7 +233,9 @@ export default function AdminPage() {
         <Text size="sm" c="dimmed">
           Local accounts sign in with username + password. ORCID users appear here
           automatically after their first sign-in. Roles: <b>admin</b> (everything),{' '}
-          <b>office</b> (approve members, manage speakers & publications), <b>member</b>.
+          <b>office</b> (approve members, institutions, all roles), <b>leadership</b>{' '}
+          (representatives & deputies: working groups, publications, talks),{' '}
+          <b>speakers_committee</b> (talks & events), <b>member</b>.
         </Text>
       </Card>
 
@@ -249,7 +279,7 @@ export default function AdminPage() {
               </Table.Td>
               <Table.Td>
                 <Select
-                  data={['admin', 'office', 'member']}
+                  data={USER_ROLES.map((r) => r.value)}
                   value={u.role}
                   onChange={(v) => v && update(u.id, { role: v })}
                   disabled={u.id === me?.user.id}
@@ -306,6 +336,26 @@ export default function AdminPage() {
           >
             Link person
           </Button>
+          {removablePerson && (
+            <>
+              <Text size="xs" c="dimmed">
+                The linked person is an unapproved ({removablePerson.status}) registration —
+                usually created by the first ORCID sign-in. To keep this login as an office or
+                admin account without a collaboration membership, remove that record.
+                {manage?.role === 'member' && ' Give the account a role other than member first.'}
+              </Text>
+              <Button
+                w="fit-content"
+                size="xs"
+                color="red"
+                variant="light"
+                onClick={removePerson}
+                disabled={manage?.role === 'member'}
+              >
+                Remove person record
+              </Button>
+            </>
+          )}
           <Divider label="Merge accounts" />
           <Select
             label="Merge another account into this one"
@@ -395,7 +445,7 @@ export default function AdminPage() {
           />
           <Select
             label="Role"
-            data={['admin', 'office', 'member']}
+            data={USER_ROLES.map((r) => ({ value: r.value, label: `${r.label} — ${r.description}` }))}
             value={form.role}
             onChange={(v) => setForm({ ...form, role: v ?? 'member' })}
           />

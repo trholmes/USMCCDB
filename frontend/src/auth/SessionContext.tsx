@@ -9,6 +9,13 @@ interface Session {
   logout: () => Promise<void>
   isOffice: boolean
   isAdmin: boolean
+  // Leadership Council representatives / deputies (or office): working
+  // groups, their members and conveners (issue #167).
+  canManageWGs: boolean
+  // Same accounts: any publication, its people, status and author lists.
+  canManagePubs: boolean
+  // Speakers committee (or leadership / office): any talk, event, nomination.
+  canManageTalks: boolean
 }
 
 const SessionContext = createContext<Session>({
@@ -18,6 +25,9 @@ const SessionContext = createContext<Session>({
   logout: async () => {},
   isOffice: false,
   isAdmin: false,
+  canManageWGs: false,
+  canManagePubs: false,
+  canManageTalks: false,
 })
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
@@ -52,6 +62,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         logout,
         isOffice: !!me && me.permissions.includes('office'),
         isAdmin: !!me && me.permissions.includes('admin'),
+        canManageWGs: !!me && me.permissions.includes('leadership'),
+        canManagePubs: !!me && me.permissions.includes('leadership'),
+        canManageTalks: !!me && me.permissions.includes('speakers_committee'),
       }}
     >
       {children}

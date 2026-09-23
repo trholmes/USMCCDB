@@ -1,8 +1,11 @@
-import { Anchor, Badge, Card, Group, Stack, Text, Title } from '@mantine/core'
-import { useEffect } from 'react'
+import { Anchor, Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { api } from '../api/client'
 import { useAlerts } from '../auth/AlertsContext'
-import type { InstitutionAlert, PersonAlert } from '../api/types'
+import { useSession } from '../auth/SessionContext'
+import type { InstitutionAlert, PersonAlert, RoleSuggestionAlert } from '../api/types'
 
 function Section({
   title,
@@ -61,6 +64,82 @@ function InstitutionRow({ item }: { item: InstitutionAlert }) {
       <Text size="sm" c="dimmed">
         — {item.current_members} current {item.current_members === 1 ? 'member' : 'members'}
       </Text>
+    </Group>
+  )
+}
+
+function RoleSuggestionRow({
+  item,
+  onApplied,
+}: {
+  item: RoleSuggestionAlert
+  onApplied: () => void
+}) {
+  const { me } = useSession()
+  const [busy, setBusy] = useState(false)
+  const demotion = item.suggested_role === 'member'
+  const run = async (action: () => Promise<unknown>, message: string) => {
+    setBusy(true)
+    try {
+      await action()
+      notifications.show({ message })
+      onApplied()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const apply = () =>
+    run(
+      () => api.patch(`/auth/users/${item.user_id}`, { role: item.suggested_role }),
+      `${item.name} is now ${item.suggested_role}`,
+    )
+  // Rejecting keeps the role and silences this suggestion until the person's
+  // positions change.
+  const dismiss = () =>
+    run(
+      () =>
+        api.post('/alerts/role-suggestions/dismiss', {
+          user_id: item.user_id,
+          suggested_role: item.suggested_role,
+          detail: item.detail,
+        }),
+      `Suggestion for ${item.name} dismissed`,
+    )
+  return (
+    <Group gap="xs" wrap="nowrap" justify="space-between">
+      <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+        <Anchor component={Link} to={`/people/${item.person_id}`} size="sm">
+          {item.name}
+        </Anchor>
+        <Text size="sm" c="dimmed" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          ({item.login}) — {item.detail}
+        </Text>
+      </Group>
+      <Group gap="xs" wrap="nowrap">
+        <Badge variant="light" color="gray" size="sm">
+          {item.current_role}
+        </Badge>
+        <Text size="sm" c="dimmed">
+          →
+        </Text>
+        <Badge variant="light" color={demotion ? 'gray' : 'indigo'} size="sm">
+          {item.suggested_role}
+        </Badge>
+        <Button
+          size="compact-xs"
+          variant={demotion ? 'default' : 'light'}
+          loading={busy}
+          disabled={item.user_id === me?.user.id}
+          onClick={apply}
+        >
+          Apply
+        </Button>
+        <Button size="compact-xs" variant="subtle" color="gray" disabled={busy} onClick={dismiss}>
+          Dismiss
+        </Button>
+      </Group>
     </Group>
   )
 }
@@ -132,6 +211,16 @@ export default function AlertsPage() {
               {u.login}
             </Anchor>
           </Group>
+        ))}
+      </Section>
+
+      <Section
+        title="Account roles to review"
+        count={alerts.role_suggestions.length}
+        description="Leadership positions come with database permissions — chair and vice chair as admin, representatives and deputies as leadership, the speakers committee as speakers_committee — but positions never change an account by themselves. These sign-ins hold a role that doesn't match the person's current positions (including admins whose term as chair has ended). Apply the suggestion, or dismiss it to keep the role — it comes back only if the person's positions change."
+      >
+        {alerts.role_suggestions.map((s) => (
+          <RoleSuggestionRow key={s.user_id} item={s} onApplied={refresh} />
         ))}
       </Section>
 

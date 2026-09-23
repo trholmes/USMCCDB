@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import AuthorList, Publication, User
 from app.schemas.publications import AuthorListOut, AuthorListRequest
-from app.security import get_current_user, is_office
+from app.security import get_current_user, can_manage_publications
 from app.services.author_list import build_snapshot
 from app.services.exports import CONTENT_TYPES, RENDERERS
 
@@ -14,7 +14,7 @@ router = APIRouter(tags=["author-lists"])
 
 
 def _can_generate(db, user: User, pub: Publication | None) -> bool:
-    if is_office(user):
+    if can_manage_publications(user):
         return True
     if pub is None or user.person_id is None:
         return False
@@ -85,8 +85,8 @@ def preview(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Dry-run: build (but do not store) the list for an arbitrary date."""
-    if not is_office(user):
-        raise HTTPException(403, "Office only")
+    if not can_manage_publications(user):
+        raise HTTPException(403, "Office or leadership only")
     return build_snapshot(db, body.cutoff_date)
 
 

@@ -39,7 +39,7 @@ export default function EventsPage() {
   const [modal, setModal] = useState(false)
   const [editId, setEditId] = useState<number | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
-  const { isOffice } = useSession()
+  const { canManageTalks } = useSession()
   const { sorted, sort, toggle } = useSortable(rows, ACCESSORS)
 
   const load = useCallback(() => {
@@ -106,7 +106,7 @@ export default function EventsPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Conferences & events</Title>
-        {isOffice && <Button onClick={openCreate}>Add event</Button>}
+        {canManageTalks && <Button onClick={openCreate}>Add event</Button>}
       </Group>
       <Table.ScrollContainer minWidth={700}>
 <Table striped highlightOnHover>
@@ -117,7 +117,7 @@ export default function EventsPage() {
             <SortableTh label="Dates" k="dates" sort={sort} toggle={toggle} />
             <SortableTh label="Abstract deadline" k="abstract_deadline" sort={sort} toggle={toggle} />
             <SortableTh label="Talks" k="talks" sort={sort} toggle={toggle} />
-            {isOffice && <Table.Th />}
+            {canManageTalks && <Table.Th />}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -139,7 +139,7 @@ export default function EventsPage() {
               </Table.Td>
               <Table.Td>{e.abstract_deadline}</Table.Td>
               <Table.Td>{e.talk_count}</Table.Td>
-              {isOffice && (
+              {canManageTalks && (
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
                     <Button size="compact-xs" variant="subtle" onClick={() => openEdit(e)}>

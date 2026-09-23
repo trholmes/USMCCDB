@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.models import LoginEvent, MembershipEvent, MemberStatus, Person, User, UserRole
+from app.models.auth import ROLE_RANK
 from app.ratelimit import enforce, login_limiter
 from app.schemas.auth import (
     LoginRequest,
@@ -122,11 +123,10 @@ def logout(response: Response) -> dict:
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeOut:
     settings = get_settings()
     person = db.get(Person, user.person_id) if user.person_id else None
-    permissions = ["member"]
-    if user.role == UserRole.admin:
-        permissions = ["admin", "office", "member"]
-    elif user.role == UserRole.office:
-        permissions = ["office", "member"]
+    # Every role at or below the account's own: the frontend gates on
+    # membership ("office" in permissions), so a leadership account also
+    # carries "speakers_committee" and "member".
+    permissions = [r.value for r in UserRole if ROLE_RANK[r] <= ROLE_RANK[user.role]]
     return MeOut(
         user=UserOut.model_validate(user),
         person_id=user.person_id,
@@ -220,9 +220,6 @@ def update_user(
     return UserOut.model_validate(user)
 
 
-_ROLE_RANK = {UserRole.member: 0, UserRole.office: 1, UserRole.admin: 2}
-
-
 @router.post("/users/{keep_id}/merge/{other_id}")
 def merge_users(
     keep_id: int,
@@ -254,7 +251,7 @@ def merge_users(
     password_hash = keep.password_hash or other.password_hash
     orcid = keep.orcid or other.orcid
     person_id = keep.person_id or other.person_id
-    role = keep.role if _ROLE_RANK[keep.role] >= _ROLE_RANK[other.role] else other.role
+    role = keep.role if ROLE_RANK[keep.role] >= ROLE_RANK[other.role] else other.role
     db.delete(other)
     db.flush()  # release the unique username/orcid/person_id before reassigning
     keep.username = username
@@ -265,6 +262,42 @@ def merge_users(
     db.commit()
     db.refresh(keep)
     return UserOut.model_validate(keep)
+
+
+@router.delete("/users/{user_id}/person")
+def remove_user_person(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _actor: User = Depends(require_admin),
+) -> UserOut:
+    """Delete the unapproved person record linked to a login, keeping the
+    login. For someone who signed in with ORCID (which provisions a pending
+    registration) but needs only an office/admin account, not a membership.
+
+    Only pending/rejected records can go this way: approved members carry
+    history that must not vanish with a click. And the account must hold a
+    privileged role first — a member-role login without a person would slip
+    past the membership-approval gate (membership_block_reason)."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(404, "User not found")
+    if user.person_id is None:
+        raise HTTPException(400, "This account has no linked person")
+    if user.role == UserRole.member:
+        raise HTTPException(
+            400, "Give the account a role other than member before removing its person"
+        )
+    person = db.get(Person, user.person_id)
+    if person is not None:
+        if person.status not in (MemberStatus.pending, MemberStatus.rejected):
+            raise HTTPException(
+                409, "Only an unapproved (pending or rejected) registration can be removed"
+            )
+        db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
+    user.person_id = None
+    db.commit()
+    db.refresh(user)
+    return UserOut.model_validate(user)
 
 
 @router.post("/users/{user_id}/reset-password")
