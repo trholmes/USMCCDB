@@ -136,13 +136,13 @@ def registration_submitted(db, person: Person) -> Message | None:
 
 
 def registration_duplicate(
-    db, existing: Person, submitted_name: str, submitted_email: str, submitted_orcid: str | None
+    db, existing: Person, submitted_name: str, submitted_email: str
 ) -> Message | None:
     """Tell the office a public registration matched an existing member
     record. The submitter got the same neutral acknowledgement as everyone
     else — confirming the match to them would let anyone probe which emails
-    and ORCID iDs belong to collaboration members (issue #62) — so the
-    office has to follow up by hand."""
+    belong to collaboration members (issue #62) — so the office has to
+    follow up by hand."""
     to = [addr for addr in _office_recipients(db) if addr]
     if not to:
         return None
@@ -152,10 +152,8 @@ def registration_duplicate(
         "but matched an existing record, so no new record was created.",
         "",
         f"Submitted email: {submitted_email}",
+        f"Existing record: {existing.display_name}",
     ]
-    if submitted_orcid:
-        lines.append(f"Submitted ORCID iD: {submitted_orcid}")
-    lines.append(f"Existing record: {existing.display_name}")
     site = get_settings().site_url
     if site:
         lines.append(f"{site.rstrip('/')}/people/{existing.id}")
@@ -166,6 +164,40 @@ def registration_duplicate(
         "please contact them directly.",
     ]
     return (to, f"Duplicate membership registration: {submitted_name}", "\n".join(lines))
+
+
+def orcid_link_conflict(db, existing: Person, created: Person, orcid_id: str) -> Message | None:
+    """Tell the office an authenticated ORCID sign-in matched a directory
+    record it could not be linked to safely: the record's login already
+    carries a different ORCID iD, or it holds a role above member that a
+    directory match alone must not open. The sign-in was given a fresh
+    pending registration instead; the office reconciles the two records."""
+    to = [addr for addr in _office_recipients(db) if addr]
+    if not to:
+        return None
+
+    site = get_settings().site_url
+    lines = [
+        f"Someone signed in with ORCID iD {orcid_id}, which is on the "
+        f"directory record of {existing.display_name}, but that record's "
+        "login could not take the link automatically (it already carries a "
+        "different ORCID iD, or it holds a role above member).",
+        "",
+        f"Existing record: {existing.display_name}",
+    ]
+    if site:
+        lines.append(f"{site.rstrip('/')}/people/{existing.id}")
+    lines += ["", f"New pending registration created for the sign-in: {created.display_name}"]
+    if site:
+        lines.append(f"{site.rstrip('/')}/people/{created.id}")
+    lines += [
+        "",
+        "The new registration stays pending with no access. If the sign-in "
+        "really is the person on the existing record, fix that record's "
+        "login (or remove the stale iD) and reject the new registration; "
+        "if not, the existing record is carrying someone else's ORCID iD.",
+    ]
+    return (to, f"ORCID sign-in needs review: {orcid_id}", "\n".join(lines))
 
 
 def review_requested(db, pub: Publication, actor: User) -> Message | None:

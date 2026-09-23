@@ -71,7 +71,7 @@ export default function AccountPage() {
               <Text size="sm" c="dimmed">
                 not linked
                 {me.orcid_enabled &&
-                  ' — sign in with ORCID (after your profile ORCID is on record) to link it'}
+                  ' — ask the office to put your ORCID iD on your profile, then sign in with ORCID to link it'}
               </Text>
             )}
           </Group>

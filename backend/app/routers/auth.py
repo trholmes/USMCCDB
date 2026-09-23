@@ -2,7 +2,7 @@ import hmac
 import secrets
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from sqlalchemy import select
@@ -33,7 +33,9 @@ from app.security import (
     require_admin,
     set_session_cookie,
 )
+from app.services import notifications
 from app.services import orcid as orcid_svc
+from app.services.email import send_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -164,6 +166,20 @@ def auth_config() -> dict:
 # --- Local account management (admin) ---------------------------------------
 
 
+def _check_person_free(db: Session, person_id: int, except_user_id: int | None = None) -> None:
+    """409 when the person is already linked to another login (users.person_id
+    is unique — without this the commit dies with an IntegrityError 500)."""
+    stmt = select(User).where(User.person_id == person_id)
+    if except_user_id is not None:
+        stmt = stmt.where(User.id != except_user_id)
+    if db.execute(stmt).scalar_one_or_none() is not None:
+        raise HTTPException(
+            409,
+            "That person is already linked to another account — merge the "
+            "accounts or unlink the person there first",
+        )
+
+
 @router.get("/users", dependencies=[Depends(require_admin)])
 def list_users(db: Session = Depends(get_db)) -> list[UserOut]:
     users = db.execute(select(User).order_by(User.id)).scalars().all()
@@ -175,8 +191,10 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)) -> UserOut:
     exists = db.execute(select(User).where(User.username == body.username)).scalar_one_or_none()
     if exists:
         raise HTTPException(409, "Username already taken")
-    if body.person_id is not None and db.get(Person, body.person_id) is None:
-        raise HTTPException(404, "person_id not found")
+    if body.person_id is not None:
+        if db.get(Person, body.person_id) is None:
+            raise HTTPException(404, "person_id not found")
+        _check_person_free(db, body.person_id)
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -209,10 +227,24 @@ def update_user(
         user.is_active = body.is_active
     if body.password is not None:
         user.password_hash = hash_password(body.password)
-    if body.person_id is not None:
-        if db.get(Person, body.person_id) is None:
-            raise HTTPException(404, "person_id not found")
-        user.person_id = body.person_id
+    # For person_id an explicit null means "unlink" — model_fields_set tells
+    # it apart from the field simply being omitted.
+    if "person_id" in body.model_fields_set:
+        if body.person_id is None:
+            # Same gate as remove_user_person: a member-role login without a
+            # person slips past the membership-approval gate
+            # (membership_block_reason). user.role already reflects a role
+            # sent in this same request.
+            if user.role == UserRole.member:
+                raise HTTPException(
+                    400, "Give the account a role other than member before unlinking its person"
+                )
+            user.person_id = None
+        else:
+            if db.get(Person, body.person_id) is None:
+                raise HTTPException(404, "person_id not found")
+            _check_person_free(db, body.person_id, except_user_id=user.id)
+            user.person_id = body.person_id
     db.commit()
     db.refresh(user)
     return UserOut.model_validate(user)
@@ -382,6 +414,7 @@ def orcid_login(request: Request) -> RedirectResponse:
 @router.get("/orcid/callback")
 async def orcid_callback(
     request: Request,
+    background: BackgroundTasks,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
@@ -419,6 +452,10 @@ async def orcid_callback(
     # 1. Existing login with this ORCID iD.
     user = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
 
+    # A directory person already carrying this ORCID iD whose login could not
+    # take the link — resolved by the office instead of guessed at here.
+    conflict: Person | None = None
+
     if user is None:
         # 2. Directory member with this ORCID iD: link automatically. If the
         # person already signs in with a local account, attach the ORCID to
@@ -436,13 +473,18 @@ async def orcid_callback(
                 db.add(user)
                 db.commit()
                 db.refresh(user)
-            elif existing.orcid is None:
+            elif existing.orcid is None and existing.role == UserRole.member:
                 existing.orcid = orcid_id
                 user = existing
                 db.commit()
-            # else: the person's account already carries a *different* ORCID
-            # iD — ambiguous records; fall through to the unknown-ORCID path
-            # so the office sorts it out instead of guessing here.
+            else:
+                # The person's account already carries a *different* ORCID iD
+                # (ambiguous records), or it holds a role above member — a
+                # directory match alone must not hand out a privileged
+                # session (a mistyped iD on such a record would otherwise
+                # sign a stranger into it). Take the unknown-ORCID path below
+                # and tell the office instead of guessing here.
+                conflict = person
 
     if user is None:
         # 3. Unknown ORCID: create a pending person + login, send to the
@@ -456,7 +498,10 @@ async def orcid_callback(
             given_name=given or "Unknown",
             family_name=family or orcid_id,
             email=f"{orcid_id}@orcid.placeholder",  # replaced when they complete the form
-            orcid=orcid_id,
+            # On a conflict the directory person keeps the iD (unique
+            # column); the authenticated iD lives on the login, and the
+            # office reconciles the two records.
+            orcid=None if conflict is not None else orcid_id,
             status=MemberStatus.pending,
         )
         db.add(person)
@@ -466,6 +511,10 @@ async def orcid_callback(
         db.add(user)
         db.commit()
         db.refresh(user)
+        if conflict is not None:
+            msg = notifications.orcid_link_conflict(db, conflict, person, orcid_id)
+            if msg:
+                background.add_task(send_email, *msg)
 
     if not user.is_active:
         return bounce("/login?error=account_disabled")

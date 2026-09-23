@@ -2634,9 +2634,11 @@ def test_orcid_links_existing_approved_member(admin, monkeypatch):
             "given_name": "Ora",
             "family_name": "Linked",
             "email": "ora.linked@example.edu",
-            "orcid": "0000-0001-2345-6789",
         },
     ).json()
+    # ORCID iDs are office-entered (or come from an authenticated sign-in) —
+    # the registration form no longer takes one.
+    admin.patch(f"/api/v1/people/{person['id']}", json={"orcid": "0000-0001-2345-6789"})
     admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
 
     # First ORCID sign-in auto-links a login to the approved person record.
@@ -2646,6 +2648,116 @@ def test_orcid_links_existing_approved_member(admin, monkeypatch):
     assert me.status_code == 200, me.text
     assert me.json()["person_id"] == person["id"]
     assert member.get("/api/v1/people").status_code == 200
+
+
+def test_member_cannot_self_edit_orcid(admin, monkeypatch):
+    """orcid is not SELF_EDITABLE: the sign-in auto-link trusts Person.orcid,
+    so a self-asserted iD would let a member capture someone else's first
+    ORCID sign-in. Only the office (or an authenticated sign-in) sets it."""
+    member, pid = _linked_member(
+        admin, given="Orla", family="Ownid", email="orla.ownid@example.edu"
+    )
+    r = member.patch(f"/api/v1/people/{pid}", json={"orcid": "0000-0002-0000-0002"})
+    assert r.status_code == 403, r.text
+    assert "orcid" in r.json()["detail"]
+    # The office can.
+    r = admin.patch(f"/api/v1/people/{pid}", json={"orcid": "0000-0002-0000-0002"})
+    assert r.status_code == 200, r.text
+
+
+def test_orcid_conflicting_directory_record_goes_to_office_review(admin, monkeypatch):
+    """A directory person carries the ORCID iD but their login already has a
+    *different* one: the sign-in must not guess. It gets a fresh pending
+    registration (no crash on the unique orcid column) and the office is
+    emailed to reconcile the two records."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+
+    # An ORCID account whose person record the office later points at a
+    # different iD (say, correcting what they believe is a typo).
+    _, r = _orcid_signin(monkeypatch, "0000-0002-7777-0001", "Orig Holder")
+    assert r.status_code == 307
+    holder_pid = admin.get(
+        "/api/v1/people", params={"status": "pending", "q": "0000-0002-7777-0001"}
+    ).json()[0]["id"]
+    assert admin.patch(
+        f"/api/v1/people/{holder_pid}", json={"orcid": "0000-0002-7777-0002"}
+    ).status_code == 200
+
+    sent.clear()
+    # Now the real owner of the reassigned iD signs in: person record matches,
+    # but its login carries a different iD — ambiguous, office decides.
+    stranger, r = _orcid_signin(monkeypatch, "0000-0002-7777-0002", "Connie Conflict")
+    assert r.status_code == 307, r.text
+    assert r.headers["location"] == "/register?welcome=orcid"
+    # Registration-only session, like any unknown-ORCID sign-in.
+    assert stranger.get("/api/v1/people").status_code == 403
+
+    # A fresh pending record was created for the sign-in; the directory
+    # person keeps the (unique) iD on their record, the login keeps the
+    # authenticated one.
+    pend = admin.get("/api/v1/people", params={"status": "pending", "q": "Conflict"}).json()
+    assert len(pend) == 1
+    assert pend[0]["orcid"] is None
+    users = admin.get("/api/v1/auth/users").json()
+    signin_user = next(u for u in users if u["orcid"] == "0000-0002-7777-0002")
+    assert signin_user["person_id"] == pend[0]["id"]
+
+    # The office was told to sort it out.
+    assert len(sent) == 1
+    assert sent[0]["Subject"] == "ORCID sign-in needs review: 0000-0002-7777-0002"
+    assert "office@example.edu" in sent[0]["To"]
+
+
+def test_orcid_signin_does_not_attach_to_privileged_account(admin, monkeypatch):
+    """A directory match alone must not open an office/admin account: a
+    mistyped iD on such a record would sign a stranger into it. The sign-in
+    is parked as a pending registration and the office reviews the link."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+
+    orcid = "0000-0002-8888-0001"
+    pid = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Office",
+            "family_name": "Holder",
+            "email": "office.holder@example.edu",
+        },
+    ).json()["id"]
+    admin.patch(f"/api/v1/people/{pid}", json={"orcid": orcid})
+    admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"})
+    uid = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": "office.holder",
+            "password": "long-password",
+            "role": "office",
+            "person_id": pid,
+        },
+    ).json()["id"]
+
+    sent.clear()
+    c, r = _orcid_signin(monkeypatch, orcid, "Office Holder")
+    assert r.status_code == 307, r.text
+    assert r.headers["location"] == "/register?welcome=orcid"
+
+    # The office account was not touched and the session is not it.
+    users = admin.get("/api/v1/auth/users").json()
+    office_user = next(u for u in users if u["id"] == uid)
+    assert office_user["orcid"] is None
+    signin_user = next(u for u in users if u["orcid"] == orcid)
+    assert signin_user["role"] == "member"
+    assert signin_user["person_id"] != pid
+    assert c.get("/api/v1/people").status_code == 403
+
+    # The office was told to review the link.
+    assert len(sent) == 1
+    assert sent[0]["Subject"] == f"ORCID sign-in needs review: {orcid}"
 
 
 def test_admin_contact_approves_pending_registration(admin, monkeypatch):
@@ -2786,9 +2898,9 @@ def test_orcid_callback_rejects_state_from_another_session(admin, monkeypatch):
 
 
 def test_registration_does_not_reveal_existing_records(admin, monkeypatch):
-    """Anonymous registration answers identically whether or not the email /
-    ORCID iD already belongs to a member; the office is told about the
-    duplicate instead. Office callers keep the informative 409."""
+    """Anonymous registration answers identically whether or not the email
+    already belongs to a member; the office is told about the duplicate
+    instead. Office callers keep the informative 409."""
     import app.services.email as email_mod
 
     sent = []
@@ -2800,7 +2912,6 @@ def test_registration_does_not_reveal_existing_records(admin, monkeypatch):
             "given_name": "Dana",
             "family_name": "Duplicated",
             "email": "dana.duplicated@example.edu",
-            "orcid": "0000-0002-4444-5555",
         },
     )
     assert existing.status_code == 201, existing.text
@@ -2817,37 +2928,33 @@ def test_registration_does_not_reveal_existing_records(admin, monkeypatch):
             "email": "dana.duplicated@example.edu",
         },
     )
-    # …same ORCID iD…
-    dup_orcid = anon.post(
-        "/api/v1/people/register",
-        json={
-            "given_name": "Pat",
-            "family_name": "Probe",
-            "email": "pat.probe.orcid@example.edu",
-            "orcid": "0000-0002-4444-5555",
-        },
-    )
-    # …and a genuinely new person all get the exact same answer.
+    # …and a genuinely new person get the exact same answer.
     fresh = anon.post(
         "/api/v1/people/register",
         json={
             "given_name": "Frida",
             "family_name": "Fresh",
             "email": "frida.fresh@example.edu",
+            # The form takes no ORCID iD (only sign-in / the office set one);
+            # a submitted claim is ignored, not stored.
+            "orcid": "0000-0002-4444-5555",
         },
     )
-    assert dup.status_code == dup_orcid.status_code == fresh.status_code == 201
-    assert dup.json() == dup_orcid.json() == fresh.json()
+    assert dup.status_code == fresh.status_code == 201
+    assert dup.json() == fresh.json()
     assert set(fresh.json()) == {"detail"}
 
-    # The probes created nothing; the real registration went through.
+    # The probe created nothing; the real registration went through, without
+    # the self-asserted ORCID iD.
     assert admin.get("/api/v1/people", params={"q": "Probe"}).json() == []
     assert len(admin.get("/api/v1/people", params={"q": "dana.duplicated"}).json()) == 1
-    assert len(admin.get("/api/v1/people", params={"q": "frida.fresh"}).json()) == 1
+    frida = admin.get("/api/v1/people", params={"q": "frida.fresh"}).json()
+    assert len(frida) == 1
+    assert frida[0]["orcid"] is None
 
-    # The office heard about both duplicate attempts (and the fresh one).
+    # The office heard about the duplicate attempt (and the fresh one).
     subjects = [m["Subject"] for m in sent]
-    assert subjects.count("Duplicate membership registration: Pat Probe") == 2
+    assert subjects.count("Duplicate membership registration: Pat Probe") == 1
     assert "New membership registration: Frida Fresh" in subjects
     dup_mail = next(m for m in sent if m["Subject"].startswith("Duplicate"))
     assert "office@example.edu" in dup_mail["To"]
@@ -3072,11 +3179,11 @@ def test_orcid_signin_attaches_to_existing_local_account(admin, monkeypatch):
             "given_name": "Local",
             "family_name": "Orcidholder",
             "email": "local.orcidholder@example.edu",
-            "orcid": orcid,
             "institution_name": "Attach University",
             "institution_is_us": True,
         },
     ).json()["id"]
+    admin.patch(f"/api/v1/people/{pid}", json={"orcid": orcid})
     admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"})
     uid = admin.post(
         "/api/v1/auth/users",
@@ -3143,6 +3250,76 @@ def test_admin_merges_local_and_orcid_accounts(admin, monkeypatch):
     ).json()
     r = admin.post(f"/api/v1/auth/users/{local['id']}/merge/{other['id']}")
     assert r.status_code == 409
+
+
+def test_admin_person_link_management(admin, monkeypatch):
+    """PATCH /auth/users tells an explicit person_id null (unlink) apart from
+    the field being omitted, refuses to unlink member-role accounts (a member
+    login without a person slips past the membership gate), and answers 409 —
+    not an IntegrityError 500 — when the person is already linked to another
+    account (users.person_id is unique)."""
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+
+    pids = []
+    for given, family, email in [
+        ("Uma", "Unlinked", "uma.unlinked@example.edu"),
+        ("Toby", "Taken", "toby.taken@example.edu"),
+    ]:
+        pids.append(
+            admin.post(
+                "/api/v1/people/register",
+                json={"given_name": given, "family_name": family, "email": email},
+            ).json()["id"]
+        )
+    pid_a, pid_b = pids
+    user_a = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": "uma.local",
+            "password": "long-password",
+            "role": "member",
+            "person_id": pid_a,
+        },
+    ).json()
+    user_b = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": "toby.local",
+            "password": "long-password",
+            "role": "office",
+            "person_id": pid_b,
+        },
+    ).json()
+
+    # Creating or relinking onto an already-linked person is a 409, not a 500.
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "dupe.local", "password": "long-password", "person_id": pid_a},
+    )
+    assert r.status_code == 409, r.text
+    r = admin.patch(f"/api/v1/auth/users/{user_b['id']}", json={"person_id": pid_a})
+    assert r.status_code == 409, r.text
+
+    # Unlinking a member-role account is refused (membership gate)…
+    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"person_id": None})
+    assert r.status_code == 400, r.text
+    # …and an unrelated PATCH leaves the link alone (omitted != null).
+    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"is_active": True})
+    assert r.status_code == 200 and r.json()["person_id"] == pid_a
+
+    # Role change + unlink works in one request; the person record survives.
+    r = admin.patch(
+        f"/api/v1/auth/users/{user_a['id']}", json={"role": "office", "person_id": None}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["person_id"] is None
+    assert admin.get(f"/api/v1/people/{pid_a}").status_code == 200
+
+    # The freed person can now be linked elsewhere.
+    r = admin.patch(f"/api/v1/auth/users/{user_b['id']}", json={"person_id": pid_a})
+    assert r.status_code == 200 and r.json()["person_id"] == pid_a
 
 
 # --- Backups (issue #109) ------------------------------------------------------
