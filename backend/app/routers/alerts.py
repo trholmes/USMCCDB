@@ -20,9 +20,16 @@ from app.models import (
     User,
     UserRole,
 )
+from app.models.auth import ROLE_RANK
 from app.routers.people import STUDENT_STAGES
 from app.routers.site import migration_state
-from app.schemas.alerts import AccountAlert, AdminAlerts, InstitutionAlert, PersonAlert
+from app.schemas.alerts import (
+    AccountAlert,
+    AdminAlerts,
+    InstitutionAlert,
+    PersonAlert,
+    RoleSuggestionAlert,
+)
 from app.security import require_admin
 
 router = APIRouter(prefix="/alerts", tags=["site"], dependencies=[Depends(require_admin)])
@@ -150,6 +157,119 @@ def _unlinked_accounts(db: Session) -> list[AccountAlert]:
     ]
 
 
+# Leadership positions that come with database permissions (issue #167) and
+# the account role each one calls for. Positions never grant the role by
+# themselves — an admin applies (or declines) the suggestion.
+ROLE_FOR_POSITION = {
+    CollabRoleType.chair: UserRole.admin,
+    CollabRoleType.vice_chair: UserRole.admin,
+    CollabRoleType.representative: UserRole.leadership,
+    CollabRoleType.deputy_representative: UserRole.leadership,
+    CollabRoleType.speakers_comm: UserRole.speakers,
+}
+# Roles that exist only because of such a position: an account still holding
+# one after the position ended is flagged for demotion. Admin and office are
+# not — they are also given for other reasons (site administration, the
+# collaboration office).
+POSITION_ONLY_ROLES = (UserRole.leadership, UserRole.speakers)
+
+
+def _position_title(role: CollabRole) -> str:
+    if role.role == CollabRoleType.representative:
+        return f"{role.detail} Representative"
+    if role.role == CollabRoleType.deputy_representative:
+        return f"Deputy {role.detail} Representative"
+    return {
+        CollabRoleType.chair: "Chair",
+        CollabRoleType.vice_chair: "Vice Chair",
+        CollabRoleType.speakers_comm: "Speakers Committee",
+    }.get(role.role, role.detail or role.role.value)
+
+
+def _role_suggestions(db: Session, today) -> list[RoleSuggestionAlert]:
+    """Accounts whose role is below what an active leadership position calls
+    for (a representative signed in but is still a plain member), and
+    position-only roles whose position has ended. Only people who have a
+    sign-in are listed — the suggestion is about the account, and there is
+    nothing to apply before their first login."""
+    positions = (
+        db.execute(
+            select(CollabRole, User)
+            .join(User, User.person_id == CollabRole.person_id)
+            .where(
+                User.is_active.is_(True),
+                CollabRole.role.in_(ROLE_FOR_POSITION.keys()),
+                CollabRole.start_date <= today,
+                (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+            )
+            .order_by(CollabRole.start_date, CollabRole.id)
+        )
+        .all()
+    )
+    active_by_user: dict[int, tuple[User, list[CollabRole]]] = {}
+    for position, user in positions:
+        active_by_user.setdefault(user.id, (user, []))[1].append(position)
+
+    out: list[RoleSuggestionAlert] = []
+
+    def suggest(user: User, suggested: UserRole, detail: str) -> None:
+        person = db.get(Person, user.person_id)
+        out.append(
+            RoleSuggestionAlert(
+                user_id=user.id,
+                login=user.username or user.orcid or f"#{user.id}",
+                person_id=user.person_id,
+                name=person.display_name if person else f"#{user.person_id}",
+                current_role=user.role.value,
+                suggested_role=suggested.value,
+                detail=detail,
+            )
+        )
+
+    for user, held in active_by_user.values():
+        warranted = max((ROLE_FOR_POSITION[p.role] for p in held), key=ROLE_RANK.__getitem__)
+        titles = ", ".join(_position_title(p) for p in held)
+        if ROLE_RANK[warranted] > ROLE_RANK[user.role]:
+            suggest(user, warranted, titles)
+        elif user.role in POSITION_ONLY_ROLES and ROLE_RANK[warranted] < ROLE_RANK[user.role]:
+            suggest(user, warranted, f"current position: {titles}")
+
+    # Position-only roles with no active qualifying position at all.
+    stale = (
+        db.execute(
+            select(User)
+            .where(
+                User.is_active.is_(True),
+                User.role.in_(POSITION_ONLY_ROLES),
+                User.person_id.isnot(None),
+                User.id.notin_(active_by_user.keys()),
+            )
+            .order_by(User.id)
+        )
+        .scalars()
+        .all()
+    )
+    for user in stale:
+        last = db.execute(
+            select(CollabRole)
+            .where(
+                CollabRole.person_id == user.person_id,
+                CollabRole.role.in_(ROLE_FOR_POSITION.keys()),
+                CollabRole.end_date.isnot(None),
+                CollabRole.end_date < today,
+            )
+            .order_by(CollabRole.end_date.desc(), CollabRole.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        detail = (
+            f"{_position_title(last)} ended {last.end_date.isoformat()}"
+            if last is not None
+            else "no active leadership position"
+        )
+        suggest(user, UserRole.member, detail)
+    return out
+
+
 def _active_without_affiliation(db: Session) -> list[PersonAlert]:
     """Active members with no current primary affiliation — invisible to
     author lists, voting eligibility, and their institution's admin contact."""
@@ -232,6 +352,7 @@ def admin_alerts(db: Session = Depends(get_db)) -> AdminAlerts:
             db, member_counts, today
         ),
         unlinked_accounts=_unlinked_accounts(db),
+        role_suggestions=_role_suggestions(db, today),
         active_without_affiliation=_active_without_affiliation(db),
         ineligible_voting_members=_ineligible_voting_members(db),
         open_author_periods_not_active=_open_author_periods_not_active(db),
@@ -243,6 +364,7 @@ def admin_alerts(db: Session = Depends(get_db)) -> AdminAlerts:
         + len(alerts.unreviewed_institutions)
         + len(alerts.institutions_missing_admin_contact)
         + len(alerts.unlinked_accounts)
+        + len(alerts.role_suggestions)
         + len(alerts.active_without_affiliation)
         + len(alerts.ineligible_voting_members)
         + len(alerts.open_author_periods_not_active)

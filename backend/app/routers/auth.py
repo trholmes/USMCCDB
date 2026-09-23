@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.models import LoginEvent, MembershipEvent, MemberStatus, Person, User, UserRole
+from app.models.auth import ROLE_RANK
 from app.ratelimit import enforce, login_limiter
 from app.schemas.auth import (
     LoginRequest,
@@ -120,11 +121,10 @@ def logout(response: Response) -> dict:
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeOut:
     settings = get_settings()
     person = db.get(Person, user.person_id) if user.person_id else None
-    permissions = ["member"]
-    if user.role == UserRole.admin:
-        permissions = ["admin", "office", "member"]
-    elif user.role == UserRole.office:
-        permissions = ["office", "member"]
+    # Every role at or below the account's own: the frontend gates on
+    # membership ("office" in permissions), so a leadership account also
+    # carries "speakers" and "member".
+    permissions = [r.value for r in UserRole if ROLE_RANK[r] <= ROLE_RANK[user.role]]
     return MeOut(
         user=UserOut.model_validate(user),
         person_id=user.person_id,
@@ -218,9 +218,6 @@ def update_user(
     return UserOut.model_validate(user)
 
 
-_ROLE_RANK = {UserRole.member: 0, UserRole.office: 1, UserRole.admin: 2}
-
-
 @router.post("/users/{keep_id}/merge/{other_id}")
 def merge_users(
     keep_id: int,
@@ -252,7 +249,7 @@ def merge_users(
     password_hash = keep.password_hash or other.password_hash
     orcid = keep.orcid or other.orcid
     person_id = keep.person_id or other.person_id
-    role = keep.role if _ROLE_RANK[keep.role] >= _ROLE_RANK[other.role] else other.role
+    role = keep.role if ROLE_RANK[keep.role] >= ROLE_RANK[other.role] else other.role
     db.delete(other)
     db.flush()  # release the unique username/orcid/person_id before reassigning
     keep.username = username
@@ -286,7 +283,7 @@ def remove_user_person(
         raise HTTPException(400, "This account has no linked person")
     if user.role == UserRole.member:
         raise HTTPException(
-            400, "Give the account the office or admin role before removing its person"
+            400, "Give the account a role other than member before removing its person"
         )
     person = db.get(Person, user.person_id)
     if person is not None:

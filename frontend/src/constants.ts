@@ -16,6 +16,23 @@ export const CAREER_STAGES = [
 export const careerStageLabel = (value: string | null | undefined): string =>
   CAREER_STAGES.find((s) => s.value === value)?.label ?? value ?? ''
 
+// Account roles, most to least privileged (mirrors UserRole / ROLE_RANK in
+// backend/app/models/auth.py). Each role holds every permission of the ones
+// below it. `leadership` and `speakers` (issue #167) are assigned explicitly
+// by an admin — the alerts panel suggests them from a person's leadership
+// positions but never applies them.
+export const USER_ROLES = [
+  { value: 'admin', label: 'admin', description: 'Everything, incl. accounts and system' },
+  { value: 'office', label: 'office', description: 'Membership, institutions, all roles' },
+  {
+    value: 'leadership',
+    label: 'leadership',
+    description: 'Representatives & deputies: working groups, conveners, talks',
+  },
+  { value: 'speakers', label: 'speakers', description: 'Speakers committee: talks & events' },
+  { value: 'member', label: 'member', description: 'Own profile, own talks, publications' },
+]
+
 // Stages not eligible for voting membership (see _voting_eligible).
 export const STUDENT_STAGES = ['undergrad', 'grad']
 

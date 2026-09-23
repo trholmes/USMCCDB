@@ -27,7 +27,7 @@ from app.schemas.speakers import (
     TalkStatRow,
     TalkUpdate,
 )
-from app.security import get_current_user, is_office, require_office
+from app.security import can_manage_talks, get_current_user, require_speakers
 
 router = APIRouter(tags=["speakers"])
 
@@ -52,7 +52,7 @@ def list_events(
     return [_event_out(db, e) for e in events]
 
 
-@router.post("/events", dependencies=[Depends(require_office)], status_code=201)
+@router.post("/events", dependencies=[Depends(require_speakers)], status_code=201)
 def create_event(body: EventCreate, db: Session = Depends(get_db)) -> EventOut:
     event = Event(**body.model_dump())
     db.add(event)
@@ -61,7 +61,7 @@ def create_event(body: EventCreate, db: Session = Depends(get_db)) -> EventOut:
     return _event_out(db, event)
 
 
-@router.patch("/events/{event_id}", dependencies=[Depends(require_office)])
+@router.patch("/events/{event_id}", dependencies=[Depends(require_speakers)])
 def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)) -> EventOut:
     event = db.get(Event, event_id)
     if event is None:
@@ -73,7 +73,7 @@ def update_event(event_id: int, body: EventUpdate, db: Session = Depends(get_db)
     return _event_out(db, event)
 
 
-@router.delete("/events/{event_id}", dependencies=[Depends(require_office)], status_code=204)
+@router.delete("/events/{event_id}", dependencies=[Depends(require_speakers)], status_code=204)
 def delete_event(event_id: int, db: Session = Depends(get_db)) -> None:
     event = db.get(Event, event_id)
     if event is None:
@@ -126,9 +126,10 @@ def list_talks(
 
 
 def _require_talk_editor(user: User, talk: Talk) -> None:
-    """Office may manage any talk; members only ones they added themselves
-    (self-service seminars / colloquia, issue #33)."""
-    if not is_office(user) and talk.created_by_user_id != user.id:
+    """Office, leadership and the speakers committee may manage any talk;
+    members only ones they added themselves (self-service seminars /
+    colloquia, issue #33)."""
+    if not can_manage_talks(user) and talk.created_by_user_id != user.id:
         raise HTTPException(403, "Members can only edit talks they added")
 
 
@@ -238,7 +239,7 @@ def update_nomination(
     nom = db.get(Nomination, nomination_id)
     if nom is None:
         raise HTTPException(404, "Nomination not found")
-    if not is_office(user):
+    if not can_manage_talks(user):
         # Members may only withdraw their own nomination (self or one they made).
         own = user.person_id == nom.person_id or user.id == nom.nominated_by_user_id
         if not (own and body.status == NominationStatus.withdrawn):

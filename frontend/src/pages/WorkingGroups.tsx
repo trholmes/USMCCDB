@@ -34,13 +34,13 @@ export default function WorkingGroupsPage() {
   const [slugTouched, setSlugTouched] = useState(false)
   // Person selected in the "Add member" picker of the open accordion panel.
   const [addPersonId, setAddPersonId] = useState<string | null>(null)
-  const { me, isOffice, isAdmin } = useSession()
+  const { me, canManageWGs, isAdmin } = useSession()
 
   // Conveners may manage their own group's membership (mirrors the backend
   // rule on POST/DELETE /working-groups/{id}/members).
   const [convenerWgIds, setConvenerWgIds] = useState<number[]>([])
   useEffect(() => {
-    if (me?.person_id == null || isOffice) {
+    if (me?.person_id == null || canManageWGs) {
       setConvenerWgIds([])
       return
     }
@@ -56,17 +56,17 @@ export default function WorkingGroupsPage() {
         ),
       )
       .catch(() => setConvenerWgIds([]))
-  }, [me?.person_id, isOffice])
+  }, [me?.person_id, canManageWGs])
 
-  const canManage = (wgId: number) => isOffice || convenerWgIds.includes(wgId)
+  const canManage = (wgId: number) => canManageWGs || convenerWgIds.includes(wgId)
 
   // One shared directory load for the per-group "Add member" pickers (every
   // accordion panel stays mounted, so self-loading pickers would each fetch).
   const [people, setPeople] = useState<PersonSummary[]>([])
   useEffect(() => {
-    if (!isOffice && convenerWgIds.length === 0) return
+    if (!canManageWGs && convenerWgIds.length === 0) return
     api.get<PersonSummary[]>('/people').then(setPeople).catch(() => setPeople([]))
-  }, [isOffice, convenerWgIds])
+  }, [canManageWGs, convenerWgIds])
 
   const load = useCallback(() => {
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
@@ -195,7 +195,7 @@ export default function WorkingGroupsPage() {
     <>
       <Group justify="space-between" mb="md">
         <Title order={3}>Working groups</Title>
-        {isOffice && <Button onClick={() => open('new')}>Add working group</Button>}
+        {canManageWGs && <Button onClick={() => open('new')}>Add working group</Button>}
       </Group>
       <Accordion
         onChange={(v) => {
@@ -228,7 +228,7 @@ export default function WorkingGroupsPage() {
                     Join this group
                   </Button>
                 )}
-                {isOffice && (
+                {canManageWGs && (
                   <Button size="xs" variant="subtle" onClick={() => open(wg)}>
                     Edit
                   </Button>

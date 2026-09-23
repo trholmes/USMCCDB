@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.models import Affiliation, CollabRole, CollabRoleType, MemberStatus, Person, User, UserRole
+from app.models.auth import ROLE_RANK
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -97,9 +98,9 @@ def membership_block_reason(db: Session, user: User) -> str | None:
 
     A member-role account whose linked person is in a moderation state
     (pending/rejected) has not been approved — self-registration (ORCID or
-    the form) must not grant member-level access to the database. Office and
-    admin accounts are exempt: their access comes from the role, which only
-    an admin can assign, and someone has to be able to approve."""
+    the form) must not grant member-level access to the database. Accounts
+    with any other role are exempt: their access comes from the role, which
+    only an admin can assign, and someone has to be able to approve."""
     if user.role != UserRole.member or user.person_id is None:
         return None
     person = db.get(Person, user.person_id)
@@ -170,10 +171,30 @@ def require_role(*roles: UserRole):
 
 require_admin = require_role()  # admin only
 require_office = require_role(UserRole.office)  # office or admin
+# Leadership Council representatives / deputies (issue #167): working groups
+# and their conveners, plus everything the speakers committee may do.
+require_leadership = require_role(UserRole.office, UserRole.leadership)
+# Speakers committee: full edit access to talks, events and nominations.
+require_speakers = require_role(UserRole.office, UserRole.leadership, UserRole.speakers)
+
+
+def has_role(user: User, role: UserRole) -> bool:
+    """True if the account holds `role` or a more privileged one."""
+    return ROLE_RANK[user.role] >= ROLE_RANK[role]
 
 
 def is_office(user: User) -> bool:
-    return user.role in (UserRole.admin, UserRole.office)
+    return has_role(user, UserRole.office)
+
+
+def can_manage_working_groups(user: User) -> bool:
+    """Create/edit working groups, add or remove anyone, name conveners."""
+    return has_role(user, UserRole.leadership)
+
+
+def can_manage_talks(user: User) -> bool:
+    """Edit any talk, event or nomination — not just one's own."""
+    return has_role(user, UserRole.speakers)
 
 
 def is_convener_of(db: Session, user: User, working_group_id: int | None) -> bool:

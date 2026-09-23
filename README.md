@@ -44,8 +44,12 @@ ORCID sign-in.
   and **INSPIRE/arXiv `authors.xml`**.
 - **Sign-in** — ORCID OAuth for members (free public ORCID API) plus local
   username/password accounts; admins can create as many local accounts as
-  needed. Roles: `admin`, `office`, `member` (+ working-group conveners with
-  scoped rights).
+  needed. Roles: `admin`, `office`, `leadership` (Leadership Council
+  representatives and deputies: working groups, conveners, talks), `speakers`
+  (speakers committee: talks and events), `member` (+ working-group conveners
+  and administrative institutional contacts with scoped rights). Roles are
+  assigned by an admin; the alerts panel suggests one when a person's
+  leadership position and their account disagree.
 - **Interconnected, Glance-style** — every page cross-links: directory rows →
   institution pages (with their member lists) → profiles → the person's talks
   and back; speaker and stats entries click through to people. Every listing
@@ -336,7 +340,8 @@ Everything else is configured while the instance runs, in **Admin** (visible
 to admin accounts):
 
 - **User accounts** — create local username/password accounts, set roles
-  (`admin` / `office` / `member`), link logins to directory records, merge a
+  (`admin` / `office` / `leadership` / `speakers` / `member`), link logins to
+  directory records, merge a
   member's local + ORCID accounts, **reset a locked-out local account's
   password** (shows a one-time temporary password), search, and delete logins.
 - **Site settings** — an **announcement banner** (info/warning/critical, shown

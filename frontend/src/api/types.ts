@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'office' | 'member'
+export type Role = 'admin' | 'office' | 'leadership' | 'speakers' | 'member'
 
 export interface User {
   id: number
@@ -301,11 +301,22 @@ export interface AccountAlert {
   login: string
 }
 
+export interface RoleSuggestionAlert {
+  user_id: number
+  login: string
+  person_id: number
+  name: string
+  current_role: Role
+  suggested_role: Role
+  detail: string
+}
+
 export interface AdminAlerts {
   pending_registrations: PersonAlert[]
   unreviewed_institutions: InstitutionAlert[]
   institutions_missing_admin_contact: InstitutionAlert[]
   unlinked_accounts: AccountAlert[]
+  role_suggestions: RoleSuggestionAlert[]
   active_without_affiliation: PersonAlert[]
   ineligible_voting_members: PersonAlert[]
   open_author_periods_not_active: PersonAlert[]
