@@ -166,6 +166,20 @@ def auth_config() -> dict:
 # --- Local account management (admin) ---------------------------------------
 
 
+def _check_person_free(db: Session, person_id: int, except_user_id: int | None = None) -> None:
+    """409 when the person is already linked to another login (users.person_id
+    is unique — without this the commit dies with an IntegrityError 500)."""
+    stmt = select(User).where(User.person_id == person_id)
+    if except_user_id is not None:
+        stmt = stmt.where(User.id != except_user_id)
+    if db.execute(stmt).scalar_one_or_none() is not None:
+        raise HTTPException(
+            409,
+            "That person is already linked to another account — merge the "
+            "accounts or unlink the person there first",
+        )
+
+
 @router.get("/users", dependencies=[Depends(require_admin)])
 def list_users(db: Session = Depends(get_db)) -> list[UserOut]:
     users = db.execute(select(User).order_by(User.id)).scalars().all()
@@ -177,8 +191,10 @@ def create_user(body: UserCreate, db: Session = Depends(get_db)) -> UserOut:
     exists = db.execute(select(User).where(User.username == body.username)).scalar_one_or_none()
     if exists:
         raise HTTPException(409, "Username already taken")
-    if body.person_id is not None and db.get(Person, body.person_id) is None:
-        raise HTTPException(404, "person_id not found")
+    if body.person_id is not None:
+        if db.get(Person, body.person_id) is None:
+            raise HTTPException(404, "person_id not found")
+        _check_person_free(db, body.person_id)
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -211,10 +227,24 @@ def update_user(
         user.is_active = body.is_active
     if body.password is not None:
         user.password_hash = hash_password(body.password)
-    if body.person_id is not None:
-        if db.get(Person, body.person_id) is None:
-            raise HTTPException(404, "person_id not found")
-        user.person_id = body.person_id
+    # For person_id an explicit null means "unlink" — model_fields_set tells
+    # it apart from the field simply being omitted.
+    if "person_id" in body.model_fields_set:
+        if body.person_id is None:
+            # Same gate as remove_user_person: a member-role login without a
+            # person slips past the membership-approval gate
+            # (membership_block_reason). user.role already reflects a role
+            # sent in this same request.
+            if user.role == UserRole.member:
+                raise HTTPException(
+                    400, "Give the account a role other than member before unlinking its person"
+                )
+            user.person_id = None
+        else:
+            if db.get(Person, body.person_id) is None:
+                raise HTTPException(404, "person_id not found")
+            _check_person_free(db, body.person_id, except_user_id=user.id)
+            user.person_id = body.person_id
     db.commit()
     db.refresh(user)
     return UserOut.model_validate(user)
@@ -449,7 +479,7 @@ async def orcid_callback(
                 db.commit()
             else:
                 # The person's account already carries a *different* ORCID iD
-                # (ambiguous records), or it is an office/admin account — a
+                # (ambiguous records), or it holds a role above member — a
                 # directory match alone must not hand out a privileged
                 # session (a mistyped iD on such a record would otherwise
                 # sign a stranger into it). Take the unknown-ORCID path below

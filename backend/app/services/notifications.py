@@ -169,7 +169,7 @@ def registration_duplicate(
 def orcid_link_conflict(db, existing: Person, created: Person, orcid_id: str) -> Message | None:
     """Tell the office an authenticated ORCID sign-in matched a directory
     record it could not be linked to safely: the record's login already
-    carries a different ORCID iD, or it is an office/admin account that a
+    carries a different ORCID iD, or it holds a role above member that a
     directory match alone must not open. The sign-in was given a fresh
     pending registration instead; the office reconciles the two records."""
     to = [addr for addr in _office_recipients(db) if addr]
@@ -181,7 +181,7 @@ def orcid_link_conflict(db, existing: Person, created: Person, orcid_id: str) ->
         f"Someone signed in with ORCID iD {orcid_id}, which is on the "
         f"directory record of {existing.display_name}, but that record's "
         "login could not take the link automatically (it already carries a "
-        "different ORCID iD, or it is an office/admin account).",
+        "different ORCID iD, or it holds a role above member).",
         "",
         f"Existing record: {existing.display_name}",
     ]

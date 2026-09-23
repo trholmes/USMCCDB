@@ -114,6 +114,16 @@ export default function AdminPage() {
     setManage(null)
   }
 
+  // Detach the login from its person record, keeping both (the record stays
+  // in the directory). Refused by the backend for member-role accounts —
+  // a member login without a person would skip the membership gate.
+  const unlinkPerson = async () => {
+    if (!manage || manage.person_id == null) return
+    await update(manage.id, { person_id: null })
+    notifications.show({ message: 'Account unlinked from person' })
+    setManage(null)
+  }
+
   // An unapproved registration (typically provisioned by a first ORCID
   // sign-in) that an office/admin login can shed to stay a non-member.
   const linkedPerson = manage?.person_id ? people.find((p) => p.id === manage.person_id) : undefined
@@ -328,14 +338,30 @@ export default function AdminPage() {
             value={personPick}
             onChange={setPersonPick}
           />
-          <Button
-            w="fit-content"
-            size="xs"
-            onClick={linkPerson}
-            disabled={!personPick || Number(personPick) === manage?.person_id}
-          >
-            Link person
-          </Button>
+          <Group gap="xs">
+            <Button
+              size="xs"
+              onClick={linkPerson}
+              disabled={!personPick || Number(personPick) === manage?.person_id}
+            >
+              Link person
+            </Button>
+            {manage?.person_id != null && (
+              <Button
+                size="xs"
+                variant="light"
+                onClick={unlinkPerson}
+                disabled={manage.role === 'member'}
+                title={
+                  manage.role === 'member'
+                    ? 'Member accounts need a linked person — change the role first.'
+                    : 'Detach this login from the person record; both are kept.'
+                }
+              >
+                Unlink person
+              </Button>
+            )}
+          </Group>
           {removablePerson && (
             <>
               <Text size="xs" c="dimmed">

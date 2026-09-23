@@ -3252,6 +3252,76 @@ def test_admin_merges_local_and_orcid_accounts(admin, monkeypatch):
     assert r.status_code == 409
 
 
+def test_admin_person_link_management(admin, monkeypatch):
+    """PATCH /auth/users tells an explicit person_id null (unlink) apart from
+    the field being omitted, refuses to unlink member-role accounts (a member
+    login without a person slips past the membership gate), and answers 409 —
+    not an IntegrityError 500 — when the person is already linked to another
+    account (users.person_id is unique)."""
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+
+    pids = []
+    for given, family, email in [
+        ("Uma", "Unlinked", "uma.unlinked@example.edu"),
+        ("Toby", "Taken", "toby.taken@example.edu"),
+    ]:
+        pids.append(
+            admin.post(
+                "/api/v1/people/register",
+                json={"given_name": given, "family_name": family, "email": email},
+            ).json()["id"]
+        )
+    pid_a, pid_b = pids
+    user_a = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": "uma.local",
+            "password": "long-password",
+            "role": "member",
+            "person_id": pid_a,
+        },
+    ).json()
+    user_b = admin.post(
+        "/api/v1/auth/users",
+        json={
+            "username": "toby.local",
+            "password": "long-password",
+            "role": "office",
+            "person_id": pid_b,
+        },
+    ).json()
+
+    # Creating or relinking onto an already-linked person is a 409, not a 500.
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "dupe.local", "password": "long-password", "person_id": pid_a},
+    )
+    assert r.status_code == 409, r.text
+    r = admin.patch(f"/api/v1/auth/users/{user_b['id']}", json={"person_id": pid_a})
+    assert r.status_code == 409, r.text
+
+    # Unlinking a member-role account is refused (membership gate)…
+    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"person_id": None})
+    assert r.status_code == 400, r.text
+    # …and an unrelated PATCH leaves the link alone (omitted != null).
+    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"is_active": True})
+    assert r.status_code == 200 and r.json()["person_id"] == pid_a
+
+    # Role change + unlink works in one request; the person record survives.
+    r = admin.patch(
+        f"/api/v1/auth/users/{user_a['id']}", json={"role": "office", "person_id": None}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["person_id"] is None
+    assert admin.get(f"/api/v1/people/{pid_a}").status_code == 200
+
+    # The freed person can now be linked elsewhere.
+    r = admin.patch(f"/api/v1/auth/users/{user_b['id']}", json={"person_id": pid_a})
+    assert r.status_code == 200 and r.json()["person_id"] == pid_a
+
+
 # --- Backups (issue #109) ------------------------------------------------------
 
 
