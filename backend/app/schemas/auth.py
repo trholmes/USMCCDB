@@ -33,6 +33,11 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=8, max_length=128)
     person_id: int | None = None
+    # With person_id: also delete the person currently linked to the login,
+    # provided it is an unapproved (pending/rejected) registration — the
+    # duplicate an ORCID sign-in provisions when the directory record it
+    # belongs to carried a different (mistyped) iD.
+    replace_person: bool = False
 
 
 class PasswordChange(BaseModel):
@@ -46,4 +51,7 @@ class MeOut(BaseModel):
     display_name: str | None
     permissions: list[str]
     orcid_enabled: bool
+    # Whether the server delivers mail (SMTP configured) — the UI warns before
+    # actions that send notifications only when it does.
+    email_enabled: bool
     contact_email: str

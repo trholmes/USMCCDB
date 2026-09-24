@@ -30,6 +30,7 @@ const SIGNIN_ERRORS: Record<string, string> = {
   orcid_denied: 'ORCID sign-in was cancelled or denied.',
   orcid_state: 'ORCID sign-in expired — please try again.',
   account_disabled: 'This account is disabled.',
+  account_unlinked: 'This sign-in is not linked to a collaboration member — contact the office.',
   membership_pending: 'Your membership registration is awaiting approval.',
   membership_rejected: 'Your membership registration was not approved — contact the office.',
 }

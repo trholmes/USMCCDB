@@ -269,7 +269,14 @@ def test_member_cannot_do_office_things(admin):
     # Create a plain member account.
     r = admin.post(
         "/api/v1/auth/users",
-        json={"username": "plainmember", "password": "member-pw-123", "role": "member"},
+        json={
+            "username": "plainmember",
+            "password": "member-pw-123",
+            "role": "member",
+            "person_id": _active_person(
+                admin, given="Plain", family="Member", email="plain.member@example.edu"
+            ),
+        },
     )
     assert r.status_code == 201, r.text
 
@@ -283,10 +290,21 @@ def test_member_cannot_do_office_things(admin):
     # Directory is visible…
     assert member.get("/api/v1/people").status_code == 200
     # …but office/admin actions are forbidden.
-    somebody = member.get("/api/v1/people").json()[0]["id"]
+    somebody = _active_person(admin, given="Some", family="Body", email="some.body@example.edu")
     assert member.post(f"/api/v1/people/{somebody}/status", json={"status": "inactive"}).status_code == 403
     assert member.post("/api/v1/institutions", json={"name": "Nope U"}).status_code == 403
     assert member.get("/api/v1/auth/users").status_code == 403
+
+
+def _active_person(admin, *, given, family, email):
+    """Create an approved (active) person and return their id — a member-role
+    login needs one to get past the membership gate."""
+    person = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": given, "family_name": family, "email": email},
+    ).json()
+    admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
+    return person["id"]
 
 
 def _linked_member(admin, *, given, family, email, career_stage="postdoc"):
@@ -2676,30 +2694,35 @@ def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
 
 
 def test_orcid_admin_without_membership(admin, monkeypatch):
-    """An ORCID sign-in provisions a pending person; an admin can make the
-    login office/admin and drop that person, leaving a non-member account."""
+    """An ORCID sign-in provisions a pending person; an admin can drop that
+    person whatever the login's role. As a member the login then has no
+    access (nothing approved to point at); made office/admin it is a
+    non-member account."""
     orcid_id = "0000-0003-4444-5555"
     stranger, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
     assert r.headers["location"] == "/register?welcome=orcid"
     uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid_id)
     pid = admin.get("/api/v1/people", params={"q": orcid_id}).json()[0]["id"]
 
-    # A member-role login must not lose its person: that would bypass the
-    # approval gate.
-    r = admin.delete(f"/api/v1/auth/users/{uid}/person")
-    assert r.status_code == 400, r.text
-    assert admin.get(f"/api/v1/people/{pid}").status_code == 200
-
-    assert admin.patch(f"/api/v1/auth/users/{uid}", json={"role": "admin"}).status_code == 200
+    # Removing the person from a member-role login works, and the login is
+    # then blocked at the membership gate rather than let through it.
     r = admin.delete(f"/api/v1/auth/users/{uid}/person")
     assert r.status_code == 200, r.text
-    assert r.json()["person_id"] is None
-    assert r.json()["role"] == "admin"
+    assert r.json()["person_id"] is None and r.json()["role"] == "member"
     assert admin.get(f"/api/v1/people/{pid}").status_code == 404
     assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+    r = stranger.get("/api/v1/people")
+    assert r.status_code == 403, r.text
+    assert "not linked" in r.json()["detail"]
+    blocked, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
+    assert r.headers["location"] == "/login?error=account_unlinked"
+    assert _no_session_cookie(r)
+    # Still no second pending person was provisioned: the login exists.
+    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
 
-    # A fresh sign-in reuses the login — no new pending person, no
-    # registration redirect — and has admin access.
+    # As admin the same login is a legitimate non-member account: a fresh
+    # sign-in reuses it — no new pending person, no registration redirect.
+    assert admin.patch(f"/api/v1/auth/users/{uid}", json={"role": "admin"}).status_code == 200
     again, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
     assert r.headers["location"] == "/"
     assert again.get("/api/v1/auth/users").status_code == 200
@@ -2744,6 +2767,170 @@ def test_orcid_links_existing_approved_member(admin, monkeypatch):
     assert me.status_code == 200, me.text
     assert me.json()["person_id"] == person["id"]
     assert member.get("/api/v1/people").status_code == 200
+
+
+def _wrong_orcid_import(admin, monkeypatch, *, given, family, email, wrong, right):
+    """The scenario behind the relink tools: the directory record was imported
+    with a mistyped ORCID iD, so the person's real sign-in matched nothing
+    and provisioned a pending duplicate plus a login. Returns (directory
+    person id, duplicate person id, login id)."""
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+    person = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": given, "family_name": family, "email": email},
+    ).json()
+    admin.patch(f"/api/v1/people/{person['id']}", json={"orcid": wrong})
+    admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
+
+    _, r = _orcid_signin(monkeypatch, right, f"{given} {family}")
+    assert r.headers["location"] == "/register?welcome=orcid"
+    dup = admin.get("/api/v1/people", params={"q": right}).json()
+    assert len(dup) == 1 and dup[0]["id"] != person["id"]
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == right)
+    # The directory record cannot simply take the right iD: the duplicate holds it.
+    r = admin.patch(f"/api/v1/people/{person['id']}", json={"orcid": right})
+    assert r.status_code == 409, r.text
+    return person["id"], dup[0]["id"], uid
+
+
+def test_relink_orcid_login_replaces_duplicate_and_corrects_orcid(admin, monkeypatch):
+    """PATCH /auth/users {person_id, replace_person}: one step moves the login
+    onto the directory record, deletes the pending duplicate, and puts the
+    login's authenticated iD on the record in place of the mistyped one."""
+    wrong, right = "0000-0002-6060-0001", "0000-0002-6060-0002"
+    pid, dup_id, uid = _wrong_orcid_import(
+        admin, monkeypatch, given="Ida", family="Import", email="ida.import@example.edu",
+        wrong=wrong, right=right,
+    )
+
+    # Without replace_person the duplicate stays and keeps the iD, so the
+    # link is refused rather than leaving two records claiming one iD.
+    r = admin.patch(f"/api/v1/auth/users/{uid}", json={"person_id": pid})
+    assert r.status_code == 409, r.text
+    assert admin.get(f"/api/v1/people/{dup_id}").status_code == 200
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == wrong
+
+    r = admin.patch(
+        f"/api/v1/auth/users/{uid}", json={"person_id": pid, "replace_person": True}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["person_id"] == pid and r.json()["orcid"] == right
+    assert admin.get(f"/api/v1/people/{dup_id}").status_code == 404
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == right
+
+    # The next sign-in lands on the directory record with member access.
+    member, r = _orcid_signin(monkeypatch, right, "Ida Import")
+    assert r.headers["location"] == "/"
+    assert member.get("/api/v1/auth/me").json()["person_id"] == pid
+    # No second duplicate was provisioned: the sign-in's iD is on one record.
+    assert admin.get("/api/v1/people", params={"q": f"{right}@orcid.placeholder"}).json() == []
+
+    # replace_person never deletes an approved member.
+    other = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Ono", "family_name": "Approved", "email": "ono.appr@example.edu"},
+    ).json()
+    r = admin.patch(
+        f"/api/v1/auth/users/{uid}", json={"person_id": other["id"], "replace_person": True}
+    )
+    assert r.status_code == 409, r.text
+    assert admin.get(f"/api/v1/people/{pid}").status_code == 200
+    assert next(u for u in admin.get("/api/v1/auth/users").json() if u["id"] == uid)[
+        "person_id"
+    ] == pid
+
+
+def test_link_refuses_orcid_held_by_third_person(admin, monkeypatch):
+    """The login's iD is already on an unrelated directory record: linking
+    must not silently strip it from there — two people claim one iD."""
+    wrong, right = "0000-0002-6060-0011", "0000-0002-6060-0012"
+    pid, dup_id, uid = _wrong_orcid_import(
+        admin, monkeypatch, given="Tia", family="Third", email="tia.third@example.edu",
+        wrong=wrong, right=right,
+    )
+    # Move the iD from the duplicate onto a third, unrelated record.
+    admin.patch(f"/api/v1/people/{dup_id}", json={"orcid": "0000-0002-6060-0013"})
+    third = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Tom", "family_name": "Holder", "email": "tom.holder@example.edu"},
+    ).json()
+    assert admin.patch(f"/api/v1/people/{third['id']}", json={"orcid": right}).status_code == 200
+
+    r = admin.patch(
+        f"/api/v1/auth/users/{uid}", json={"person_id": pid, "replace_person": True}
+    )
+    assert r.status_code == 409, r.text
+    assert "Tom Holder" in r.json()["detail"]
+    # Nothing moved: the refusal rolled the whole change back.
+    assert admin.get(f"/api/v1/people/{dup_id}").status_code == 200
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == wrong
+    assert next(u for u in admin.get("/api/v1/auth/users").json() if u["id"] == uid)[
+        "person_id"
+    ] == dup_id
+
+
+def test_merge_drops_unapproved_duplicate_person(admin, monkeypatch):
+    """The directory person already has a local login. Merging the ORCID
+    login into it deletes the pending duplicate, links the merged login to
+    the directory person and corrects that record's iD."""
+    wrong, right = "0000-0002-6060-0021", "0000-0002-6060-0022"
+    pid, dup_id, uid = _wrong_orcid_import(
+        admin, monkeypatch, given="Mel", family="Merged", email="mel.merged@example.edu",
+        wrong=wrong, right=right,
+    )
+    local = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "mel.local", "password": "long-password", "person_id": pid},
+    ).json()
+
+    r = admin.post(f"/api/v1/auth/users/{local['id']}/merge/{uid}")
+    assert r.status_code == 200, r.text
+    merged = r.json()
+    assert merged["username"] == "mel.local" and merged["orcid"] == right
+    assert merged["person_id"] == pid and merged["role"] == "member"
+    assert admin.get(f"/api/v1/people/{dup_id}").status_code == 404
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == right
+    assert uid not in [u["id"] for u in admin.get("/api/v1/auth/users").json()]
+
+    # Either direction: keeping the ORCID login works the same way.
+    wrong, right = "0000-0002-6060-0031", "0000-0002-6060-0032"
+    pid2, dup2, uid2 = _wrong_orcid_import(
+        admin, monkeypatch, given="Mia", family="Mirror", email="mia.mirror@example.edu",
+        wrong=wrong, right=right,
+    )
+    local2 = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "mia.local", "password": "long-password", "person_id": pid2},
+    ).json()
+    r = admin.post(f"/api/v1/auth/users/{uid2}/merge/{local2['id']}")
+    assert r.status_code == 200, r.text
+    assert r.json()["person_id"] == pid2 and r.json()["username"] == "mia.local"
+    assert admin.get(f"/api/v1/people/{dup2}").status_code == 404
+    assert admin.get(f"/api/v1/people/{pid2}").json()["orcid"] == right
+
+    # Two approved people are still two people: refused.
+    _, pid_x = _linked_member(admin, given="Xa", family="One", email="xa.one@example.edu")
+    _, pid_y = _linked_member(admin, given="Ya", family="Two", email="ya.two@example.edu")
+    users = admin.get("/api/v1/auth/users").json()
+    ux = next(u["id"] for u in users if u["person_id"] == pid_x)
+    uy = next(u["id"] for u in users if u["person_id"] == pid_y)
+    # One local + one ORCID-less local would fail the username rule first;
+    # give one of them an ORCID-only shape via a fresh sign-in instead.
+    _, r = _orcid_signin(monkeypatch, "0000-0002-6060-0041", "Zed Pending")
+    uz = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-6060-0041")
+    r = admin.post(f"/api/v1/auth/users/{ux}/merge/{uz}")
+    assert r.status_code == 200, r.text  # pending duplicate dropped, as above
+    assert admin.get(f"/api/v1/people/{pid_x}").json()["orcid"] == "0000-0002-6060-0041"
+    assert admin.get("/api/v1/people", params={"q": "0000-0002-6060-0041"}).json() == []
+    _, r = _orcid_signin(monkeypatch, "0000-0002-6060-0042", "Zoe Pending")
+    uz2 = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-6060-0042")
+    pz2 = admin.get("/api/v1/people", params={"q": "0000-0002-6060-0042"}).json()[0]["id"]
+    admin.post(f"/api/v1/people/{pz2}/status", json={"status": "active"})
+    r = admin.post(f"/api/v1/auth/users/{uy}/merge/{uz2}")
+    assert r.status_code == 409, r.text
+    assert "different people" in r.json()["detail"]
 
 
 def test_member_cannot_self_edit_orcid(admin, monkeypatch):
@@ -3226,7 +3413,12 @@ def test_register_free_text_links_existing_institution(admin, monkeypatch):
 def test_change_own_password(admin):
     r = admin.post(
         "/api/v1/auth/users",
-        json={"username": "pw.user", "password": "first-password", "role": "member"},
+        json={
+            "username": "pw.user",
+            "password": "first-password",
+            "role": "member",
+            "person_id": _active_person(admin, given="Pw", family="User", email="pw.user@example.edu"),
+        },
     )
     assert r.status_code == 201, r.text
 
@@ -3350,10 +3542,9 @@ def test_admin_merges_local_and_orcid_accounts(admin, monkeypatch):
 
 def test_admin_person_link_management(admin, monkeypatch):
     """PATCH /auth/users tells an explicit person_id null (unlink) apart from
-    the field being omitted, refuses to unlink member-role accounts (a member
-    login without a person slips past the membership gate), and answers 409 —
-    not an IntegrityError 500 — when the person is already linked to another
-    account (users.person_id is unique)."""
+    the field being omitted, blocks an unlinked member-role account at the
+    membership gate, and answers 409 — not an IntegrityError 500 — when the
+    person is already linked to another account (users.person_id is unique)."""
     import app.services.email as email_mod
 
     monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
@@ -3398,20 +3589,25 @@ def test_admin_person_link_management(admin, monkeypatch):
     r = admin.patch(f"/api/v1/auth/users/{user_b['id']}", json={"person_id": pid_a})
     assert r.status_code == 409, r.text
 
-    # Unlinking a member-role account is refused (membership gate)…
-    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"person_id": None})
-    assert r.status_code == 400, r.text
-    # …and an unrelated PATCH leaves the link alone (omitted != null).
+    # An unrelated PATCH leaves the link alone (omitted != null).
     r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"is_active": True})
     assert r.status_code == 200 and r.json()["person_id"] == pid_a
 
-    # Role change + unlink works in one request; the person record survives.
-    r = admin.patch(
-        f"/api/v1/auth/users/{user_a['id']}", json={"role": "office", "person_id": None}
-    )
+    # Unlinking a member-role account works; the person record survives and
+    # the login is blocked at the membership gate until linked again.
+    admin.post(f"/api/v1/people/{pid_a}/status", json={"status": "active"})
+    uma = TestClient(app)
+    login = {"username": "uma.local", "password": "long-password"}
+    assert uma.post("/api/v1/auth/login", json=login).status_code == 200
+    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"person_id": None})
     assert r.status_code == 200, r.text
     assert r.json()["person_id"] is None
     assert admin.get(f"/api/v1/people/{pid_a}").status_code == 200
+    assert uma.get("/api/v1/people").status_code == 403
+    r = TestClient(app).post("/api/v1/auth/login", json=login)
+    assert r.status_code == 403 and "not linked" in r.json()["detail"]
+    r = admin.patch(f"/api/v1/auth/users/{user_a['id']}", json={"role": "office"})
+    assert r.status_code == 200, r.text
 
     # The freed person can now be linked elsewhere.
     r = admin.patch(f"/api/v1/auth/users/{user_b['id']}", json={"person_id": pid_a})
@@ -3787,7 +3983,14 @@ def test_site_settings_banner(admin):
 def test_admin_password_reset_and_delete(admin):
     u = admin.post(
         "/api/v1/auth/users",
-        json={"username": "lockedout", "password": "forgotten-pw", "role": "member"},
+        json={
+            "username": "lockedout",
+            "password": "forgotten-pw",
+            "role": "member",
+            "person_id": _active_person(
+                admin, given="Locked", family="Out", email="locked.out@example.edu"
+            ),
+        },
     ).json()
 
     r = admin.post(f"/api/v1/auth/users/{u['id']}/reset-password")
@@ -3817,7 +4020,14 @@ def test_login_events_audit(admin):
     # A failed then successful local sign-in both land in the audit.
     admin.post(
         "/api/v1/auth/users",
-        json={"username": "audited", "password": "audited-pw-1", "role": "member"},
+        json={
+            "username": "audited",
+            "password": "audited-pw-1",
+            "role": "member",
+            "person_id": _active_person(
+                admin, given="Aud", family="Ited", email="aud.ited@example.edu"
+            ),
+        },
     )
     fresh = TestClient(app)
     fresh.post("/api/v1/auth/login", json={"username": "audited", "password": "wrong"})

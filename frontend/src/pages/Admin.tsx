@@ -2,6 +2,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Code,
   CopyButton,
   Divider,
@@ -49,6 +50,8 @@ export default function AdminPage() {
   // Link-person / merge dialog for one account.
   const [manage, setManage] = useState<User | null>(null)
   const [personPick, setPersonPick] = useState<string | null>(null)
+  // Delete the login's current (unapproved, duplicate) person when relinking.
+  const [replacePerson, setReplacePerson] = useState(true)
   const [mergePick, setMergePick] = useState<string | null>(null)
   const [q, setQ] = useState('')
   // One-time temporary password from an admin reset, shown in a modal.
@@ -93,52 +96,78 @@ export default function AdminPage() {
     }
   }
 
-  const update = async (id: number, body: Record<string, unknown>) => {
+  // Resolves to whether the change went through (the error is already shown).
+  const update = async (id: number, body: Record<string, unknown>): Promise<boolean> => {
     try {
       await api.patch(`/auth/users/${id}`, body)
       load()
+      return true
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
+      return false
     }
   }
 
   const openManage = (u: User) => {
     setPersonPick(u.person_id ? String(u.person_id) : null)
+    setReplacePerson(true)
     setMergePick(null)
     setManage(u)
   }
 
+  const personLabel = (p: PersonSummary) => `${p.given_name} ${p.family_name}`
+
+  // An unapproved registration (typically provisioned by a first ORCID
+  // sign-in): a duplicate of a directory record the login belongs to, or a
+  // membership an office/admin login does not need.
+  const linkedPerson = manage?.person_id ? people.find((p) => p.id === manage.person_id) : undefined
+  const removablePerson =
+    linkedPerson && ['pending', 'rejected'].includes(linkedPerson.status) ? linkedPerson : undefined
+  const pickedPerson = personPick ? people.find((p) => p.id === Number(personPick)) : undefined
+  const relinking = !!pickedPerson && pickedPerson.id !== manage?.person_id
+
   const linkPerson = async () => {
-    if (!manage || !personPick) return
-    await update(manage.id, { person_id: Number(personPick) })
+    if (!manage || !pickedPerson) return
+    const dropping = relinking && replacePerson && removablePerson
+    const lines = [`Link the login '${loginLabel(manage)}' to '${personLabel(pickedPerson)}'?`]
+    if (dropping)
+      lines.push(
+        `The ${removablePerson.status} record '${personLabel(removablePerson)}' currently ` +
+          'linked to it is deleted as a duplicate. This cannot be undone.',
+      )
+    if (manage.orcid && pickedPerson.orcid !== manage.orcid)
+      lines.push(
+        `'${personLabel(pickedPerson)}' takes the login's ORCID iD ${manage.orcid}` +
+          (pickedPerson.orcid ? ` (replacing ${pickedPerson.orcid}).` : '.'),
+      )
+    if (lines.length > 1 && !window.confirm(lines.join('\n\n'))) return
+    if (!(await update(manage.id, { person_id: pickedPerson.id, replace_person: !!dropping })))
+      return
     notifications.show({ message: 'Account linked to person' })
     setManage(null)
   }
 
   // Detach the login from its person record, keeping both (the record stays
-  // in the directory). Refused by the backend for member-role accounts —
-  // a member login without a person would skip the membership gate.
+  // in the directory). A member-role login without a person gets no access
+  // until it is linked again.
   const unlinkPerson = async () => {
     if (!manage || manage.person_id == null) return
-    await update(manage.id, { person_id: null })
+    if (!(await update(manage.id, { person_id: null }))) return
     notifications.show({ message: 'Account unlinked from person' })
     setManage(null)
   }
-
-  // An unapproved registration (typically provisioned by a first ORCID
-  // sign-in) that an office/admin login can shed to stay a non-member.
-  const linkedPerson = manage?.person_id ? people.find((p) => p.id === manage.person_id) : undefined
-  const removablePerson =
-    linkedPerson && ['pending', 'rejected'].includes(linkedPerson.status) ? linkedPerson : undefined
 
   const removePerson = async () => {
     if (!manage || !removablePerson) return
     if (
       !window.confirm(
         `Delete the ${removablePerson.status} person record ` +
-          `'${removablePerson.given_name} ${removablePerson.family_name}'?\n\n` +
-          `The login '${loginLabel(manage)}' stays, but no longer belongs to a ` +
-          'collaboration member. This cannot be undone.',
+          `'${personLabel(removablePerson)}'?\n\n` +
+          `The login '${loginLabel(manage)}' stays` +
+          (manage.role === 'member'
+            ? ' but has no access until it is linked to an approved member.'
+            : ', but no longer belongs to a collaboration member.') +
+          ' This cannot be undone.',
       )
     )
       return
@@ -186,15 +215,27 @@ export default function AdminPage() {
   const mergeAccounts = async () => {
     if (!manage || !mergePick) return
     const other = users.find((u) => u.id === Number(mergePick))
-    if (
-      !other ||
-      !window.confirm(
-        `Merge account '${loginLabel(other)}' into '${loginLabel(manage)}'?\n\n` +
-          `'${loginLabel(manage)}' keeps both sign-in methods and the more ` +
-          `privileged role; '${loginLabel(other)}' is deleted.`,
+    if (!other) return
+    const otherPerson = other.person_id ? people.find((p) => p.id === other.person_id) : undefined
+    const lines = [
+      `Merge account '${loginLabel(other)}' into '${loginLabel(manage)}'?`,
+      `'${loginLabel(manage)}' keeps both sign-in methods and the more ` +
+        `privileged role; '${loginLabel(other)}' is deleted.`,
+    ]
+    // Two different people: the unapproved one is the duplicate an ORCID
+    // sign-in provisioned and goes with the merge (the backend refuses when
+    // neither, or both, is unapproved).
+    if (linkedPerson && otherPerson && linkedPerson.id !== otherPerson.id) {
+      const dup = [linkedPerson, otherPerson].find((p) =>
+        ['pending', 'rejected'].includes(p.status),
       )
-    )
-      return
+      if (dup)
+        lines.push(
+          `The ${dup.status} record '${personLabel(dup)}' is deleted as a duplicate; the ` +
+            'merged login is linked to the other person. This cannot be undone.',
+        )
+    }
+    if (!window.confirm(lines.join('\n\n'))) return
     try {
       await api.post(`/auth/users/${manage.id}/merge/${other.id}`)
       notifications.show({ message: 'Accounts merged' })
@@ -334,7 +375,10 @@ export default function AdminPage() {
         <Stack gap="sm">
           <Select
             label="Linked person"
-            description="Connects this login to a directory record; the account can then edit that profile."
+            description={
+              'Connects this login to a directory record; the account can then edit that profile.' +
+              (manage?.orcid ? " The record takes the login's ORCID iD." : '')
+            }
             placeholder="Pick a person…"
             searchable
             data={people.map((p) => ({
@@ -344,12 +388,19 @@ export default function AdminPage() {
             value={personPick}
             onChange={setPersonPick}
           />
-          <Group gap="xs">
-            <Button
+          {removablePerson && relinking && (
+            <Checkbox
               size="xs"
-              onClick={linkPerson}
-              disabled={!personPick || Number(personPick) === manage?.person_id}
-            >
+              label={
+                `Also delete the ${removablePerson.status} record ` +
+                `'${personLabel(removablePerson)}' now linked to this login (a duplicate)`
+              }
+              checked={replacePerson}
+              onChange={(e) => setReplacePerson(e.currentTarget.checked)}
+            />
+          )}
+          <Group gap="xs">
+            <Button size="xs" onClick={linkPerson} disabled={!relinking}>
               Link person
             </Button>
             {manage?.person_id != null && (
@@ -357,12 +408,7 @@ export default function AdminPage() {
                 size="xs"
                 variant="light"
                 onClick={unlinkPerson}
-                disabled={manage.role === 'member'}
-                title={
-                  manage.role === 'member'
-                    ? 'Member accounts need a linked person — change the role first.'
-                    : 'Detach this login from the person record; both are kept.'
-                }
+                title="Detach this login from the person record; both are kept."
               >
                 Unlink person
               </Button>
@@ -372,9 +418,9 @@ export default function AdminPage() {
             <>
               <Text size="xs" c="dimmed">
                 The linked person is an unapproved ({removablePerson.status}) registration —
-                usually created by the first ORCID sign-in. To keep this login as an office or
-                admin account without a collaboration membership, remove that record.
-                {manage?.role === 'member' && ' Give the account a role other than member first.'}
+                usually created by the first ORCID sign-in. If it duplicates an existing directory
+                record, pick that record above and link it. To keep this login as an office or
+                admin account without a collaboration membership, remove the record instead.
               </Text>
               <Button
                 w="fit-content"
@@ -382,7 +428,6 @@ export default function AdminPage() {
                 color="red"
                 variant="light"
                 onClick={removePerson}
-                disabled={manage?.role === 'member'}
               >
                 Remove person record
               </Button>
@@ -391,7 +436,7 @@ export default function AdminPage() {
           <Divider label="Merge accounts" />
           <Select
             label="Merge another account into this one"
-            description="For one human with two logins (typically local + ORCID). This account keeps both sign-in methods; the other is deleted."
+            description="For one human with two logins (typically local + ORCID). This account keeps both sign-in methods; the other is deleted. If one login is linked to an unapproved duplicate registration, that record goes too."
             placeholder="Pick the account to absorb…"
             searchable
             data={users
