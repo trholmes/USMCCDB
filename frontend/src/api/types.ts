@@ -16,6 +16,7 @@ export interface Me {
   display_name: string | null
   permissions: string[]
   orcid_enabled: boolean
+  email_enabled: boolean
   contact_email: string
 }
 

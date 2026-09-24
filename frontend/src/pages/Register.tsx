@@ -307,6 +307,10 @@ export default function RegisterPage() {
               <Button type="submit" loading={busy}>
                 Submit registration
               </Button>
+              <Text size="xs" c="dimmed">
+                Submitting emails your registration to the collaboration office and your
+                institution's administrative contact for approval.
+              </Text>
             </Stack>
           </form>
         </Stack>
