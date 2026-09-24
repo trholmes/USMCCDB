@@ -35,6 +35,7 @@ import PersonAvatar from '../components/PersonAvatar'
 import RoleDetailInput from '../components/RoleDetailInput'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { convenerChangeEmails, useEmailConfirm } from '../emailWarnings'
 import {
   CAREER_STAGES,
   careerStageLabel,
@@ -88,6 +89,7 @@ export default function PersonPage() {
   const [voting, setVoting] = useState(false)
   const [researchAreas, setResearchAreas] = useState<string[]>([])
   const { me, isOffice, canManageWGs } = useSession()
+  const confirmEmail = useEmailConfirm()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
 
@@ -323,8 +325,19 @@ export default function PersonPage() {
   }
 
   // Single path for all status changes (office header select and the
-  // self-service card); returns whether the change was accepted.
+  // self-service card); returns whether the change was accepted. Someone
+  // else's change mails the person (a member's own change tells nobody).
   const postStatus = async (status: string, effectiveDate?: string) => {
+    if (me?.person_id !== person.id) {
+      const kind =
+        person.status === 'pending' && status === 'active'
+          ? 'registration_approved'
+          : person.status === 'pending' && status === 'rejected'
+            ? 'registration_rejected'
+            : 'membership_status_changed'
+      if (!confirmEmail(`Set ${person.given_name} ${person.family_name}'s status to ${status}?`, kind))
+        return false
+    }
     try {
       await api.post(`/people/${person.id}/status`, {
         status,
@@ -458,6 +471,11 @@ export default function PersonPage() {
 
   const addRole = async () => {
     if (!roleType) return
+    if (
+      convenerChangeEmails({ role: roleType, end_date: null }, 'add') &&
+      !confirmEmail(`Add ${person.given_name} ${person.family_name} as convener?`, 'convener_changed')
+    )
+      return
     setRoleBusy(true)
     try {
       await api.post('/collab-roles', {
@@ -482,9 +500,11 @@ export default function PersonPage() {
     }
   }
 
-  const endRole = async (roleId: number) => {
+  const endRole = async (r: CollabRole) => {
+    if (convenerChangeEmails(r, 'end') && !confirmEmail('End this convener term today?', 'convener_changed'))
+      return
     try {
-      await api.patch(`/collab-roles/${roleId}`, { end_date: today() })
+      await api.patch(`/collab-roles/${r.id}`, { end_date: today() })
       notifications.show({ message: 'Role ended today' })
       loadRoles()
     } catch (err: any) {
@@ -492,10 +512,13 @@ export default function PersonPage() {
     }
   }
 
-  const deleteRole = async (roleId: number) => {
-    if (!window.confirm('Delete this role? This removes it from the leadership history.')) return
+  const deleteRole = async (r: CollabRole) => {
+    const question = 'Delete this role? This removes it from the leadership history.'
+    if (convenerChangeEmails(r, 'delete')) {
+      if (!confirmEmail(question, 'convener_changed', { always: true })) return
+    } else if (!window.confirm(question)) return
     try {
-      await api.delete(`/collab-roles/${roleId}`)
+      await api.delete(`/collab-roles/${r.id}`)
       notifications.show({ message: 'Role deleted' })
       loadRoles()
     } catch (err: any) {
@@ -510,6 +533,11 @@ export default function PersonPage() {
 
   const saveRoleEdit = async () => {
     if (!roleEdit) return
+    if (
+      convenerChangeEmails(roleEdit, { end_date: roleForm.end_date || null }) &&
+      !confirmEmail('Save these dates? The convener term ends with them.', 'convener_changed')
+    )
+      return
     try {
       await api.patch(`/collab-roles/${roleEdit.id}`, {
         detail: roleForm.detail.trim() || null,
@@ -678,6 +706,7 @@ export default function PersonPage() {
             <Select
               placeholder="Change status…"
               data={['pending', 'active', 'inactive', 'alumni', 'rejected']}
+              value={null}
               onChange={(v) => v && postStatus(v)}
               w={160}
             />
@@ -1155,7 +1184,7 @@ export default function PersonPage() {
                         {canEditRole(r.role) && (
                           <Group gap="xs" justify="flex-end" wrap="nowrap">
                             {!r.end_date && (
-                              <Button size="compact-xs" variant="light" onClick={() => endRole(r.id)}>
+                              <Button size="compact-xs" variant="light" onClick={() => endRole(r)}>
                                 End today
                               </Button>
                             )}
@@ -1170,7 +1199,7 @@ export default function PersonPage() {
                               size="compact-xs"
                               variant="subtle"
                               color="red"
-                              onClick={() => deleteRole(r.id)}
+                              onClick={() => deleteRole(r)}
                             >
                               Delete
                             </Button>

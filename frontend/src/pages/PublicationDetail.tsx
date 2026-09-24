@@ -22,6 +22,7 @@ import { api, exportUrl } from '../api/client'
 import type { AuthorList, PersonSummary, Publication, PubPerson, WorkingGroup } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { useEmailConfirm } from '../emailWarnings'
 import { today } from '../dates'
 
 const STATUSES = ['in_progress', 'collab_review', 'submitted', 'published']
@@ -65,6 +66,7 @@ export default function PublicationDetailPage() {
     abstract: '',
   })
   const { me, canManagePubs } = useSession()
+  const confirmEmail = useEmailConfirm()
 
   const load = useCallback(() => {
     api
@@ -99,6 +101,13 @@ export default function PublicationDetailPage() {
 
   const changeStatus = async (status: string | null) => {
     if (!status) return
+    if (
+      !confirmEmail(
+        `Set the status to ${status}?`,
+        status === 'collab_review' ? 'publication_review_requested' : 'publication_status_changed',
+      )
+    )
+      return
     try {
       await api.post(`/publications/${pub.id}/status`, { status })
       load()
@@ -109,9 +118,10 @@ export default function PublicationDetailPage() {
 
   const requestReview = async () => {
     if (
-      !window.confirm(
-        'Request collaboration review? This notifies the office, which will assign readers.',
-      )
+      !confirmEmail('Request collaboration review?', 'publication_review_requested', {
+        extra: 'The office then assigns readers.',
+        always: true,
+      })
     )
       return
     try {
@@ -126,7 +136,13 @@ export default function PublicationDetailPage() {
   }
 
   const revokeReview = async () => {
-    if (!window.confirm('Revoke the collaboration review request and move back to in progress?'))
+    if (
+      !confirmEmail(
+        'Revoke the collaboration review request and move back to in progress?',
+        'publication_status_changed',
+        { always: true },
+      )
+    )
       return
     try {
       await api.post(`/publications/${pub.id}/status`, { status: 'in_progress' })
@@ -204,6 +220,14 @@ export default function PublicationDetailPage() {
 
   const addPeople = async () => {
     if (personPicks.length === 0 || !rolePick || needsContribution) return
+    if (
+      rolePick === 'reviewer' &&
+      !confirmEmail(
+        `Add ${personPicks.length === 1 ? 'this reviewer' : `these ${personPicks.length} reviewers`}?`,
+        'publication_reviewer_assigned',
+      )
+    )
+      return
     try {
       const added = await api.post<PubPerson[]>(`/publications/${pub.id}/people/bulk`, {
         person_ids: personPicks.map(Number),
@@ -297,7 +321,7 @@ export default function PublicationDetailPage() {
             </Button>
           )}
           {canManagePubs && (
-            <Select placeholder="Change status…" data={STATUSES} onChange={changeStatus} w={{ base: '100%', xs: 170 }} />
+            <Select placeholder="Change status…" data={STATUSES} value={null} onChange={changeStatus} w={{ base: "100%", xs: 170 }} />
           )}
         </Group>
       </Group>

@@ -107,10 +107,17 @@ itself, so the database just has to exist.
   `SELF_EDITABLE` fields on their own profile and set only `SELF_SETTABLE_STATUSES`;
   moderation states (`pending`/`rejected`) are decided by the office — or, for
   pending registrations, by an active `admin_contact` of the person's
-  institution. A member-role login whose person is `pending`/`rejected` gets
-  **no API access** (`membership_block_reason` in `app/security.py`) — ORCID
-  self-registration must not grant member-level access before approval; a
-  registration submission emails everyone who can approve it. A person holding
+  institution. A member-role login whose person is `pending`/`rejected` — or that has no
+  person at all — gets **no API access** (`membership_block_reason` in
+  `app/security.py`) — ORCID self-registration must not grant member-level
+  access before approval; a registration submission emails everyone who can
+  approve it. Because the gate is there, an admin may unlink or remove a
+  login's unapproved person whatever its role. A duplicate registration
+  (an ORCID sign-in whose directory record carried a mistyped iD) is fixed
+  from Admin → Accounts: link the login to the real record with
+  `replace_person`, or merge the two logins — the duplicate is deleted and
+  the record takes the login's authenticated ORCID iD (`_link_person`,
+  `_carry_orcid`, `merge_users` in `app/routers/auth.py`). A person holding
   an active `admin_contact` collab role (Administrative Institutional Contact,
   institution-scoped) may also edit the `ADMIN_CONTACT_EDITABLE` fields of
   people currently at their institution. Voting membership
@@ -122,7 +129,9 @@ itself, so the database just has to exist.
 - Notification mail is composed in-request by `app/services/notifications.py`
   (audience helpers → `Message`) and queued with `notifications.queue`; every
   send is recorded in `email_log` (Admin → Email). Each kind is catalogued in
-  `docs/NOTIFICATIONS.md`. `ADMIN_EMAIL` is the database-admin listserv;
+  `docs/NOTIFICATIONS.md`. Every UI action that triggers one confirms first
+  via `useEmailConfirm` (`frontend/src/emailWarnings.ts`, recipients mirrored
+  from the catalogue) — a new notification needs a prompt at its trigger. `ADMIN_EMAIL` is the database-admin listserv;
   `CONTACT_EMAIL` is the address members see.
 - API tests live in `backend/tests/test_api.py` and exercise the real HTTP
   API via `TestClient` (module-scoped, tables dropped/recreated per run).

@@ -357,9 +357,11 @@ def orcid_link_conflict(db, existing: Person, created: Person, orcid_id: str) ->
     lines += [
         "",
         "The new registration stays pending with no access. If the sign-in "
-        "really is the person on the existing record, fix that record's "
-        "login (or remove the stale iD) and reject the new registration; "
-        "if not, the existing record is carrying someone else's ORCID iD.",
+        "really is the person on the existing record, open Admin → Accounts, "
+        "manage the new ORCID login and link it to the existing record (or "
+        "merge it into that record's login): the pending duplicate is deleted "
+        "and the record takes the authenticated ORCID iD. If not, the existing "
+        "record is carrying someone else's ORCID iD.",
     ]
     return Message(
         to,

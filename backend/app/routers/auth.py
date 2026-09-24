@@ -132,6 +132,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) ->
         display_name=person.display_name if person else user.username,
         permissions=permissions,
         orcid_enabled=settings.orcid_enabled,
+        email_enabled=settings.email_enabled,
         contact_email=settings.contact_email,
     )
 
@@ -158,6 +159,7 @@ def auth_config() -> dict:
     settings = get_settings()
     return {
         "orcid_enabled": settings.orcid_enabled,
+        "email_enabled": settings.email_enabled,
         "contact_email": settings.contact_email,
     }
 
@@ -177,6 +179,59 @@ def _check_person_free(db: Session, person_id: int, except_user_id: int | None =
             "That person is already linked to another account — merge the "
             "accounts or unlink the person there first",
         )
+
+
+def _is_unapproved(person: Person | None) -> bool:
+    return person is not None and person.status in (MemberStatus.pending, MemberStatus.rejected)
+
+
+def _drop_unapproved_person(db: Session, person: Person) -> None:
+    """Delete an unapproved (pending/rejected) registration — typically the
+    duplicate an ORCID sign-in provisions when the directory record it
+    belongs to carries a different iD. Approved members carry history that
+    must not vanish with a click. Flushed so the record's unique values
+    (email, ORCID iD) are free for whatever the caller does next."""
+    if not _is_unapproved(person):
+        raise HTTPException(
+            409, "Only an unapproved (pending or rejected) registration can be removed"
+        )
+    db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
+    db.flush()
+
+
+def _carry_orcid(db: Session, user: User, person: Person) -> None:
+    """A login's ORCID iD was proven by an OAuth round trip, so the person it
+    is linked to carries that iD: linking corrects a mistyped or stale iD
+    on the directory record (an import typo, issue #97 follow-up). Refused
+    when a *different* record already holds the iD — that is two people
+    claiming one iD, for the office to sort out first."""
+    if not user.orcid or person.orcid == user.orcid:
+        return
+    holder = db.execute(
+        select(Person).where(Person.orcid == user.orcid, Person.id != person.id)
+    ).scalar_one_or_none()
+    if holder is not None:
+        raise HTTPException(
+            409,
+            f"The login's ORCID iD {user.orcid} is on another directory record "
+            f"({holder.display_name}) — remove it there first",
+        )
+    person.orcid = user.orcid
+
+
+def _link_person(db: Session, user: User, person: Person, *, replace_person: bool) -> None:
+    """Point a login at a person record. With replace_person, the login's
+    current person (an unapproved duplicate) is deleted first so its ORCID
+    iD and email are free to move over."""
+    if user.person_id == person.id:
+        return
+    _check_person_free(db, person.id, except_user_id=user.id)
+    if replace_person and user.person_id is not None:
+        current = db.get(Person, user.person_id)
+        if current is not None:
+            _drop_unapproved_person(db, current)
+    user.person_id = person.id
+    _carry_orcid(db, user, person)
 
 
 @router.get("/users", dependencies=[Depends(require_admin)])
@@ -227,23 +282,17 @@ def update_user(
     if body.password is not None:
         user.password_hash = hash_password(body.password)
     # For person_id an explicit null means "unlink" — model_fields_set tells
-    # it apart from the field simply being omitted.
+    # it apart from the field simply being omitted. A member-role login left
+    # without a person gets no access (membership_block_reason), so unlinking
+    # never opens the approval gate.
     if "person_id" in body.model_fields_set:
         if body.person_id is None:
-            # Same gate as remove_user_person: a member-role login without a
-            # person slips past the membership-approval gate
-            # (membership_block_reason). user.role already reflects a role
-            # sent in this same request.
-            if user.role == UserRole.member:
-                raise HTTPException(
-                    400, "Give the account a role other than member before unlinking its person"
-                )
             user.person_id = None
         else:
-            if db.get(Person, body.person_id) is None:
+            person = db.get(Person, body.person_id)
+            if person is None:
                 raise HTTPException(404, "person_id not found")
-            _check_person_free(db, body.person_id, except_user_id=user.id)
-            user.person_id = body.person_id
+            _link_person(db, user, person, replace_person=body.replace_person)
     db.commit()
     db.refresh(user)
     return UserOut.model_validate(user)
@@ -259,7 +308,13 @@ def merge_users(
     """Merge two accounts belonging to the same human — typically a local
     username account and an ORCID account (issue #97). The kept account
     absorbs the other's credentials (username/password, ORCID iD), person
-    link, and the more privileged role; the other account is deleted."""
+    link, and the more privileged role; the other account is deleted.
+
+    When the two logins point at different people and exactly one of them
+    is an unapproved registration, that record is the duplicate an ORCID
+    sign-in provisioned (the directory record carried a mistyped iD, or its
+    login could not take the link): it is deleted and the approved person
+    kept, whose record then takes the login's authenticated ORCID iD."""
     if keep_id == other_id:
         raise HTTPException(400, "Pick two different accounts")
     if other_id == actor.id:
@@ -272,22 +327,36 @@ def merge_users(
         raise HTTPException(409, "Both accounts have usernames — these are two local accounts")
     if keep.orcid and other.orcid:
         raise HTTPException(409, "Both accounts have ORCID iDs — these are two ORCID accounts")
+    person_id = keep.person_id or other.person_id
+    duplicate: Person | None = None
     if keep.person_id and other.person_id and keep.person_id != other.person_id:
-        raise HTTPException(
-            409, "Accounts are linked to different people — fix the person links first"
-        )
+        keep_person = db.get(Person, keep.person_id)
+        other_person = db.get(Person, other.person_id)
+        if _is_unapproved(other_person) and not _is_unapproved(keep_person):
+            duplicate, person_id = other_person, keep.person_id
+        elif _is_unapproved(keep_person) and not _is_unapproved(other_person):
+            duplicate, person_id = keep_person, other.person_id
+        else:
+            raise HTTPException(
+                409,
+                "Accounts are linked to different people, neither an unapproved "
+                "registration — fix the person links first",
+            )
     username = keep.username or other.username
     password_hash = keep.password_hash or other.password_hash
     orcid = keep.orcid or other.orcid
-    person_id = keep.person_id or other.person_id
     role = keep.role if ROLE_RANK[keep.role] >= ROLE_RANK[other.role] else other.role
     db.delete(other)
+    if duplicate is not None:
+        db.delete(duplicate)  # frees its ORCID iD for the kept person
     db.flush()  # release the unique username/orcid/person_id before reassigning
     keep.username = username
     keep.password_hash = password_hash
     keep.orcid = orcid
     keep.person_id = person_id
     keep.role = role
+    if person_id is not None:
+        _carry_orcid(db, keep, db.get(Person, person_id))
     db.commit()
     db.refresh(keep)
     return UserOut.model_validate(keep)
@@ -301,28 +370,22 @@ def remove_user_person(
 ) -> UserOut:
     """Delete the unapproved person record linked to a login, keeping the
     login. For someone who signed in with ORCID (which provisions a pending
-    registration) but needs only an office/admin account, not a membership.
+    registration) but needs only an office/admin account, not a membership —
+    or whose registration duplicates a directory record the login should be
+    linked to instead (PATCH person_id with replace_person does both at once).
 
     Only pending/rejected records can go this way: approved members carry
-    history that must not vanish with a click. And the account must hold a
-    privileged role first — a member-role login without a person would slip
-    past the membership-approval gate (membership_block_reason)."""
+    history that must not vanish with a click. A member-role login left
+    without a person gets no access (membership_block_reason) until it is
+    linked to an approved member."""
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(404, "User not found")
     if user.person_id is None:
         raise HTTPException(400, "This account has no linked person")
-    if user.role == UserRole.member:
-        raise HTTPException(
-            400, "Give the account a role other than member before removing its person"
-        )
     person = db.get(Person, user.person_id)
     if person is not None:
-        if person.status not in (MemberStatus.pending, MemberStatus.rejected):
-            raise HTTPException(
-                409, "Only an unapproved (pending or rejected) registration can be removed"
-            )
-        db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
+        _drop_unapproved_person(db, person)
     user.person_id = None
     db.commit()
     db.refresh(user)
@@ -527,7 +590,9 @@ async def orcid_callback(
     # registration, which keeps one solely so the registration form can
     # complete its own placeholder record (everything else is gated by
     # membership_block_reason in get_current_user).
-    if person is not None and user.role == UserRole.member and not needs_registration:
+    if user.role == UserRole.member and not needs_registration:
+        if person is None:
+            return bounce("/login?error=account_unlinked")
         if person.status == MemberStatus.pending:
             return bounce("/login?error=membership_pending")
         if person.status == MemberStatus.rejected:

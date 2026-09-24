@@ -21,9 +21,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { PageCount, PaginationBar, usePagination } from '../components/pagination'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
-import type { EventItem, PersonSummary, Talk } from '../api/types'
+import type { EventItem, Nomination, PersonSummary, Talk } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
+import { useEmailConfirm } from '../emailWarnings'
 import { TALK_TYPES } from '../constants'
 import { today } from '../dates'
 
@@ -63,6 +64,7 @@ export default function TalksPage() {
   const [typeFilter, setTypeFilter] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<string[]>([])
   const { me, canManageTalks } = useSession()
+  const confirmEmail = useEmailConfirm()
   const navigate = useNavigate()
 
   const load = useCallback(() => {
@@ -149,6 +151,16 @@ export default function TalksPage() {
 
   const saveEdit = async () => {
     if (!editing) return
+    // Setting a (new) speaker directly on the talk mails them — unless it is
+    // the editor assigning themself.
+    const newSpeaker = form.speaker_person_id ? Number(form.speaker_person_id) : null
+    if (
+      newSpeaker !== null &&
+      newSpeaker !== editing.speaker_person_id &&
+      newSpeaker !== me?.person_id &&
+      !confirmEmail('Save this talk with the new speaker?', 'speaker_assigned')
+    )
+      return
     try {
       await api.patch(`/talks/${editing.id}`, {
         title: form.title,
@@ -221,6 +233,7 @@ export default function TalksPage() {
   }
 
   const nominate = async (talk: Talk, personId: number) => {
+    if (!confirmEmail(`Submit this nomination for "${talk.title}"?`, 'nomination_submitted')) return
     try {
       await api.post(`/talks/${talk.id}/nominations`, { person_id: personId })
       notifications.show({ message: 'Nomination submitted' })
@@ -231,9 +244,16 @@ export default function TalksPage() {
     }
   }
 
-  const setNomStatus = async (nomId: number, status: string) => {
+  const setNomStatus = async (n: Nomination, status: string) => {
+    const name = `${n.person.given_name} ${n.person.family_name}`
+    if (
+      status === 'assigned' &&
+      n.person.id !== me?.person_id &&
+      !confirmEmail(`Assign ${name} as the speaker?`, 'speaker_assigned')
+    )
+      return
     try {
-      await api.patch(`/nominations/${nomId}`, { status })
+      await api.patch(`/nominations/${n.id}`, { status })
       load()
       closeDetail()
     } catch (err: any) {
@@ -419,7 +439,7 @@ export default function TalksPage() {
                   <Group gap="xs">
                     <StatusBadge status={n.status} />
                     {canManageTalks && n.status !== 'assigned' && (
-                      <Button size="compact-xs" onClick={() => setNomStatus(n.id, 'assigned')}>
+                      <Button size="compact-xs" onClick={() => setNomStatus(n, 'assigned')}>
                         Assign
                       </Button>
                     )}
@@ -431,7 +451,7 @@ export default function TalksPage() {
                           size="compact-xs"
                           variant="subtle"
                           color="gray"
-                          onClick={() => setNomStatus(n.id, 'withdrawn')}
+                          onClick={() => setNomStatus(n, 'withdrawn')}
                         >
                           Withdraw
                         </Button>

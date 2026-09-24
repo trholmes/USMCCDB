@@ -22,6 +22,7 @@ import PersonSelect from '../components/PersonSelect'
 import RoleDetailInput from '../components/RoleDetailInput'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+import { convenerChangeEmails, useEmailConfirm } from '../emailWarnings'
 import { COLLAB_ROLES, collabRoleLabel } from '../constants'
 import { today } from '../dates'
 
@@ -130,6 +131,7 @@ export default function LeadershipPage() {
   const [roles, setRoles] = useState<CollabRole[]>([])
   const [showPast, setShowPast] = useState(false)
   const { isOffice } = useSession()
+  const confirmEmail = useEmailConfirm()
 
   // Add-role form (office only).
   const [addPerson, setAddPerson] = useState<string | null>(null)
@@ -167,6 +169,11 @@ export default function LeadershipPage() {
 
   const addRole = async () => {
     if (!addPerson || !roleType) return
+    if (
+      convenerChangeEmails({ role: roleType, end_date: null }, 'add') &&
+      !confirmEmail('Add this convener role?', 'convener_changed')
+    )
+      return
     setRoleBusy(true)
     try {
       await api.post('/collab-roles', {
@@ -193,6 +200,8 @@ export default function LeadershipPage() {
   }
 
   const endRole = async (r: CollabRole) => {
+    if (convenerChangeEmails(r, 'end') && !confirmEmail('End this convener term today?', 'convener_changed'))
+      return
     try {
       await api.patch(`/collab-roles/${r.id}`, { end_date: today() })
       notifications.show({ message: 'Role ended today' })
@@ -203,7 +212,10 @@ export default function LeadershipPage() {
   }
 
   const deleteRole = async (r: CollabRole) => {
-    if (!window.confirm('Delete this role? This removes it from the leadership history.')) return
+    const question = 'Delete this role? This removes it from the leadership history.'
+    if (convenerChangeEmails(r, 'delete')) {
+      if (!confirmEmail(question, 'convener_changed', { always: true })) return
+    } else if (!window.confirm(question)) return
     try {
       await api.delete(`/collab-roles/${r.id}`)
       notifications.show({ message: 'Role deleted' })
@@ -220,6 +232,11 @@ export default function LeadershipPage() {
 
   const saveRoleEdit = async () => {
     if (!roleEdit) return
+    if (
+      convenerChangeEmails(roleEdit, { end_date: roleForm.end_date || null }) &&
+      !confirmEmail('Save these dates? The convener term ends with them.', 'convener_changed')
+    )
+      return
     try {
       await api.patch(`/collab-roles/${roleEdit.id}`, {
         detail: roleForm.detail.trim() || null,

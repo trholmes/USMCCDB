@@ -98,14 +98,18 @@ def membership_block_reason(db: Session, user: User) -> str | None:
 
     A member-role account whose linked person is in a moderation state
     (pending/rejected) has not been approved — self-registration (ORCID or
-    the form) must not grant member-level access to the database. Accounts
-    with any other role are exempt: their access comes from the role, which
-    only an admin can assign, and someone has to be able to approve."""
-    if user.role != UserRole.member or user.person_id is None:
+    the form) must not grant member-level access to the database. The same
+    goes for a member-role account with no person at all: member access
+    comes from an approved membership, and there is none to point at (the
+    admin removed a duplicate registration, or never linked the login).
+    Accounts with any other role are exempt: their access comes from the
+    role, which only an admin can assign, and someone has to be able to
+    approve."""
+    if user.role != UserRole.member:
         return None
-    person = db.get(Person, user.person_id)
+    person = db.get(Person, user.person_id) if user.person_id is not None else None
     if person is None:
-        return None
+        return "This sign-in is not linked to a collaboration member — contact the office"
     if person.status == MemberStatus.pending:
         return "Your membership registration is awaiting approval"
     if person.status == MemberStatus.rejected:
