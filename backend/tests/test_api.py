@@ -206,6 +206,61 @@ def test_registration_confirmations(admin):
     assert member.patch(f"/api/v1/people/{pid}", json={"public_listing_consent": None}).status_code == 422
 
 
+def test_admin_deletes_person(admin):
+    """An admin may delete a record outright — pending or approved — taking a
+    member-role login with it; nobody else may, and not their own record."""
+    inst = admin.post("/api/v1/institutions", json={"name": "Del U"}).json()
+    # A pending registration with a member login (as an ORCID sign-in makes).
+    pending = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Spam", "family_name": "Bot", "email": "spam.bot@example.edu"},
+    ).json()
+    uid = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "spambot", "password": "pw-spam-1234", "role": "member",
+              "person_id": pending["id"]},
+    ).json()["id"]
+    # A member may not delete anyone.
+    member, mid = _linked_member(admin, given="Mem", family="Ber", email="mem.ber@example.edu")
+    assert member.delete(f"/api/v1/people/{pending['id']}").status_code == 403
+    assert member.delete(f"/api/v1/people/{mid}").status_code == 403
+
+    assert admin.delete(f"/api/v1/people/{pending['id']}").status_code == 204
+    assert admin.get(f"/api/v1/people/{pending['id']}").status_code == 404
+    assert all(u["id"] != uid for u in admin.get("/api/v1/auth/users").json())
+
+    # An approved member with history can be deleted after the fact too.
+    assert admin.post(
+        f"/api/v1/people/{mid}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2025-01-01"},
+    ).status_code == 201
+    assert admin.delete(f"/api/v1/people/{mid}").status_code == 204
+    assert admin.get(f"/api/v1/people/{mid}").status_code == 404
+    assert member.get("/api/v1/auth/me").status_code in (401, 403)
+
+    # An office login linked to the record is kept, just unlinked…
+    staff_pid = _active_person(admin, given="Off", family="Icer", email="off.icer@example.edu")
+    staff_uid = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "officer", "password": "pw-off-1234", "role": "office",
+              "person_id": staff_pid},
+    ).json()["id"]
+    assert admin.delete(f"/api/v1/people/{staff_pid}").status_code == 204
+    kept = [u for u in admin.get("/api/v1/auth/users").json() if u["id"] == staff_uid]
+    assert kept and kept[0]["person_id"] is None
+
+    # …and an admin cannot delete their own record.
+    me = admin.get("/api/v1/auth/me").json()
+    own = _active_person(admin, given="Ad", family="Min", email="ad.min@example.edu")
+    admin.patch(f"/api/v1/auth/users/{me['user']['id']}", json={"person_id": own})
+    assert admin.delete(f"/api/v1/people/{own}").status_code == 400
+    assert admin.get(f"/api/v1/people/{own}").status_code == 200
+    # Leave the admin login unlinked again (later tests assume it has no
+    # person record), then the record can go.
+    admin.patch(f"/api/v1/auth/users/{me['user']['id']}", json={"person_id": None})
+    assert admin.delete(f"/api/v1/people/{own}").status_code == 204
+
+
 def test_author_list_generation(admin):
     # Institution with a formal address.
     inst = admin.post(

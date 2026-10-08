@@ -28,6 +28,7 @@ from app.models import (
     MemberStatus,
     Person,
     User,
+    UserRole,
     WorkingGroupMember,
 )
 from app.models.membership import RESEARCH_AREAS
@@ -60,6 +61,7 @@ from app.security import (
     get_current_user,
     is_admin_contact_for,
     is_office,
+    require_admin,
     require_office,
 )
 from app.services import notifications
@@ -776,6 +778,36 @@ def _decode_registration_photo(data_url: str) -> bytes:
     if not _photo_signature_ok(content_type, content[:16]):
         raise HTTPException(422, "Photo content does not match the declared image type")
     return content
+
+
+@router.delete("/{person_id}", status_code=204)
+def delete_person(
+    person_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> None:
+    """Admin-only: delete a person record outright — a spam or duplicate
+    registration, or a record that should not exist at all — rather than
+    rejecting it. Works at any status; the UI confirms first.
+
+    Everything owned by the record goes with it (affiliations, author
+    periods, membership events, working-group memberships, collaboration
+    positions, publication/talk nominations, the photo). Talks they gave and
+    emails sent to them keep a null reference. A member-role login linked to
+    the record existed only for this membership and is deleted too; an
+    office/admin/leadership login is kept and merely unlinked."""
+    person = _get_person(db, person_id)
+    if actor.person_id == person_id:
+        raise HTTPException(400, "You cannot delete your own record")
+    login = db.execute(select(User).where(User.person_id == person_id)).scalar_one_or_none()
+    if login is not None and login.role == UserRole.member:
+        db.delete(login)
+    if person.photo_file:
+        path = Path(get_settings().photos_dir) / person.photo_file
+        if path.is_file():
+            path.unlink()
+    db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
+    db.commit()
 
 
 @router.delete("/{person_id}/photo", status_code=204)
