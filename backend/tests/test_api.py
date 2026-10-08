@@ -151,6 +151,61 @@ def test_register_and_approve_flow(admin):
     assert person["middle_name"] == "R."
 
 
+def test_registration_confirmations(admin):
+    """Students must confirm advisor approval; everyone is asked whether their
+    name and photo may go on the public people page, and may change that
+    answer later on their own profile."""
+    base = {
+        "given_name": "Stu",
+        "family_name": "Dent",
+        "email": "stu.dent@example.edu",
+        "career_stage": "grad",
+    }
+    # A student registration without the advisor confirmation is refused…
+    r = admin.post("/api/v1/people/register", json=base)
+    assert r.status_code == 422
+    assert "advisor" in r.json()["detail"].lower()
+    assert all(p["email"] != base["email"] for p in admin.get("/api/v1/people").json())
+    # …and goes through once confirmed; both answers are recorded.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={**base, "advisor_approved": True, "public_listing_consent": True},
+    )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    person = admin.get(f"/api/v1/people/{pid}").json()
+    assert person["advisor_approved"] is True
+    assert person["public_listing_consent"] is True
+
+    # Non-students need no advisor confirmation; consent defaults to no.
+    r = admin.post(
+        "/api/v1/people/register",
+        json={**base, "email": "post.doc@example.edu", "career_stage": "postdoc"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "pending"
+    other = admin.get(f"/api/v1/people/{r.json()['id']}").json()
+    assert other["advisor_approved"] is False
+    assert other["public_listing_consent"] is False
+
+    # The member may withdraw (or give) the listing consent on their profile,
+    # but the advisor confirmation is not theirs to edit afterwards.
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    admin.post(
+        "/api/v1/auth/users",
+        json={"username": "stu", "password": "pw-stu-1234", "role": "member", "person_id": pid},
+    )
+    member = TestClient(app)
+    assert member.post(
+        "/api/v1/auth/login", json={"username": "stu", "password": "pw-stu-1234"}
+    ).status_code == 200
+    r = member.patch(f"/api/v1/people/{pid}", json={"public_listing_consent": False})
+    assert r.status_code == 200, r.text
+    assert r.json()["public_listing_consent"] is False
+    assert member.patch(f"/api/v1/people/{pid}", json={"advisor_approved": False}).status_code == 403
+    assert member.patch(f"/api/v1/people/{pid}", json={"public_listing_consent": None}).status_code == 422
+
+
 def test_author_list_generation(admin):
     # Institution with a formal address.
     inst = admin.post(
@@ -317,6 +372,8 @@ def _linked_member(admin, *, given, family, email, career_stage="postdoc"):
             "family_name": family,
             "email": email,
             "career_stage": career_stage,
+            # Student registrations require the advisor confirmation.
+            "advisor_approved": career_stage in ("grad", "undergrad"),
         },
     ).json()
     admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
@@ -3080,6 +3137,7 @@ def test_admin_contact_approves_pending_registration(admin, monkeypatch):
             "email": "new.comer@example.edu",
             "career_stage": "grad",
             "institution_id": inst["id"],
+            "advisor_approved": True,
         },
     )
     assert r.status_code == 201, r.text

@@ -87,6 +87,7 @@ export default function PersonPage() {
   const [form, setForm] = useState<Record<string, string>>({})
   const [usmccPercent, setUsmccPercent] = useState<number | string>('')
   const [voting, setVoting] = useState(false)
+  const [publicListing, setPublicListing] = useState(false)
   const [researchAreas, setResearchAreas] = useState<string[]>([])
   const { me, isOffice, canManageWGs } = useSession()
   const confirmEmail = useEmailConfirm()
@@ -250,6 +251,7 @@ export default function PersonPage() {
     setUsmccPercent(person.usmcc_percent ?? '')
     setResearchAreas(splitList(person.research_areas))
     setVoting(person.is_voting)
+    setPublicListing(person.public_listing_consent)
     setEditing(true)
   }
 
@@ -299,6 +301,7 @@ export default function PersonPage() {
       joinList(splitList(person.research_areas)),
     )
     changed('is_voting', voting, person.is_voting)
+    changed('public_listing_consent', publicListing, person.public_listing_consent)
     // Canonical comma-separated form, like research_areas above.
     changed(
       'grant_number',
@@ -795,6 +798,12 @@ export default function PersonPage() {
                   : undefined
               }
             />
+            <Checkbox
+              label="Name and photo may be listed on the public muoncollider.us/people page"
+              checked={publicListing}
+              disabled={!canEditFull}
+              onChange={(e) => setPublicListing(e.currentTarget.checked)}
+            />
             <Group align="flex-end" gap="xs">
               <TagsInput
                 label="Grant numbers"
@@ -867,6 +876,18 @@ export default function PersonPage() {
             {person.usmcc_percent != null && (
               <Text size="sm">
                 <b>Research time on µC:</b> {person.usmcc_percent}%
+              </Text>
+            )}
+            <Text size="sm">
+              <b>Public people page:</b>{' '}
+              {person.public_listing_consent
+                ? 'name and photo may be listed on muoncollider.us/people'
+                : 'not listed on muoncollider.us/people'}
+            </Text>
+            {STUDENT_STAGES.includes(person.career_stage) && (
+              <Text size="sm">
+                <b>Advisor approval:</b>{' '}
+                {person.advisor_approved ? 'confirmed at registration' : 'not confirmed'}
               </Text>
             )}
             {person.acknowledgement_text && (

@@ -136,6 +136,15 @@ class Person(TimestampedBase):
     # Voting member per the USMCC charter (PhD-holding physicist at a US
     # institution, actively contributing).
     is_voting: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # A student registrant confirmed that their advisor approved them
+    # joining the USMCC (required on the registration form for grad and
+    # undergrad students; recorded for the office, not re-checked later).
+    advisor_approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Permission to list the member's name and photo on the public
+    # muoncollider.us/people page. Asked at registration, self-editable.
+    public_listing_consent: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     # Comma-separated subset of RESEARCH_AREAS (accelerator/experiment/…).
     research_areas: Mapped[str | None] = mapped_column(Text)
     # Free-form comma-separated topics the member is focused on.

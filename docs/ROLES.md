@@ -41,8 +41,9 @@ the roles below it.**
 
 - **Own profile**: edit the `SELF_EDITABLE` fields — preferred name, email,
   career stage, professional title, department, research time on µC,
-  research areas, expertise, voting flag, grant numbers, acknowledgement
-  text — and upload/remove their photo. **Not** their ORCID iD (set only by
+  research areas, expertise, voting flag, public-listing consent (name and
+  photo on muoncollider.us/people), grant numbers, acknowledgement text — and
+  upload/remove their photo. **Not** their ORCID iD (set only by
   an authenticated ORCID sign-in or the office, because the sign-in auto-link
   trusts it), names, or notes.
 - **Own status**: set it to `active`, `inactive` or `alumni`, both from and

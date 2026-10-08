@@ -153,7 +153,15 @@ export default function LoginPage() {
           </Collapse>
 
           <Text size="sm" c="dimmed">
-            Not a member yet? <Anchor href="/register">Register to join.</Anchor>
+            {/* Registering starts with an ORCID sign-in: the callback creates
+                the record (and the login) for an unknown iD and forwards to
+                the form, so the approved member can sign straight in. The
+                plain form is only the entry point when ORCID is off (people
+                without an iD can still reach /register directly). */}
+            Not a member yet?{' '}
+            <Anchor href={config?.orcid_enabled ? '/api/v1/auth/orcid/login' : '/register'}>
+              Register to join.
+            </Anchor>
             {config?.contact_email && (
               <>
                 {' '}

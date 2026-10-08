@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Autocomplete,
   Avatar,
   Button,
@@ -19,8 +20,13 @@ import { notifications } from '@mantine/notifications'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { useSession } from '../auth/SessionContext'
 import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
 import { ACCEPTED_PHOTO_TYPES, preparePhoto } from '../photos'
+
+interface AuthConfig {
+  orcid_enabled: boolean
+}
 
 interface InstitutionPublic {
   id: number
@@ -47,6 +53,11 @@ export default function RegisterPage() {
     // given; new institutions carry this declaration for office review.
     institution_is_us: null as string | null,
     is_voting: false,
+    // Students confirm their advisor approved them joining (required for
+    // grad/undergrad; the backend refuses a student registration without it).
+    advisor_approved: false,
+    // Permission to list name and photo on muoncollider.us/people.
+    public_listing_consent: false,
     research_areas: [] as string[],
   })
   // "Too uncertain to estimate" for the research-time question: an answer is
@@ -60,6 +71,9 @@ export default function RegisterPage() {
   const [insts, setInsts] = useState<InstitutionPublic[]>([])
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const { me } = useSession()
+  const [config, setConfig] = useState<AuthConfig | null>(null)
+  const fromOrcid = params.get('welcome') === 'orcid'
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
   const pickPhoto = async (file: File | null) => {
@@ -78,6 +92,7 @@ export default function RegisterPage() {
   }
 
   useEffect(() => {
+    api.get<AuthConfig>('/auth/config').then(setConfig).catch(() => setConfig(null))
     api.get<InstitutionPublic[]>('/institutions/public').then(setInsts).catch(() => setInsts([]))
   }, [])
 
@@ -121,9 +136,19 @@ export default function RegisterPage() {
       ? 'Please indicate whether this is a US institution.'
       : null
 
+  const isStudent = STUDENT_STAGES.includes(form.career_stage)
+  const advisorError =
+    isStudent && !form.advisor_approved
+      ? 'Please confirm that your advisor has approved you joining the USMCC.'
+      : null
+  // Only flag the missing confirmation once they try to submit, not the
+  // moment a student stage is picked.
+  const [attempted, setAttempted] = useState(false)
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const error = instUsError || votingError
+    setAttempted(true)
+    const error = instUsError || advisorError || votingError
     if (error) {
       notifications.show({ color: 'red', message: error })
       return
@@ -132,6 +157,9 @@ export default function RegisterPage() {
     try {
       await api.post('/people/register', {
         ...form,
+        // Only meaningful for students; drop a confirmation ticked before
+        // switching to a non-student stage.
+        advisor_approved: isStudent && form.advisor_approved,
         middle_name: form.middle_name || null,
         preferred_name: form.preferred_name || null,
         usmcc_percent:
@@ -174,9 +202,21 @@ export default function RegisterPage() {
         <Stack>
           <div>
             <Title order={3}>Join USMCC</Title>
-            {params.get('welcome') === 'orcid' && (
+            {fromOrcid && (
               <Text c="green" size="sm">
                 Your ORCID sign-in worked — please complete your membership registration.
+              </Text>
+            )}
+            {/* Someone who reached the form directly (not via the ORCID
+                callback) gets a record with no login; approval then needs
+                the office to link their ORCID sign-in by hand. Point them at
+                the sign-in first so the record is created already linked. */}
+            {!fromOrcid && !me && config?.orcid_enabled && (
+              <Text c="dimmed" size="sm">
+                Have an ORCID iD?{' '}
+                <Anchor href="/api/v1/auth/orcid/login">Sign in with ORCID first</Anchor> so your
+                membership record is linked to your login from the start. Use this form only if
+                you have no ORCID iD.
               </Text>
             )}
           </div>
@@ -218,6 +258,16 @@ export default function RegisterPage() {
                 value={form.career_stage}
                 onChange={(v) => set('career_stage', v || 'other')}
               />
+              {isStudent && (
+                <Checkbox
+                  mt={-4}
+                  label="My advisor has approved my joining the USMCC"
+                  description="Students join the collaboration with their advisor's approval."
+                  checked={form.advisor_approved}
+                  onChange={(e) => set('advisor_approved', e.currentTarget.checked)}
+                  error={attempted ? advisorError : undefined}
+                />
+              )}
               <Autocomplete
                 label="Primary institution"
                 description="Start typing and pick your institution; if it isn't listed, enter its full name."
@@ -279,6 +329,12 @@ export default function RegisterPage() {
                   style={{ flex: 1 }}
                 />
               </Group>
+              <Checkbox
+                label="My name and photo may be listed on the public muoncollider.us/people page"
+                description="You can change this later on your profile."
+                checked={form.public_listing_consent}
+                onChange={(e) => set('public_listing_consent', e.currentTarget.checked)}
+              />
               <div>
                 <Text size="sm" fw={700}>
                   Register as a voting member

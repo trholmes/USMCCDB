@@ -126,6 +126,8 @@ export interface Person extends PersonSummary {
   professional_title: string | null
   department: string | null
   usmcc_percent: number | null
+  advisor_approved: boolean
+  public_listing_consent: boolean
   expertise: string | null
   notes: string | null
   grant_number: string | null
