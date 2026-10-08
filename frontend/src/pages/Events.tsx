@@ -116,7 +116,7 @@ export default function EventsPage() {
             <SortableTh label="Location" k="location" sort={sort} toggle={toggle} />
             <SortableTh label="Dates" k="dates" sort={sort} toggle={toggle} />
             <SortableTh label="Abstract deadline" k="abstract_deadline" sort={sort} toggle={toggle} />
-            <SortableTh label="Talks" k="talks" sort={sort} toggle={toggle} />
+            <SortableTh label="Presentations" k="talks" sort={sort} toggle={toggle} />
             {canManageTalks && <Table.Th />}
           </Table.Tr>
         </Table.Thead>
