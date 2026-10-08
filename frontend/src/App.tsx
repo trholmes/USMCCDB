@@ -39,7 +39,8 @@ const NAV = [
   { to: '/institutions', label: 'Institutions' },
   { to: '/working-groups', label: 'Working groups' },
   { to: '/leadership', label: 'Leadership' },
-  { to: '/events', label: 'Conferences' },
+  // Hidden from the sidebar for now; the /events route still works.
+  // { to: '/events', label: 'Conferences' },
   { to: '/talks', label: 'Talks & speakers' },
   { to: '/publications', label: 'Publications' },
   { to: '/stats', label: 'Statistics' },
@@ -121,7 +122,7 @@ export default function App() {
               </Title>
             </Link>
             <Badge variant="light" color="orange" size="sm" visibleFrom="xs">
-              alpha
+              beta
             </Badge>
             <Text c="dimmed" size="sm" visibleFrom="md">
               Collaboration Database
