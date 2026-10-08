@@ -226,6 +226,11 @@ class PersonRegistration(BaseModel):
     # institution_name (see _check_new_institution_is_us).
     institution_is_us: bool | None = None
     is_voting: bool = False
+    # Students must confirm their advisor approved them joining (checked in
+    # the register endpoint against the career stage).
+    advisor_approved: bool = False
+    # May the name and photo appear on the public muoncollider.us/people page?
+    public_listing_consent: bool = False
     research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
@@ -264,6 +269,8 @@ class PersonUpdate(BaseModel):
     department: str | None = Field(default=None, max_length=200)
     usmcc_percent: int | None = Field(default=None, ge=0, le=100)
     is_voting: bool | None = None
+    advisor_approved: bool | None = None
+    public_listing_consent: bool | None = None
     research_areas: str | None = None
     expertise: str | None = None
     notes: str | None = None
@@ -366,6 +373,8 @@ class PersonOut(PersonSummary):
     professional_title: str | None = None
     department: str | None = None
     usmcc_percent: int | None = None
+    advisor_approved: bool = False
+    public_listing_consent: bool = False
     expertise: str | None
     notes: str | None
     grant_number: str | None = None

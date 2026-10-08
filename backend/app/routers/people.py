@@ -102,6 +102,7 @@ SELF_EDITABLE = {
     "research_areas",
     "expertise",
     "is_voting",
+    "public_listing_consent",
     "grant_number",
     "acknowledgement_text",
 }
@@ -121,7 +122,15 @@ SELF_SETTABLE_STATUSES = {MemberStatus.active, MemberStatus.inactive, MemberStat
 STUDENT_STAGES = {CareerStage.undergrad, CareerStage.grad}
 # Person columns that are NOT NULL in the DB; explicit JSON nulls must be
 # rejected up front or they surface as a 500 at commit.
-NON_NULLABLE_FIELDS = {"given_name", "family_name", "email", "career_stage", "is_voting"}
+NON_NULLABLE_FIELDS = {
+    "given_name",
+    "family_name",
+    "email",
+    "career_stage",
+    "is_voting",
+    "advisor_approved",
+    "public_listing_consent",
+}
 
 
 def _voting_eligible(status: MemberStatus, career_stage: CareerStage) -> bool:
@@ -292,6 +301,15 @@ def register(
         )
         return _registration_ack()
 
+    # Students join with their advisor's blessing: the form requires the
+    # confirmation, and the API refuses a student registration without it.
+    if body.career_stage in STUDENT_STAGES and not body.advisor_approved:
+        raise HTTPException(
+            422,
+            "Students must confirm that their advisor has approved them joining "
+            "the USMCC.",
+        )
+
     # Charter voting rules are checked at registration so a registrant cannot
     # self-grant voting membership (issue #51): the question stays on the
     # form, but a "yes" that the other answers forbid is rejected so the
@@ -339,6 +357,8 @@ def register(
             usmcc_percent=body.usmcc_percent,
             status=MemberStatus.pending,
             is_voting=body.is_voting,
+            advisor_approved=body.advisor_approved,
+            public_listing_consent=body.public_listing_consent,
             research_areas=body.research_areas,
             expertise=body.expertise,
             notes=body.notes,
@@ -360,6 +380,8 @@ def register(
         person.department = body.department
         person.usmcc_percent = body.usmcc_percent
         person.is_voting = body.is_voting
+        person.advisor_approved = body.advisor_approved
+        person.public_listing_consent = body.public_listing_consent
         person.research_areas = body.research_areas
         person.expertise = body.expertise
         person.notes = body.notes
