@@ -19,7 +19,7 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, uploadFile } from '../api/client'
 import type {
   Affiliation,
@@ -89,7 +89,8 @@ export default function PersonPage() {
   const [voting, setVoting] = useState(false)
   const [publicListing, setPublicListing] = useState(false)
   const [researchAreas, setResearchAreas] = useState<string[]>([])
-  const { me, isOffice, canManageWGs } = useSession()
+  const { me, isOffice, isAdmin, canManageWGs } = useSession()
+  const navigate = useNavigate()
   const confirmEmail = useEmailConfirm()
   const fileInput = useRef<HTMLInputElement>(null)
   const [photoHover, setPhotoHover] = useState(false)
@@ -330,6 +331,28 @@ export default function PersonPage() {
   // Single path for all status changes (office header select and the
   // self-service card); returns whether the change was accepted. Someone
   // else's change mails the person (a member's own change tells nobody).
+  // Admin-only: remove the record outright instead of rejecting it — also
+  // after the fact, for approved members. Always confirmed; there is no undo.
+  const deletePerson = async () => {
+    const name = `${person.given_name} ${person.family_name}`
+    const approved = !['pending', 'rejected'].includes(person.status)
+    const lines = [
+      `Delete ${name}'s record (${person.status}) permanently?`,
+      approved
+        ? 'This is an approved member: their affiliations, author periods, membership history, working-group memberships, collaboration positions and photo are all deleted with the record. Talks they gave stay, without a speaker link. Consider setting the status to inactive or alumni instead.'
+        : 'Their registration details, photo and membership history are deleted. If they signed in with ORCID, that login is deleted too.',
+      'This cannot be undone.',
+    ]
+    if (!window.confirm(lines.join('\n\n'))) return
+    try {
+      await api.delete(`/people/${person.id}`)
+      notifications.show({ message: `${name}'s record was deleted` })
+      navigate('/directory')
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
   const postStatus = async (status: string, effectiveDate?: string) => {
     if (me?.person_id !== person.id) {
       const kind =
@@ -715,6 +738,11 @@ export default function PersonPage() {
             />
           )}
           {canEdit && !editing && <Button onClick={startEdit}>Edit profile</Button>}
+          {isAdmin && me?.person_id !== person.id && (
+            <Button variant="outline" color="red" onClick={deletePerson}>
+              Delete record
+            </Button>
+          )}
         </Group>
       </Group>
 
