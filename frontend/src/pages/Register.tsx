@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Autocomplete,
   Avatar,
   Button,
@@ -19,8 +20,13 @@ import { notifications } from '@mantine/notifications'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { useSession } from '../auth/SessionContext'
 import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
 import { ACCEPTED_PHOTO_TYPES, preparePhoto } from '../photos'
+
+interface AuthConfig {
+  orcid_enabled: boolean
+}
 
 interface InstitutionPublic {
   id: number
@@ -60,6 +66,9 @@ export default function RegisterPage() {
   const [insts, setInsts] = useState<InstitutionPublic[]>([])
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const { me } = useSession()
+  const [config, setConfig] = useState<AuthConfig | null>(null)
+  const fromOrcid = params.get('welcome') === 'orcid'
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
   const pickPhoto = async (file: File | null) => {
@@ -78,6 +87,7 @@ export default function RegisterPage() {
   }
 
   useEffect(() => {
+    api.get<AuthConfig>('/auth/config').then(setConfig).catch(() => setConfig(null))
     api.get<InstitutionPublic[]>('/institutions/public').then(setInsts).catch(() => setInsts([]))
   }, [])
 
@@ -174,9 +184,21 @@ export default function RegisterPage() {
         <Stack>
           <div>
             <Title order={3}>Join USMCC</Title>
-            {params.get('welcome') === 'orcid' && (
+            {fromOrcid && (
               <Text c="green" size="sm">
                 Your ORCID sign-in worked — please complete your membership registration.
+              </Text>
+            )}
+            {/* Someone who reached the form directly (not via the ORCID
+                callback) gets a record with no login; approval then needs
+                the office to link their ORCID sign-in by hand. Point them at
+                the sign-in first so the record is created already linked. */}
+            {!fromOrcid && !me && config?.orcid_enabled && (
+              <Text c="dimmed" size="sm">
+                Have an ORCID iD?{' '}
+                <Anchor href="/api/v1/auth/orcid/login">Sign in with ORCID first</Anchor> so your
+                membership record is linked to your login from the start. Use this form only if
+                you have no ORCID iD.
               </Text>
             )}
           </div>
