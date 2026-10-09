@@ -315,6 +315,25 @@ def is_convener_of(db: Session, user: User, working_group_id: int | None) -> boo
     return row is not None
 
 
+def admin_contact_institution_ids(db: Session, user: User) -> set[int]:
+    """Institutions where the user's person currently holds an active
+    Administrative Institutional Contact role (empty for most people)."""
+    if user.person_id is None:
+        return set()
+    today = datetime.now(UTC).date()
+    return set(
+        db.execute(
+            select(CollabRole.institution_id).where(
+                CollabRole.person_id == user.person_id,
+                CollabRole.role == CollabRoleType.admin_contact,
+                CollabRole.institution_id.isnot(None),
+                CollabRole.start_date <= today,
+                (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+            )
+        ).scalars()
+    )
+
+
 def is_admin_contact_for(db: Session, user: User, person_id: int) -> bool:
     """True if the user's person holds an active Administrative Institutional
     Contact role at the institution of person_id's current (open) primary

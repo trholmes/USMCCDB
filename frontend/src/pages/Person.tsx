@@ -737,6 +737,19 @@ export default function PersonPage() {
               w={160}
             />
           )}
+          {/* An administrative institutional contact decides pending
+              registrations at their institution (and nothing else about
+              the status) — the backend allows exactly this. */}
+          {!isOffice && isAdminContact && person.status === 'pending' && (
+            <>
+              <Button color="green" onClick={() => postStatus('active')}>
+                Approve registration
+              </Button>
+              <Button variant="outline" color="red" onClick={() => postStatus('rejected')}>
+                Reject
+              </Button>
+            </>
+          )}
           {canEdit && !editing && <Button onClick={startEdit}>Edit profile</Button>}
           {isAdmin && me?.person_id !== person.id && (
             <Button variant="outline" color="red" onClick={deletePerson}>

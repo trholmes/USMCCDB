@@ -348,6 +348,10 @@ export interface RoleSuggestionAlert {
 }
 
 export interface AdminAlerts {
+  // What the caller sees: everything (admin), membership and institutions
+  // (office), pending registrations at their institutions (admin_contact),
+  // or nothing.
+  scope: 'admin' | 'office' | 'admin_contact' | 'none'
   pending_registrations: PersonAlert[]
   unreviewed_institutions: InstitutionAlert[]
   institutions_missing_admin_contact: InstitutionAlert[]

@@ -3228,6 +3228,31 @@ def test_admin_contact_approves_pending_registration(admin, monkeypatch):
         f"/api/v1/people/{els_id}/status", json={"status": "rejected"}
     ).status_code == 403
 
+    # The contact's alerts panel lists pending registrations at their own
+    # institution only — and nothing of the admin's other categories.
+    r = registrant.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Second",
+            "family_name": "Comer",
+            "email": "second.comer@example.edu",
+            "institution_id": inst["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    second_id = admin.get("/api/v1/people", params={"q": "second.comer@example.edu"}).json()[0]["id"]
+    alerts = contact.get("/api/v1/alerts").json()
+    assert alerts["scope"] == "admin_contact"
+    assert [p["person_id"] for p in alerts["pending_registrations"]] == [second_id]
+    assert alerts["pending_registrations"][0]["detail"] == "Approve University"
+    assert alerts["total"] == 1
+    assert alerts["unreviewed_institutions"] == [] and alerts["role_suggestions"] == []
+    # Deciding it clears the alert.
+    assert contact.post(
+        f"/api/v1/people/{second_id}/status", json={"status": "rejected"}
+    ).status_code == 200
+    assert contact.get("/api/v1/alerts").json()["total"] == 0
+
 
 # --- Auth hardening (issue #62) -------------------------------------------------
 
@@ -4288,12 +4313,14 @@ def test_institution_short_name_conflict(admin):
 
 
 def test_admin_alerts(admin):
-    # Only admins see the alerts panel.
     assert TestClient(app).get("/api/v1/alerts").status_code == 401
+    # A plain member has nothing to act on: an empty panel, no nav item.
     member, member_pid = _linked_member(
         admin, given="Al", family="Erts", email="al.erts@example.edu"
     )
-    assert member.get("/api/v1/alerts").status_code == 403
+    r = member.get("/api/v1/alerts")
+    assert r.status_code == 200, r.text
+    assert r.json()["scope"] == "none" and r.json()["total"] == 0
 
     # A fresh registration: pending person at a new institution that has no
     # administrative contact yet.
@@ -4312,9 +4339,28 @@ def test_admin_alerts(admin):
     pid = r.json()["id"]
 
     alerts = admin.get("/api/v1/alerts").json()
+    assert alerts["scope"] == "admin"
     pending = {p["person_id"]: p for p in alerts["pending_registrations"]}
     assert pid in pending
     assert pending[pid]["detail"] == "Alertless University"
+    # The office sees the membership and institution items, not the
+    # account-management ones.
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "alerts.officer", "password": "office-pw-123", "role": "office"},
+    )
+    assert r.status_code == 201, r.text
+    officer = TestClient(app)
+    assert officer.post(
+        "/api/v1/auth/login", json={"username": "alerts.officer", "password": "office-pw-123"}
+    ).status_code == 200
+    office_alerts = officer.get("/api/v1/alerts").json()
+    assert office_alerts["scope"] == "office"
+    assert pid in [p["person_id"] for p in office_alerts["pending_registrations"]]
+    assert office_alerts["unreviewed_institutions"] == alerts["unreviewed_institutions"]
+    assert office_alerts["unlinked_accounts"] == []
+    assert office_alerts["role_suggestions"] == []
+    assert office_alerts["migrations_pending"] is False
     # Free-text registration created the institution inactive: it shows up
     # for review, not (yet) as missing an administrative contact.
     unreviewed = {i["name"]: i for i in alerts["unreviewed_institutions"]}
@@ -4473,7 +4519,8 @@ def test_speakers_role_manages_talks_only(admin):
     assert speaker.post("/api/v1/institutions", json={"name": "Nope U"}).status_code == 403
     assert speaker.post(f"/api/v1/people/{mpid}/status", json={"status": "inactive"}).status_code == 403
     assert speaker.get("/api/v1/auth/users").status_code == 403
-    assert speaker.get("/api/v1/alerts").status_code == 403
+    # The alerts panel is scoped, not gated: a speakers-committee account has nothing in it.
+    assert speaker.get("/api/v1/alerts").json()["scope"] == "none"
     assert speaker.delete(f"/api/v1/events/{event['id']}").status_code == 204
 
 

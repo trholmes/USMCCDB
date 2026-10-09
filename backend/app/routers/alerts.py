@@ -1,6 +1,9 @@
-"""Admin alerts: everything that currently needs an administrator's
-attention, in one place. Each category is a live query — nothing is stored,
-so an alert disappears the moment the underlying problem is fixed."""
+"""Alerts: everything that currently needs someone's attention, in one
+place, scoped to what the caller can act on — the admin sees everything, the
+office the membership and institution items, an Administrative Institutional
+Contact the pending registrations at their institution. Each category is a
+live query — nothing is stored, so an alert disappears the moment the
+underlying problem is fixed."""
 
 from datetime import UTC, datetime
 
@@ -32,9 +35,15 @@ from app.schemas.alerts import (
     RoleSuggestionAlert,
     RoleSuggestionDismiss,
 )
-from app.security import actor_id, require_admin
+from app.security import (
+    actor_id,
+    admin_contact_institution_ids,
+    get_current_user,
+    is_office,
+    require_admin,
+)
 
-router = APIRouter(prefix="/alerts", tags=["site"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/alerts", tags=["site"])
 
 # A person's current institution: the one open primary affiliation.
 OPEN_PRIMARY = (Affiliation.is_primary.is_(True), Affiliation.end_date.is_(None))
@@ -44,16 +53,17 @@ def _person_alert(p: Person, detail: str | None = None) -> PersonAlert:
     return PersonAlert(person_id=p.id, name=p.display_name, email=p.email, detail=detail)
 
 
-def _pending_registrations(db: Session) -> list[PersonAlert]:
-    people = (
-        db.execute(
-            select(Person)
-            .where(Person.status == MemberStatus.pending)
-            .order_by(Person.created_at)
+def _pending_registrations(
+    db: Session, institution_ids: set[int] | None = None
+) -> list[PersonAlert]:
+    """Pending registrations — all of them, or only those currently at the
+    given institutions (an admin contact's own)."""
+    stmt = select(Person).where(Person.status == MemberStatus.pending)
+    if institution_ids is not None:
+        stmt = stmt.join(Affiliation, Affiliation.person_id == Person.id).where(
+            *OPEN_PRIMARY, Affiliation.institution_id.in_(institution_ids)
         )
-        .scalars()
-        .all()
-    )
+    people = db.execute(stmt.order_by(Person.created_at)).scalars().unique().all()
     institution_of = dict(
         db.execute(
             select(Affiliation.person_id, Institution.name)
@@ -394,21 +404,38 @@ def _open_author_periods_not_active(db: Session) -> list[PersonAlert]:
 
 
 @router.get("")
-def admin_alerts(db: Session = Depends(get_db)) -> AdminAlerts:
+def admin_alerts(
+    db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> AdminAlerts:
+    """What needs the caller's attention. Admins get every category; the
+    office the membership and institution ones (accounts, role suggestions
+    and migrations are the admin's); anyone else only the pending
+    registrations at institutions they are the Administrative Institutional
+    Contact of — which they can approve or reject — and an empty panel
+    otherwise."""
     today = datetime.now(UTC).date()
-    _, _, migrations_pending = migration_state(db)
-    member_counts = _current_member_counts(db)
+    admin = user.role == UserRole.admin
+    office = is_office(user)
+    contact_for = set() if office else admin_contact_institution_ids(db, user)
+    scope = "admin" if admin else "office" if office else "admin_contact" if contact_for else "none"
+    migrations_pending = migration_state(db)[2] if admin else False
+    member_counts = _current_member_counts(db) if office else {}
     alerts = AdminAlerts(
-        pending_registrations=_pending_registrations(db),
-        unreviewed_institutions=_unreviewed_institutions(db, member_counts),
-        institutions_missing_admin_contact=_institutions_missing_admin_contact(
-            db, member_counts, today
+        scope=scope,
+        pending_registrations=(
+            _pending_registrations(db)
+            if office
+            else _pending_registrations(db, contact_for) if contact_for else []
         ),
-        unlinked_accounts=_unlinked_accounts(db),
-        role_suggestions=_role_suggestions(db, today),
-        active_without_affiliation=_active_without_affiliation(db),
-        ineligible_voting_members=_ineligible_voting_members(db),
-        open_author_periods_not_active=_open_author_periods_not_active(db),
+        unreviewed_institutions=_unreviewed_institutions(db, member_counts) if office else [],
+        institutions_missing_admin_contact=(
+            _institutions_missing_admin_contact(db, member_counts, today) if office else []
+        ),
+        unlinked_accounts=_unlinked_accounts(db) if admin else [],
+        role_suggestions=_role_suggestions(db, today) if admin else [],
+        active_without_affiliation=_active_without_affiliation(db) if office else [],
+        ineligible_voting_members=_ineligible_voting_members(db) if office else [],
+        open_author_periods_not_active=_open_author_periods_not_active(db) if office else [],
         migrations_pending=migrations_pending,
         total=0,
     )
