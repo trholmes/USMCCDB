@@ -27,7 +27,7 @@ from app.schemas.speakers import (
     TalkStatRow,
     TalkUpdate,
 )
-from app.security import can_manage_talks, get_current_user, require_speakers_committee
+from app.security import actor_id, can_manage_talks, get_current_user, require_speakers_committee
 from app.services import notifications
 
 router = APIRouter(tags=["speakers"])
@@ -153,7 +153,7 @@ def create_talk(
     user: User = Depends(get_current_user),
 ) -> TalkOut:
     _check_talk_refs(db, body.model_dump())
-    talk = Talk(**body.model_dump(), created_by_user_id=user.id)
+    talk = Talk(**body.model_dump(), created_by_user_id=actor_id(user))
     db.add(talk)
     db.commit()
     return TalkOut.model_validate(_load_talk(db, talk.id))
@@ -230,7 +230,7 @@ def nominate(
     nom = Nomination(
         talk_id=talk_id,
         person_id=body.person_id,
-        nominated_by_user_id=user.id,
+        nominated_by_user_id=actor_id(user),
         note=body.note,
     )
     db.add(nom)

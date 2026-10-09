@@ -20,7 +20,7 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary, User } from '../api/types'
 import { USER_ROLES } from '../constants'
@@ -58,7 +58,8 @@ export default function AdminPage() {
   const [tempPassword, setTempPassword] = useState<{ login: string; password: string } | null>(
     null,
   )
-  const { me } = useSession()
+  const { me, viewAs } = useSession()
+  const navigate = useNavigate()
 
   const load = useCallback(() => {
     api.get<User[]>('/auth/users').then(setUsers).catch(() => setUsers([]))
@@ -105,6 +106,17 @@ export default function AdminPage() {
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
       return false
+    }
+  }
+
+  // See the site as this account holder does, and act with their
+  // permissions — recorded as the admin, never as them (the banner says so).
+  const startViewAs = async (u: User) => {
+    try {
+      await viewAs(u.id)
+      navigate('/')
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
     }
   }
 
@@ -292,7 +304,9 @@ export default function AdminPage() {
           automatically after their first sign-in. Roles: <b>admin</b> (everything),{' '}
           <b>office</b> (approve members, institutions, all roles), <b>leadership</b>{' '}
           (representatives & deputies: working groups, publications, talks),{' '}
-          <b>speakers_committee</b> (talks & events), <b>member</b>.
+          <b>speakers_committee</b> (talks & events), <b>member</b>. <b>View as</b> shows
+          you the site exactly as that account holder sees it and lets you act with their
+          permissions; everything you do is still recorded as you.
         </Text>
       </Card>
 
@@ -357,9 +371,21 @@ export default function AdminPage() {
                 </Text>
               </Table.Td>
               <Table.Td>
-                <Button size="compact-xs" variant="subtle" onClick={() => openManage(u)}>
-                  Manage
-                </Button>
+                <Group gap={4} wrap="nowrap">
+                  <Button size="compact-xs" variant="subtle" onClick={() => openManage(u)}>
+                    Manage
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="orange"
+                    disabled={u.id === me?.user.id || !u.is_active}
+                    title="See the site as this account does; your actions stay recorded as you"
+                    onClick={() => startViewAs(u)}
+                  >
+                    View as
+                  </Button>
+                </Group>
               </Table.Td>
             </Table.Tr>
           ))}

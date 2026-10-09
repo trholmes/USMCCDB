@@ -4930,3 +4930,91 @@ def test_notification_routing_and_email_log(admin, monkeypatch):
         assert latest["kind"] == "test" and "SMTP said no" in latest["error"]
     finally:
         get_settings.cache_clear()
+
+
+def test_admin_view_as(admin, monkeypatch):
+    """An admin may see the site as any account holder and act with their
+    permissions, while everything done is still recorded as the admin."""
+    sent = []
+    monkeypatch.setattr("app.services.notifications.send_email", lambda m: sent.append(m))
+
+    member, pid = _linked_member(
+        admin, given="Viewed", family="Person", email="viewed.person@example.edu"
+    )
+    users = {u["username"]: u for u in admin.get("/api/v1/auth/users").json()}
+    admin_id = users["testadmin"]["id"]
+    member_id = users["viewed.person"]["id"]
+
+    # Members cannot view as anyone.
+    assert member.post(f"/api/v1/auth/view-as/{admin_id}").status_code == 403
+
+    viewer = TestClient(app)
+    assert (
+        viewer.post(
+            "/api/v1/auth/login", json={"username": "testadmin", "password": "testadmin-pw"}
+        ).status_code
+        == 200
+    )
+    # Not as yourself, not as a deactivated account, not as one the
+    # membership gate turns away.
+    assert viewer.post(f"/api/v1/auth/view-as/{admin_id}").status_code == 400
+    assert viewer.post("/api/v1/auth/view-as/999999").status_code == 404
+    r = admin.post(
+        "/api/v1/auth/users",
+        json={"username": "nobody-linked", "password": "member-pw-123", "role": "member"},
+    )
+    assert r.status_code == 201, r.text
+    r = viewer.post(f"/api/v1/auth/view-as/{r.json()['id']}")
+    assert r.status_code == 400 and "no access" in r.json()["detail"]
+
+    r = viewer.post(f"/api/v1/auth/view-as/{member_id}")
+    assert r.status_code == 200, r.text
+    me = r.json()
+    assert me["user"]["id"] == member_id
+    assert me["person_id"] == pid
+    assert me["permissions"] == ["member"]
+    assert me["actor"]["id"] == admin_id
+    # The session now acts as the member: admin pages are gone, the member's
+    # own contextual permissions are there.
+    assert viewer.get("/api/v1/auth/me").json()["user"]["id"] == member_id
+    assert viewer.get("/api/v1/auth/users").status_code == 403
+    assert viewer.get("/api/v1/people").status_code == 200
+    assert viewer.post(f"/api/v1/auth/view-as/{admin_id}").status_code == 400  # self again
+    r = viewer.post("/api/v1/auth/me/password", json={"current_password": "x" * 8, "new_password": "y" * 8})
+    assert r.status_code == 403 and "viewing" in r.json()["detail"]
+    talk = member.post(
+        "/api/v1/talks", json={"title": "Member's own seminar", "talk_type": "seminar"}
+    ).json()
+    assert viewer.patch(f"/api/v1/talks/{talk['id']}", json={"title": "Edited while viewing"}).status_code == 200
+
+    # …but what is done is recorded against the admin, and mail names them.
+    r = viewer.post(f"/api/v1/people/{pid}/status", json={"status": "inactive"})
+    assert r.status_code == 200, r.text
+    events = admin.get(f"/api/v1/people/{pid}/events").json()
+    assert events[-1]["to_status"] == "inactive"
+    assert events[-1]["actor_user_id"] == admin_id
+    assert sent and sent[-1].actor_user_id == admin_id
+    assert "testadmin" in sent[-1].body
+    r = viewer.post("/api/v1/talks", json={"title": "Added while viewing", "talk_type": "seminar"})
+    assert r.status_code == 201, r.text
+    assert r.json()["created_by_user_id"] == admin_id
+    # The start is in the sign-in history.
+    history = admin.get("/api/v1/auth/login-events?limit=5").json()
+    viewed = [e for e in history if e["method"] == "view_as"]
+    assert viewed and viewed[0]["login"] == "testadmin"
+    assert viewed[0]["username_attempted"] == "viewed.person"
+
+    # Deactivating the viewed account reverts the session to the admin's own
+    # view instead of locking them out.
+    assert admin.patch(f"/api/v1/auth/users/{member_id}", json={"is_active": False}).status_code == 200
+    me = viewer.get("/api/v1/auth/me").json()
+    assert me["user"]["id"] == admin_id and me["actor"] is None
+    admin.patch(f"/api/v1/auth/users/{member_id}", json={"is_active": True})
+
+    # Stop: back to the admin's own rights.
+    assert viewer.post(f"/api/v1/auth/view-as/{member_id}").status_code == 200
+    r = viewer.post("/api/v1/auth/view-as/stop")
+    assert r.status_code == 200, r.text
+    assert r.json()["user"]["id"] == admin_id and r.json()["actor"] is None
+    assert "admin" in r.json()["permissions"]
+    assert viewer.get("/api/v1/auth/users").status_code == 200

@@ -26,12 +26,17 @@ from app.security import (
     check_login_password,
     clear_session_cookie,
     cookie_secure,
+    actor_id,
+    actor_of,
     create_access_token,
     get_current_user,
+    get_signed_in_user,
     hash_password,
     membership_block_reason,
     require_admin,
+    session_expiry,
     set_session_cookie,
+    view_as_block_reason,
 )
 from app.services import notifications
 from app.services import orcid as orcid_svc
@@ -118,23 +123,96 @@ def logout(response: Response) -> dict:
     return {"detail": "Signed out"}
 
 
-@router.get("/me")
-def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeOut:
+def _me(db: Session, user: User) -> MeOut:
     settings = get_settings()
     person = db.get(Person, user.person_id) if user.person_id else None
     # Every role at or below the account's own: the frontend gates on
     # membership ("office" in permissions), so a leadership account also
     # carries "speakers_committee" and "member".
     permissions = [r.value for r in UserRole if ROLE_RANK[r] <= ROLE_RANK[user.role]]
+    actor = actor_of(user)
     return MeOut(
         user=UserOut.model_validate(user),
         person_id=user.person_id,
         display_name=person.display_name if person else user.username,
         permissions=permissions,
+        actor=UserOut.model_validate(actor) if actor is not user else None,
         orcid_enabled=settings.orcid_enabled,
         email_enabled=settings.email_enabled,
         contact_email=settings.contact_email,
     )
+
+
+@router.get("/me")
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeOut:
+    return _me(db, user)
+
+
+# --- View as (admin) ----------------------------------------------------------
+
+
+@router.post("/view-as/stop")
+def stop_view_as(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_signed_in_user),
+) -> MeOut:
+    """Back to the signed-in account's own view. Harmless when not viewing
+    as anyone: the session is simply reissued without the claim."""
+    set_session_cookie(
+        response, request, create_access_token(actor, exp=session_expiry(request))
+    )
+    actor.view_as_actor = None
+    return _me(db, actor)
+
+
+@router.post("/view-as/{user_id}")
+def start_view_as(
+    user_id: int,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_signed_in_user),
+) -> MeOut:
+    """Let an admin see the site — and act — exactly as another account
+    holder: the session acts with that account's role, person and
+    contextual permissions (the admin's own rights are set aside until
+    they stop). Everything done meanwhile is still recorded against the
+    admin (`actor_of`): membership events, talks added, nominations, author
+    lists, the email log and the mails themselves name the admin, never the
+    viewed person. The start is logged in the sign-in history.
+
+    Deactivated accounts and accounts the membership gate turns away cannot
+    be viewed as (there is nothing to see). Switching straight from one
+    viewed account to another is fine: the signed-in admin is what counts."""
+    if actor.role != UserRole.admin:
+        raise HTTPException(403, "Only admins can view the site as another account")
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "User not found")
+    reason = view_as_block_reason(db, actor, target)
+    if reason:
+        raise HTTPException(400, reason)
+    db.add(
+        LoginEvent(
+            user_id=actor.id,
+            method="view_as",
+            success=True,
+            username_attempted=(target.username or target.orcid or f"#{target.id}")[:80],
+            ip=_client_ip(request),
+        )
+    )
+    db.commit()
+    # Keep the signed-in session's expiry: viewing as someone must not
+    # extend it.
+    set_session_cookie(
+        response,
+        request,
+        create_access_token(actor, view_as=target, exp=session_expiry(request)),
+    )
+    target.view_as_actor = actor
+    return _me(db, target)
 
 
 @router.post("/me/password")
@@ -144,6 +222,8 @@ def change_my_password(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Self-service password change for local accounts (issue #98)."""
+    if actor_of(user) is not user:
+        raise HTTPException(403, "Stop viewing as this account before changing a password")
     if not user.username or not user.password_hash:
         raise HTTPException(400, "This account signs in with ORCID and has no password")
     if not check_login_password(user, body.current_password):
@@ -272,11 +352,11 @@ def update_user(
     if user is None:
         raise HTTPException(404, "User not found")
     if body.role is not None:
-        if user.id == actor.id and body.role != UserRole.admin:
+        if user.id == actor_id(actor) and body.role != UserRole.admin:
             raise HTTPException(400, "You cannot demote your own account")
         user.role = body.role
     if body.is_active is not None:
-        if user.id == actor.id and not body.is_active:
+        if user.id == actor_id(actor) and not body.is_active:
             raise HTTPException(400, "You cannot deactivate your own account")
         user.is_active = body.is_active
     if body.password is not None:
@@ -317,7 +397,7 @@ def merge_users(
     kept, whose record then takes the login's authenticated ORCID iD."""
     if keep_id == other_id:
         raise HTTPException(400, "Pick two different accounts")
-    if other_id == actor.id:
+    if other_id == actor_id(actor):
         raise HTTPException(400, "You cannot merge away the account you are signed in with")
     keep = db.get(User, keep_id)
     other = db.get(User, other_id)
@@ -421,7 +501,7 @@ def delete_user(
     """Delete a login. The linked person record and everything referencing
     the account (talks added, nominations, history) stay — those foreign
     keys are all SET NULL."""
-    if user_id == actor.id:
+    if user_id == actor_id(actor):
         raise HTTPException(400, "You cannot delete the account you are signed in with")
     user = db.get(User, user_id)
     if user is None:

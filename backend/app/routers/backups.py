@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse
 from app.config import get_settings
 from app.models import User
 from app.schemas.backups import BackupSnapshot, BackupStatus, RestoreStatus
-from app.security import require_admin
+from app.security import actor_of, require_admin
 
 router = APIRouter(tags=["backups"])
 
@@ -40,6 +40,7 @@ _FILENAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def _audit_label(user: User) -> str:
+    user = actor_of(user)
     return f"user {user.id} ({user.username or user.orcid or 'unknown'})"
 
 

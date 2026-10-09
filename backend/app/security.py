@@ -46,15 +46,28 @@ def check_login_password(user: User | None, password: str) -> bool:
     return False
 
 
-def create_access_token(user: User) -> str:
+# Token claim carrying the account an admin is viewing the site as. The
+# session's `sub` stays the admin: every request re-checks that they still
+# hold the admin role, and actions are attributed to them (actor_of).
+VIEW_AS_CLAIM = "view_as"
+
+
+def create_access_token(
+    user: User, *, view_as: User | None = None, exp: datetime | None = None
+) -> str:
+    """Session token for `user`. With view_as, the token also carries the
+    account the (admin) user is viewing the site as; `exp` keeps an existing
+    session's expiry instead of starting a fresh one."""
     settings = get_settings()
     payload = {
         "sub": str(user.id),
         "role": user.role.value,
         "person_id": user.person_id,
-        "exp": datetime.now(UTC) + timedelta(hours=settings.access_token_hours),
+        "exp": exp or datetime.now(UTC) + timedelta(hours=settings.access_token_hours),
         "iat": datetime.now(UTC),
     }
+    if view_as is not None:
+        payload[VIEW_AS_CLAIM] = view_as.id
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
@@ -117,19 +130,80 @@ def membership_block_reason(db: Session, user: User) -> str | None:
     return None
 
 
-def _session_user(request: Request, db: Session) -> User | None:
-    """Cookie → active User, or None. No membership-status gate."""
+def view_as_block_reason(db: Session, actor: User, target: User) -> str | None:
+    """Why `actor` may not view the site as `target` right now, or None."""
+    if actor.role != UserRole.admin:
+        return "Only admins can view the site as another account"
+    if target.id == actor.id:
+        return "You are already signed in as this account"
+    if not target.is_active:
+        return "That account is deactivated"
+    reason = membership_block_reason(db, target)
+    if reason:
+        return f"That account has no access: {reason}"
+    return None
+
+
+def _apply_view_as(db: Session, user: User, payload: dict) -> User:
+    """Resolve the view_as claim: the account the session acts as, with the
+    signed-in admin remembered on it for attribution (see actor_of).
+
+    Re-validated on every request. When viewing is no longer possible (the
+    admin lost the role, the viewed account was deactivated, deleted or
+    moved into a moderation state), the session silently reverts to the
+    admin's own view — never to more access than the admin has themselves,
+    and never to an unusable session."""
+    user.view_as_actor = None
+    target_id = payload.get(VIEW_AS_CLAIM)
+    if target_id is None:
+        return user
+    target = db.get(User, int(target_id))
+    if target is None or view_as_block_reason(db, user, target):
+        return user
+    target.view_as_actor = user
+    return target
+
+
+def actor_of(user: User) -> User:
+    """The account to record as having performed an action: the admin behind
+    a view-as session, otherwise the user itself. Use it wherever an action
+    is attributed (membership events, talks added, nominations, email log,
+    …) — permission checks keep using the user the request acts as."""
+    return getattr(user, "view_as_actor", None) or user
+
+
+def actor_id(user: User) -> int:
+    return actor_of(user).id
+
+
+def session_expiry(request: Request) -> datetime | None:
+    """When the current session cookie expires — reissued tokens (view as,
+    and back) keep it rather than starting a fresh session."""
+    payload = _session_payload(request)
+    exp = payload.get("exp") if payload else None
+    return datetime.fromtimestamp(exp, UTC) if exp else None
+
+
+def _session_payload(request: Request) -> dict | None:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
     try:
-        payload = _decode_token(token)
+        return _decode_token(token)
     except HTTPException:
+        return None
+
+
+def _session_user(request: Request, db: Session) -> User | None:
+    """Cookie → active User the session acts as, or None. No
+    membership-status gate."""
+    payload = _session_payload(request)
+    if payload is None:
         return None
     user = db.get(User, int(payload["sub"]))
     if user is None or not user.is_active:
         return None
-    return user
+    return _apply_view_as(db, user, payload)
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -140,9 +214,24 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, int(payload["sub"]))
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled or missing")
+    user = _apply_view_as(db, user, payload)
     reason = membership_block_reason(db, user)
     if reason:
         raise HTTPException(status.HTTP_403_FORBIDDEN, reason)
+    return user
+
+
+def get_signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """The account that actually signed in, ignoring any view-as claim —
+    only for starting and stopping a view-as session, which must work
+    whatever the viewed account may do."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not signed in")
+    payload = _decode_token(token)
+    user = db.get(User, int(payload["sub"]))
+    if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled or missing")
     return user
 
 

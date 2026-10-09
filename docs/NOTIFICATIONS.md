@@ -122,7 +122,7 @@ own database session:
 | `status` | `sent` (SMTP accepted it), `failed` (`error` holds the exception), or `disabled` (`SMTP_HOST` unset — what *would* have gone out). |
 | `context` | Free text for the log: "talk #12", the publication code, the working group. |
 | `person_id` | The member the message is about (link survives deletion as NULL). |
-| `actor_user_id` | The account whose action triggered it. |
+| `actor_user_id` | The account whose action triggered it — the admin, when the action was taken while viewing the site as another account (`docs/ROLES.md`, "View as"); the mail body names the admin too. |
 
 The Admin → Email tab lists the log newest first with filters by kind and
 status and a subject/recipient search; clicking a row shows the full body.

@@ -11,10 +11,15 @@ export interface User {
 }
 
 export interface Me {
+  // The account the session acts as: the viewed account during an admin
+  // "view as" session, otherwise the one that signed in.
   user: User
   person_id: number | null
   display_name: string | null
   permissions: string[]
+  // The admin actually signed in while viewing the site as `user`; null
+  // otherwise. Everything done in that state is recorded against them.
+  actor: User | null
   orcid_enabled: boolean
   email_enabled: boolean
   contact_email: string

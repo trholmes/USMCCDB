@@ -7,6 +7,11 @@ interface Session {
   loading: boolean
   refresh: () => Promise<void>
   logout: () => Promise<void>
+  // Admin "view as": act as another account (its role, person and contextual
+  // permissions) while every action stays recorded against the admin.
+  viewAs: (userId: number) => Promise<void>
+  stopViewAs: () => Promise<void>
+  isViewingAs: boolean
   isOffice: boolean
   isAdmin: boolean
   // Leadership Council representatives / deputies (or office): working
@@ -23,6 +28,9 @@ const SessionContext = createContext<Session>({
   loading: true,
   refresh: async () => {},
   logout: async () => {},
+  viewAs: async () => {},
+  stopViewAs: async () => {},
+  isViewingAs: false,
   isOffice: false,
   isAdmin: false,
   canManageWGs: false,
@@ -49,6 +57,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setMe(null)
   }, [])
 
+  const viewAs = useCallback(async (userId: number) => {
+    setMe(await api.post<Me>(`/auth/view-as/${userId}`))
+  }, [])
+
+  const stopViewAs = useCallback(async () => {
+    setMe(await api.post<Me>('/auth/view-as/stop'))
+  }, [])
+
   useEffect(() => {
     refresh()
   }, [refresh])
@@ -60,6 +76,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         loading,
         refresh,
         logout,
+        viewAs,
+        stopViewAs,
+        isViewingAs: !!me?.actor,
         isOffice: !!me && me.permissions.includes('office'),
         isAdmin: !!me && me.permissions.includes('admin'),
         canManageWGs: !!me && me.permissions.includes('leadership'),

@@ -22,7 +22,9 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false)
 
   if (!me) return null
-  const isLocal = Boolean(me.user.username)
+  // While an admin views the site as this account, the password stays the
+  // account holder's own business (the server refuses the change too).
+  const isLocal = Boolean(me.user.username) && !me.actor
 
   const changePassword = async (e: React.FormEvent) => {
     e.preventDefault()
