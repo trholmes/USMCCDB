@@ -66,7 +66,7 @@ function ColorSchemeToggle() {
 
 export default function App() {
   const { me, loading, logout, stopViewAs, isAdmin } = useSession()
-  const { alerts } = useAlerts()
+  const { alerts, hasAlerts } = useAlerts()
   const [opened, { toggle, close }] = useDisclosure()
   const navigate = useNavigate()
   const location = useLocation()
@@ -181,32 +181,32 @@ export default function App() {
             }}
           />
         ))}
+        {hasAlerts && (
+          <NavLink
+            label="Alerts"
+            active={location.pathname.startsWith('/alerts')}
+            rightSection={
+              alerts && alerts.total > 0 ? (
+                <Badge color="red" size="sm">
+                  {alerts.total}
+                </Badge>
+              ) : undefined
+            }
+            onClick={() => {
+              navigate('/alerts')
+              close()
+            }}
+          />
+        )}
         {isAdmin && (
-          <>
-            <NavLink
-              label="Alerts"
-              active={location.pathname.startsWith('/alerts')}
-              rightSection={
-                alerts && alerts.total > 0 ? (
-                  <Badge color="red" size="sm">
-                    {alerts.total}
-                  </Badge>
-                ) : undefined
-              }
-              onClick={() => {
-                navigate('/alerts')
-                close()
-              }}
-            />
-            <NavLink
-              label="Admin"
-              active={location.pathname.startsWith('/admin')}
-              onClick={() => {
-                navigate('/admin')
-                close()
-              }}
-            />
-          </>
+          <NavLink
+            label="Admin"
+            active={location.pathname.startsWith('/admin')}
+            onClick={() => {
+              navigate('/admin')
+              close()
+            }}
+          />
         )}
       </AppShell.Navbar>
 
@@ -252,7 +252,7 @@ export default function App() {
           <Route path="/publications/:id" element={<PublicationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/account" element={<AccountPage />} />
-          {isAdmin && <Route path="/alerts" element={<AlertsPage />} />}
+          {hasAlerts && <Route path="/alerts" element={<AlertsPage />} />}
           {isAdmin && <Route path="/admin" element={<AdminPage />} />}
           <Route path="*" element={<Navigate to="/directory" replace />} />
         </Routes>

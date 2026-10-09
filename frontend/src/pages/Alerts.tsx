@@ -153,14 +153,19 @@ export default function AlertsPage() {
   }, [refresh])
 
   if (!alerts) return null
+  const contactOnly = alerts.scope === 'admin_contact'
 
   return (
     <Stack maw={900}>
       <div>
         <Title order={3}>Alerts</Title>
         <Text size="sm" c="dimmed">
-          Things that need an administrator. Each alert clears itself as soon as the
-          underlying issue is fixed.
+          {contactOnly
+            ? 'Things that need you as an administrative institutional contact. '
+            : alerts.scope === 'office'
+              ? 'Things that need the collaboration office. '
+              : 'Things that need an administrator. '}
+          Each alert clears itself as soon as the underlying issue is fixed.
         </Text>
       </div>
 
@@ -173,7 +178,11 @@ export default function AlertsPage() {
       <Section
         title="Pending membership registrations"
         count={alerts.pending_registrations.length}
-        description="Registrations waiting for approval — the person has no database access until someone decides. Approve or reject from their profile page."
+        description={
+          contactOnly
+            ? 'Registrations at your institution waiting for your approval — the person has no database access until someone decides. Open their profile page to approve or reject.'
+            : 'Registrations waiting for approval — the person has no database access until someone decides. Approve or reject from their profile page.'
+        }
       >
         {alerts.pending_registrations.map((p) => (
           <PersonRow key={p.person_id} item={p} />

@@ -46,9 +46,13 @@ class RoleSuggestionDismiss(BaseModel):
 
 
 class AdminAlerts(BaseModel):
-    """Everything the admin alerts panel nags about; `total` feeds the badge
-    in the navigation."""
+    """Everything the alerts panel nags about, scoped to what the caller can
+    act on; `total` feeds the badge in the navigation."""
 
+    # What the caller sees: "admin" (everything), "office" (membership and
+    # institutions), "admin_contact" (pending registrations at the
+    # institutions they are the administrative contact of), or "none".
+    scope: str
     pending_registrations: list[PersonAlert]
     unreviewed_institutions: list[InstitutionAlert]
     institutions_missing_admin_contact: list[InstitutionAlert]
