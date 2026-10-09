@@ -243,6 +243,76 @@ def import_members(
 
 
 @cli.command()
+def set_public_listing(
+    exclude: list[str] = typer.Option(
+        [],
+        "--exclude",
+        help="Email of a person who does NOT want to be listed (repeatable); "
+        "they are set to opted out, everyone else to opted in",
+    ),
+    exclude_file: Path | None = typer.Option(
+        None,
+        exists=True,
+        readable=True,
+        help="File with one such email per line (blank lines and # comments ignored)",
+    ),
+    dry_run: bool = typer.Option(False, help="Report what would change, write nothing"),
+):
+    """One-time bulk update of the public-listing consent (name and photo on
+    muoncollider.us/people) for members who opted in through another system
+    before the database asked the question itself.
+
+    Every person is set to opted in except the excluded emails, who are set
+    to opted out. Nothing else on the record is touched. An excluded email
+    that matches nobody aborts the whole run — a typo there would publish
+    someone who asked not to be — so check the spelling and retry.
+    """
+    excluded = {e.strip().lower() for e in exclude if e.strip()}
+    if exclude_file is not None:
+        for line in exclude_file.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                excluded.add(line.lower())
+
+    opted_in = opted_out = unchanged = 0
+    with SessionLocal() as db:
+        people = db.execute(select(Person).order_by(Person.id)).scalars().all()
+        by_email = {p.email.lower() for p in people}
+        missing = sorted(e for e in excluded if e not in by_email)
+        if missing:
+            typer.echo("Excluded email(s) match nobody in the database — nothing changed:")
+            for e in missing:
+                typer.echo(f"  - {e}")
+            raise typer.Exit(1)
+
+        for person in people:
+            want = person.email.lower() not in excluded
+            if person.public_listing_consent == want:
+                unchanged += 1
+                continue
+            person.public_listing_consent = want
+            if want:
+                opted_in += 1
+            else:
+                opted_out += 1
+            typer.echo(
+                f"{person.display_name} <{person.email}>: "
+                f"{'opted in' if want else 'OPTED OUT'}"
+            )
+
+        summary = (
+            f"{opted_in} opted in, {opted_out} opted out, "
+            f"{unchanged} already as requested"
+        )
+        if dry_run:
+            db.rollback()
+            typer.echo(f"DRY RUN — would set {summary}")
+        else:
+            db.commit()
+            typer.echo(f"Set {summary}")
+
+
+@cli.command()
 def seed_coordinates(
     dry_run: bool = typer.Option(False, help="Report what would change, write nothing"),
     match_missing: bool = typer.Option(
