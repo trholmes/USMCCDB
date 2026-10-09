@@ -5018,3 +5018,55 @@ def test_admin_view_as(admin, monkeypatch):
     assert r.json()["user"]["id"] == admin_id and r.json()["actor"] is None
     assert "admin" in r.json()["permissions"]
     assert viewer.get("/api/v1/auth/users").status_code == 200
+
+
+def test_set_public_listing_bulk_update(admin, tmp_path):
+    # One-time bulk opt-in of members who consented in another system: all
+    # people are set to listed except the excluded emails, which are set to
+    # not listed — case-insensitively, from --exclude and a file — and an
+    # excluded email that matches nobody aborts without writing anything.
+    import typer
+
+    from app.cli import set_public_listing
+
+    def make(given: str, email: str, consent: bool) -> int:
+        r = admin.post(
+            "/api/v1/people/register",
+            json={
+                "given_name": given,
+                "family_name": "Listing",
+                "email": email,
+                "public_listing_consent": consent,
+            },
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    yes = make("Yes", "yes.listing@example.edu", False)
+    already = make("Already", "already.listing@example.edu", True)
+    no_flag = make("Noflag", "noflag.listing@example.edu", True)
+    no_file = make("Nofile", "nofile.listing@example.edu", False)
+
+    def consent(pid: int) -> bool:
+        return admin.get(f"/api/v1/people/{pid}").json()["public_listing_consent"]
+
+    # A typo in the exclusion list must not silently list someone who opted out.
+    with pytest.raises(typer.Exit):
+        set_public_listing(exclude=["nobody@example.edu"], exclude_file=None, dry_run=False)
+    assert consent(yes) is False and consent(no_flag) is True
+
+    exclude_file = tmp_path / "opt-out.txt"
+    exclude_file.write_text("# people who asked not to be listed\n\nnofile.listing@example.edu\n")
+
+    set_public_listing(
+        exclude=["NOFLAG.Listing@example.edu"], exclude_file=exclude_file, dry_run=True
+    )
+    assert consent(yes) is False and consent(no_flag) is True  # dry run wrote nothing
+
+    set_public_listing(
+        exclude=["NOFLAG.Listing@example.edu"], exclude_file=exclude_file, dry_run=False
+    )
+    assert consent(yes) is True
+    assert consent(already) is True
+    assert consent(no_flag) is False
+    assert consent(no_file) is False

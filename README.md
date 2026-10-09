@@ -274,6 +274,24 @@ instance:
 There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
 (fictional demo data) commands — see `python -m app.cli --help`.
 
+#### Bulk public-listing consent
+
+Members who agreed elsewhere to appear on muoncollider.us/people (before the
+database asked at registration) can be opted in all at once; the few who
+declined are set to opted out so an earlier answer cannot leave them listed:
+
+```bash
+docker compose exec backend python -m app.cli set-public-listing \
+    --exclude a.person@example.edu --exclude b.person@example.edu --dry-run
+docker compose exec backend python -m app.cli set-public-listing \
+    --exclude a.person@example.edu --exclude b.person@example.edu
+```
+
+`--exclude-file /data/opt-out.txt` takes one email per line instead. An
+excluded email that matches nobody aborts the run before writing anything,
+since a typo there would publish someone who asked not to be. Members can
+still change their own answer afterwards on their profile.
+
 #### The whole sequence at a glance
 
 Input files go in `data/` (mounted read-only in the backend container at
