@@ -76,7 +76,9 @@ class User(TimestampedBase):
 class LoginEvent(TimestampedBase):
     """Append-only sign-in audit shown in the admin panel's login history.
     Failed local attempts keep the username tried (no user row to point at);
-    the user link survives account deletion as NULL."""
+    the user link survives account deletion as NULL. An admin starting to
+    view the site as another account is logged too (method `view_as`, the
+    admin as the user, the viewed account's login in `username_attempted`)."""
 
     __tablename__ = "login_events"
 

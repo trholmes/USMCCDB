@@ -46,10 +46,15 @@ class PasswordChange(BaseModel):
 
 
 class MeOut(BaseModel):
+    # The account the session acts as — the viewed account during an admin
+    # "view as" session, otherwise the account that signed in.
     user: UserOut
     person_id: int | None
     display_name: str | None
     permissions: list[str]
+    # The admin actually signed in while viewing the site as `user`; null
+    # otherwise. Everything done in that state is recorded against it.
+    actor: UserOut | None = None
     orcid_enabled: bool
     # Whether the server delivers mail (SMTP configured) — the UI warns before
     # actions that send notifications only when it does.

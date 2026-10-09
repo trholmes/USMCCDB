@@ -1,7 +1,9 @@
 import {
   ActionIcon,
+  Alert,
   AppShell,
   Badge,
+  Button,
   Burger,
   Group,
   Loader,
@@ -63,7 +65,7 @@ function ColorSchemeToggle() {
 }
 
 export default function App() {
-  const { me, loading, logout, isAdmin } = useSession()
+  const { me, loading, logout, stopViewAs, isAdmin } = useSession()
   const { alerts } = useAlerts()
   const [opened, { toggle, close }] = useDisclosure()
   const navigate = useNavigate()
@@ -209,6 +211,30 @@ export default function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        {me.actor && (
+          <Alert color="orange" variant="light" mb="md" title="Viewing as another account">
+            <Group justify="space-between" wrap="wrap" gap="sm">
+              <Text size="sm">
+                You are seeing the site as <b>{me.user.username ?? me.user.orcid}</b>
+                {me.display_name && me.display_name !== me.user.username
+                  ? ` (${me.display_name})`
+                  : ''}
+                , role <b>{me.user.role}</b>. Anything you do here is recorded as{' '}
+                <b>{me.actor.username ?? me.actor.orcid}</b>, not as them.
+              </Text>
+              <Button
+                size="xs"
+                color="orange"
+                onClick={async () => {
+                  await stopViewAs()
+                  navigate('/admin')
+                }}
+              >
+                Stop viewing as
+              </Button>
+            </Group>
+          </Alert>
+        )}
         <SiteBanner />
         <Routes>
           <Route path="/" element={<Navigate to="/directory" replace />} />

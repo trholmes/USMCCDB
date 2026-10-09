@@ -31,7 +31,7 @@ the roles below it.**
 
 | Role | Meant for | Adds on top of the role below |
 |---|---|---|
-| `admin` | The people running the database. | User accounts (create, link to a person, merge, reset passwords, change roles, deactivate, delete), site settings (banner, login message, map key), the Alerts panel, the Email log and test email, backups and restore, system status, deleting working groups, deleting a person record outright (`DELETE /people/{id}`, any status, confirmed in the UI — the record's affiliations, history, positions, nominations and photo go with it, and a member-role login linked to it is deleted too; talks given and emails sent keep a null reference). Cannot demote or deactivate their own account, nor delete their own record. |
+| `admin` | The people running the database. | User accounts (create, link to a person, merge, reset passwords, change roles, deactivate, delete), site settings (banner, login message, map key), the Alerts panel, the Email log and test email, backups and restore, system status, deleting working groups, deleting a person record outright (`DELETE /people/{id}`, any status, confirmed in the UI — the record's affiliations, history, positions, nominations and photo go with it, and a member-role login linked to it is deleted too; talks given and emails sent keep a null reference); **view as** any other account (below). Cannot demote or deactivate their own account, nor delete their own record. |
 | `office` | The collaboration office: membership administration. | Approve/reject registrations and change anyone's status; edit any profile field (including ORCID iD and office-internal notes); create/edit/delete institutions; manage every affiliation and author period; assign and end every collaboration position; register people directly (gets a real response instead of the neutral acknowledgement, and no rate limit); see membership-event notes and actors. |
 | `leadership` | Leadership Council representatives and deputies. | Create and edit working groups, add or remove anyone from them, name and end **conveners** (no other position); edit any publication, its status, people and reviewers, build and preview author lists (`can_manage_publications`). |
 | `speakers_committee` | The speakers committee. | Create/edit/delete events; edit or delete **any** talk; act on any nomination (shortlist, assign, decline) (`can_manage_talks`). |
@@ -70,6 +70,33 @@ Some permissions come from a relationship to the record rather than the role:
 | **Working-group convener** (active `convener` position for that group) | Add and remove members of the group. For publications tagged with the group: the same as a contact. |
 | **Administrative Institutional Contact** (active `admin_contact` position for that institution) | Edit the `ADMIN_CONTACT_EDITABLE` fields — career stage, professional title, department, research time — of people currently at the institution, and approve or reject **pending** registrations of people at the institution. Nothing else. |
 | **Talk creator** | Edit or delete the talk. |
+
+## View as (admin)
+
+From Admin → Accounts an admin can **view as** any other active account
+(`POST /auth/view-as/{user_id}`; `POST /auth/view-as/stop` ends it): the
+session then acts as that account — its role, person, self-service rights
+and contextual permissions, nothing of the admin's own — so the admin sees
+exactly what the account holder sees and can do what they can do. An orange
+banner says so on every page.
+
+Everything done meanwhile is still **recorded as the admin**, never as the
+viewed person: membership events, talks added, nominations, author lists,
+publication events, dismissed role suggestions and the email log carry the
+admin's account, and mails name the admin ("changed by testadmin"). The
+start of each view-as session is logged in the sign-in history (method
+`view_as`). Two consequences: a talk the admin adds while viewing as a
+member is not the member's own (they cannot edit it later), and a status
+change the admin makes while viewing as the member is announced to the
+member like an office change rather than treated as the member's own.
+
+Accounts that are deactivated or that the membership gate turns away cannot
+be viewed as; if the viewed account becomes one of those (or the admin loses
+the role) mid-session, the session falls back to the admin's own view. The
+viewed account's password cannot be changed from the Account page while
+viewing. In code: `actor_of` / `actor_id` in `security.py` give the account
+to attribute an action to; permission checks keep using the user the request
+acts as.
 
 ## Membership status and access
 

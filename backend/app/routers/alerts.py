@@ -32,7 +32,7 @@ from app.schemas.alerts import (
     RoleSuggestionAlert,
     RoleSuggestionDismiss,
 )
-from app.security import require_admin
+from app.security import actor_id, require_admin
 
 router = APIRouter(prefix="/alerts", tags=["site"], dependencies=[Depends(require_admin)])
 
@@ -317,7 +317,7 @@ def dismiss_role_suggestion(
                 user_id=body.user_id,
                 suggested_role=body.suggested_role,
                 detail=body.detail[:500],
-                dismissed_by_user_id=actor.id,
+                dismissed_by_user_id=actor_id(actor),
             )
         )
         db.commit()

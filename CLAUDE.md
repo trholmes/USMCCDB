@@ -123,7 +123,12 @@ itself, so the database just has to exist.
   people currently at their institution. Voting membership
   requires an active, non-student member currently at a US institution
   (`institutions.is_us`) — enforced server-side everywhere the involved
-  fields change.
+  fields change. An admin may **view as** any other account
+  (`POST /auth/view-as/{id}`, `docs/ROLES.md`): `get_current_user` then
+  returns the viewed account, so permission checks see what that holder
+  sees, while `actor_of` / `actor_id` (`app/security.py`) give the admin
+  behind the session — use them wherever an action is attributed
+  (`actor_user_id`, `created_by_user_id`, …), never `user.id`.
 - Status and membership changes are recorded append-only in
   `membership_events`; don't mutate history.
 - Notification mail is composed in-request by `app/services/notifications.py`

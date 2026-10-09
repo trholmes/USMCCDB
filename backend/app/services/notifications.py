@@ -34,6 +34,7 @@ from app.models import (
     UserRole,
     WorkingGroup,
 )
+from app.security import actor_id, actor_of
 from app.services.email import Message, send_email
 
 # Sign-ins provisioned from ORCID carry this until the registration form is
@@ -185,6 +186,7 @@ def finalize(recipients: set[str], *, exclude: set[str] | None = None) -> list[s
 
 
 def _actor_email(db, user: User | None) -> set[str]:
+    user = actor_of(user) if user is not None else None
     if user is None or user.person_id is None:
         return set()
     person = db.get(Person, user.person_id)
@@ -195,6 +197,8 @@ def _actor_email(db, user: User | None) -> set[str]:
 
 
 def _actor_name(db, user: User | None) -> str:
+    # The admin behind a view-as session did this, and the mail says so.
+    user = actor_of(user) if user is not None else None
     if user is not None and user.person_id is not None:
         person = db.get(Person, user.person_id)
         if person is not None:
@@ -412,7 +416,7 @@ def registration_approved(db, person: Person, actor: User) -> Message | None:
         "\n".join(lines),
         kind="registration_approved",
         person_id=person.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
     )
 
 
@@ -439,7 +443,7 @@ def registration_rejected(db, person: Person, actor: User) -> Message | None:
         "\n".join(lines),
         kind="registration_rejected",
         person_id=person.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
     )
 
 
@@ -470,7 +474,7 @@ def membership_status_changed(
         "\n".join(lines),
         kind="membership_status_changed",
         person_id=person.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
     )
 
 
@@ -503,7 +507,7 @@ def convener_changed(
         "\n".join(lines),
         kind="convener_changed",
         person_id=person.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
         context=f"working group {wg.name}",
     )
 
@@ -529,7 +533,7 @@ def nomination_submitted(db, talk: Talk, nominee: Person, actor: User) -> Messag
         "\n".join(lines),
         kind="nomination_submitted",
         person_id=nominee.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
         context=f"talk #{talk.id}",
     )
 
@@ -556,7 +560,7 @@ def speaker_assigned(db, talk: Talk, speaker: Person, actor: User) -> Message | 
         "\n".join(lines),
         kind="speaker_assigned",
         person_id=speaker.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
         context=f"talk #{talk.id}",
     )
 
@@ -580,7 +584,7 @@ def review_requested(db, pub: Publication, actor: User) -> Message | None:
         f"Collaboration review requested: {pub.title}",
         body,
         kind="publication_review_requested",
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
         context=pub.short_code or f"publication #{pub.id}",
     )
 
@@ -602,7 +606,7 @@ def reviewer_assigned(db, pub: Publication, reviewer: Person, actor: User) -> Me
         body,
         kind="publication_reviewer_assigned",
         person_id=reviewer.id,
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
         context=pub.short_code or f"publication #{pub.id}",
     )
 
@@ -624,7 +628,7 @@ def status_changed(
         f"Publication status update: {pub.title}",
         body,
         kind="publication_status_changed",
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
         context=pub.short_code or f"publication #{pub.id}",
     )
 
@@ -650,5 +654,5 @@ def test_message(db, actor: User) -> Message | None:
         "USMCC database test email",
         "\n".join(lines),
         kind="test",
-        actor_user_id=actor.id,
+        actor_user_id=actor_id(actor),
     )

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import AuthorList, Publication, User
 from app.schemas.publications import AuthorListOut, AuthorListRequest
-from app.security import get_current_user, can_manage_publications
+from app.security import actor_id, can_manage_publications, get_current_user
 from app.services.author_list import build_snapshot
 from app.services.exports import CONTENT_TYPES, RENDERERS
 
@@ -68,7 +68,7 @@ def generate_for_publication(
     alist = AuthorList(
         publication_id=pub_id,
         cutoff_date=cutoff,
-        generated_by_user_id=user.id,
+        generated_by_user_id=actor_id(user),
         snapshot=snapshot,
     )
     pub.author_cutoff_date = cutoff

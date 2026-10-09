@@ -57,6 +57,8 @@ from app.schemas.membership import (
 from app.config import get_settings
 from app.ratelimit import enforce, registration_limiter
 from app.security import (
+    actor_id,
+    actor_of,
     get_registrant_user,
     get_current_user,
     is_admin_contact_for,
@@ -626,7 +628,7 @@ def change_status(
             from_status=person.status.value,
             to_status=body.status.value,
             effective_date=effective,
-            actor_user_id=actor.id,
+            actor_user_id=actor_id(actor),
             note=body.note,
         )
     )
@@ -647,12 +649,13 @@ def change_status(
         person.is_voting = False
     # Tell the person (issue #166): the pending decisions have their own
     # messages; any other office-made change gets the generic one, and a
-    # member's own change tells nobody.
+    # member's own change tells nobody — an admin viewing the site as the
+    # member is not the member, so that change is announced like any other.
     if from_status == MemberStatus.pending and body.status == MemberStatus.active:
         notifications.queue(background, notifications.registration_approved(db, person, actor))
     elif from_status == MemberStatus.pending and body.status == MemberStatus.rejected:
         notifications.queue(background, notifications.registration_rejected(db, person, actor))
-    elif actor.person_id != person.id:
+    elif actor_of(actor).person_id != person.id:
         notifications.queue(
             background,
             notifications.membership_status_changed(
@@ -797,7 +800,7 @@ def delete_person(
     the record existed only for this membership and is deleted too; an
     office/admin/leadership login is kept and merely unlinked."""
     person = _get_person(db, person_id)
-    if actor.person_id == person_id:
+    if actor_of(actor).person_id == person_id:
         raise HTTPException(400, "You cannot delete your own record")
     login = db.execute(select(User).where(User.person_id == person_id)).scalar_one_or_none()
     if login is not None and login.role == UserRole.member:

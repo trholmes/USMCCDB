@@ -29,6 +29,7 @@ from app.schemas.publications import (
     PubStatusChange,
 )
 from app.security import (
+    actor_id,
     get_current_user,
     get_optional_user,
     is_convener_of,
@@ -168,7 +169,7 @@ def create_publication(
         )
     db.add(
         PublicationEvent(
-            publication_id=pub.id, from_status=None, to_status="in_progress", actor_user_id=user.id
+            publication_id=pub.id, from_status=None, to_status="in_progress", actor_user_id=actor_id(user)
         )
     )
     db.commit()
@@ -239,7 +240,7 @@ def change_status(
             publication_id=pub.id,
             from_status=from_status,
             to_status=body.status.value,
-            actor_user_id=user.id,
+            actor_user_id=actor_id(user),
             note=body.note,
         )
     )

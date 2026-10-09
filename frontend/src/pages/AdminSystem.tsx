@@ -95,6 +95,12 @@ export default function AdminSystem() {
                 <Table.Td>{new Date(e.created_at).toLocaleString()}</Table.Td>
                 <Table.Td>
                   {e.login ?? e.username_attempted ?? '—'}
+                  {e.method === 'view_as' && e.username_attempted && (
+                    <Text size="xs" c="dimmed" component="span">
+                      {' '}
+                      viewed as {e.username_attempted}
+                    </Text>
+                  )}
                   {!e.login && e.username_attempted && (
                     <Text size="xs" c="dimmed" component="span">
                       {' '}
