@@ -42,6 +42,7 @@ from app.security import (
     is_office,
     require_admin,
 )
+from app.services.notifications import PLACEHOLDER_DOMAIN
 
 router = APIRouter(prefix="/alerts", tags=["site"])
 
@@ -58,7 +59,10 @@ def _pending_registrations(
 ) -> list[PersonAlert]:
     """Pending registrations — all of them, or only those currently at the
     given institutions (an admin contact's own)."""
-    stmt = select(Person).where(Person.status == MemberStatus.pending)
+    stmt = select(Person).where(
+        Person.status == MemberStatus.pending,
+        Person.email.not_like(f"%{PLACEHOLDER_DOMAIN}"),
+    )
     if institution_ids is not None:
         stmt = stmt.join(Affiliation, Affiliation.person_id == Person.id).where(
             *OPEN_PRIMARY, Affiliation.institution_id.in_(institution_ids)
@@ -72,6 +76,26 @@ def _pending_registrations(
         ).all()
     )
     return [_person_alert(p, institution_of.get(p.id)) for p in people]
+
+
+def _incomplete_orcid_registrations(db: Session) -> list[PersonAlert]:
+    """Records an ORCID sign-in provisioned before the registration form was
+    ever submitted (an earlier design: the sign-in created the person on the
+    spot, so closing the form left this stub plus its login behind). Nothing
+    creates them any more; the ones that exist are discarded — or, when the
+    sign-in belongs to an existing member, linked from Admin → Accounts."""
+    people = (
+        db.execute(
+            select(Person)
+            .where(Person.email.like(f"%{PLACEHOLDER_DOMAIN}"))
+            .order_by(Person.created_at)
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        _person_alert(p, f"ORCID iD {p.orcid}" if p.orcid else "ORCID sign-in") for p in people
+    ]
 
 
 def _current_member_counts(db: Session) -> dict[int, int]:
@@ -431,6 +455,7 @@ def admin_alerts(
         institutions_missing_admin_contact=(
             _institutions_missing_admin_contact(db, member_counts, today) if office else []
         ),
+        incomplete_orcid_registrations=_incomplete_orcid_registrations(db) if admin else [],
         unlinked_accounts=_unlinked_accounts(db) if admin else [],
         role_suggestions=_role_suggestions(db, today) if admin else [],
         active_without_affiliation=_active_without_affiliation(db) if office else [],
@@ -443,6 +468,7 @@ def admin_alerts(
         len(alerts.pending_registrations)
         + len(alerts.unreviewed_institutions)
         + len(alerts.institutions_missing_admin_contact)
+        + len(alerts.incomplete_orcid_registrations)
         + len(alerts.unlinked_accounts)
         + len(alerts.role_suggestions)
         + len(alerts.active_without_affiliation)

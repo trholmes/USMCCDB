@@ -5,17 +5,20 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import LoginEvent, MembershipEvent, MemberStatus, Person, User, UserRole
+from app.models import LoginEvent, MemberStatus, Person, User, UserRole
 from app.models.auth import ROLE_RANK
-from app.ratelimit import enforce, login_limiter
+from app.ratelimit import enforce, login_limiter, registration_limiter
 from app.schemas.auth import (
     LoginRequest,
     MeOut,
+    OrcidClaimAck,
+    OrcidClaimRequest,
+    OrcidRegistrationOut,
     PasswordChange,
     UserCreate,
     UserOut,
@@ -24,6 +27,7 @@ from app.schemas.auth import (
 from app.schemas.site import LoginEventOut
 from app.security import (
     check_login_password,
+    clear_orcid_registration_cookie,
     clear_session_cookie,
     cookie_secure,
     actor_id,
@@ -32,9 +36,13 @@ from app.security import (
     get_current_user,
     get_signed_in_user,
     hash_password,
+    make_orcid_claim_token,
     membership_block_reason,
+    read_orcid_claim_token,
+    read_orcid_registration,
     require_admin,
     session_expiry,
+    set_orcid_registration_cookie,
     set_session_cookie,
     view_as_block_reason,
 )
@@ -83,12 +91,7 @@ def _log_login(
 
 
 def _redirect_uri(request: Request) -> str:
-    settings = get_settings()
-    if settings.site_url:
-        base = settings.site_url.rstrip("/")
-    else:
-        base = str(request.base_url).rstrip("/")
-    return f"{base}/api/v1/auth/orcid/callback"
+    return f"{_api_base(request)}/api/v1/auth/orcid/callback"
 
 
 @router.post("/login")
@@ -267,8 +270,8 @@ def _is_unapproved(person: Person | None) -> bool:
 
 def _drop_unapproved_person(db: Session, person: Person) -> None:
     """Delete an unapproved (pending/rejected) registration — typically the
-    duplicate an ORCID sign-in provisions when the directory record it
-    belongs to carries a different iD. Approved members carry history that
+    duplicate an ORCID newcomer registers when the directory record they
+    belong to carries a different iD. Approved members carry history that
     must not vanish with a click. Flushed so the record's unique values
     (email, ORCID iD) are free for whatever the caller does next."""
     if not _is_unapproved(person):
@@ -392,7 +395,7 @@ def merge_users(
 
     When the two logins point at different people and exactly one of them
     is an unapproved registration, that record is the duplicate an ORCID
-    sign-in provisioned (the directory record carried a mistyped iD, or its
+    newcomer registered (the directory record carried a mistyped iD, or its
     login could not take the link): it is deleted and the approved person
     kept, whose record then takes the login's authenticated ORCID iD."""
     if keep_id == other_id:
@@ -449,8 +452,8 @@ def remove_user_person(
     _actor: User = Depends(require_admin),
 ) -> UserOut:
     """Delete the unapproved person record linked to a login, keeping the
-    login. For someone who signed in with ORCID (which provisions a pending
-    registration) but needs only an office/admin account, not a membership —
+    login. For someone who registered after an ORCID sign-in but needs only
+    an office/admin account, not a membership —
     or whose registration duplicates a directory record the login should be
     linked to instead (PATCH person_id with replace_person does both at once).
 
@@ -594,10 +597,6 @@ async def orcid_callback(
     # 1. Existing login with this ORCID iD.
     user = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
 
-    # A directory person already carrying this ORCID iD whose login could not
-    # take the link — resolved by the office instead of guessed at here.
-    conflict: Person | None = None
-
     if user is None:
         # 2. Directory member with this ORCID iD: link automatically. If the
         # person already signs in with a local account, attach the ORCID to
@@ -624,53 +623,27 @@ async def orcid_callback(
                 # (ambiguous records), or it holds a role above member — a
                 # directory match alone must not hand out a privileged
                 # session (a mistyped iD on such a record would otherwise
-                # sign a stranger into it). Take the unknown-ORCID path below
-                # and tell the office instead of guessing here.
-                conflict = person
+                # sign a stranger into it). Park the sign-in as a login
+                # without a person and tell the office instead of guessing.
+                _park_conflicting_signin(db, background, person, orcid_id, name)
+                return bounce("/login?error=orcid_conflict")
 
     if user is None:
-        # 3. Unknown ORCID: create a pending person + login, send to the
-        # registration form. Someone with approval rights activates (or
-        # rejects) later; until then the login gets no member-level access.
-        given, family = "", ""
-        if name:
-            parts = name.rsplit(" ", 1)
-            given, family = (parts[0], parts[1]) if len(parts) == 2 else ("", name)
-        person = Person(
-            given_name=given or "Unknown",
-            family_name=family or orcid_id,
-            email=f"{orcid_id}@orcid.placeholder",  # replaced when they complete the form
-            # On a conflict the directory person keeps the iD (unique
-            # column); the authenticated iD lives on the login, and the
-            # office reconciles the two records.
-            orcid=None if conflict is not None else orcid_id,
-            status=MemberStatus.pending,
-        )
-        db.add(person)
-        db.flush()
-        db.add(MembershipEvent(person_id=person.id, from_status=None, to_status="pending"))
-        user = User(orcid=orcid_id, person_id=person.id, role=UserRole.member)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        if conflict is not None:
-            notifications.queue(
-                background, notifications.orcid_link_conflict(db, conflict, person, orcid_id)
-            )
+        # 3. Unknown ORCID: nothing is created yet. The authenticated iD
+        # rides in a short-lived signed cookie to the registration form,
+        # which creates the person + login together on submit — so closing
+        # the form leaves no half-filled record behind.
+        response = bounce("/register?welcome=orcid")
+        set_orcid_registration_cookie(response, request, orcid=orcid_id, name=name)
+        return response
 
     if not user.is_active:
         return bounce("/login?error=account_disabled")
 
-    person = db.get(Person, user.person_id) if user.person_id else None
-    needs_registration = bool(
-        person is not None and person.email.endswith("@orcid.placeholder")
-    )
-
-    # Unapproved memberships get no session — except an incomplete ORCID
-    # registration, which keeps one solely so the registration form can
-    # complete its own placeholder record (everything else is gated by
+    # Unapproved memberships get no session (everything else is gated by
     # membership_block_reason in get_current_user).
-    if user.role == UserRole.member and not needs_registration:
+    person = db.get(Person, user.person_id) if user.person_id else None
+    if user.role == UserRole.member:
         if person is None:
             return bounce("/login?error=account_unlinked")
         if person.status == MemberStatus.pending:
@@ -682,7 +655,184 @@ async def orcid_callback(
     _log_login(db, request, method="orcid", success=True, user=user)
     db.commit()
 
-    dest = "/register?welcome=orcid" if needs_registration else "/"
-    response = bounce(dest)
+    response = bounce("/")
     set_session_cookie(response, request, create_access_token(user))
     return response
+
+
+def _park_conflicting_signin(
+    db: Session, background: BackgroundTasks, existing: Person, orcid_id: str, name: str
+) -> None:
+    """An authenticated ORCID iD matched a directory record it must not be
+    linked to automatically. Keep a member login carrying the iD but no
+    person — it gets no access (membership_block_reason) and shows up under
+    "sign-ins not linked" — so the office can link or merge it from Admin →
+    Accounts, and tell them. A repeat sign-in reuses the parked login."""
+    parked = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
+    if parked is None:
+        parked = User(orcid=orcid_id, person_id=None, role=UserRole.member)
+        db.add(parked)
+        db.commit()
+        db.refresh(parked)
+        notifications.queue(
+            background, notifications.orcid_link_conflict(db, existing, orcid_id, name)
+        )
+
+
+def _split_orcid_name(name: str) -> tuple[str, str]:
+    """ORCID's profile name is "Given Family" — a best-effort split for
+    prefilling the form (the registrant corrects it)."""
+    if not name:
+        return "", ""
+    parts = name.rsplit(" ", 1)
+    return (parts[0], parts[1]) if len(parts) == 2 else ("", name)
+
+
+def _directory_name_match(db: Session, name: str) -> bool:
+    """True when exactly one directory record with no ORCID iD carries this
+    name — a hint to an ORCID newcomer that they may already be a member. A
+    hint only: the record is linked solely through the emailed verification
+    (never from a name match), and rejected registrations don't count."""
+    given, family = _split_orcid_name(name)
+    if not given or not family:
+        return False
+    stmt = select(func.count(Person.id)).where(
+        Person.orcid.is_(None),
+        Person.status != MemberStatus.rejected,
+        func.lower(Person.family_name) == family.lower(),
+        or_(
+            func.lower(Person.given_name) == given.lower(),
+            func.lower(Person.preferred_name) == given.lower(),
+        ),
+    )
+    return db.execute(stmt).scalar_one() == 1
+
+
+@router.get("/orcid/registration")
+def orcid_registration(request: Request, db: Session = Depends(get_db)) -> OrcidRegistrationOut:
+    """What the registration form shows an ORCID newcomer: the authenticated
+    iD, the profile name to prefill, and whether the directory holds an
+    unlinked record with that name. 404 once the hand-off cookie is gone."""
+    pending = read_orcid_registration(request)
+    if pending is None:
+        raise HTTPException(404, "No ORCID sign-in is waiting to be registered")
+    given, family = _split_orcid_name(pending["name"])
+    return OrcidRegistrationOut(
+        orcid=pending["orcid"],
+        name=pending["name"],
+        given_name=given,
+        family_name=family,
+        name_match=_directory_name_match(db, pending["name"]),
+    )
+
+
+@router.post("/orcid/claim")
+def orcid_claim(
+    body: OrcidClaimRequest,
+    request: Request,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> OrcidClaimAck:
+    """"I'm already a member": link the ORCID iD just authenticated to the
+    directory record carrying this email. Nothing is linked here — a
+    verification link goes to that address, and following it (orcid_claim_verify)
+    proves both the iD and the address. The answer never says whether the
+    address matched a record (issue #62: the public endpoints must not let
+    anyone probe who is a member); a record whose login already carries a
+    different iD goes to the office instead."""
+    enforce(registration_limiter(), request)
+    pending = read_orcid_registration(request)
+    if pending is None:
+        raise HTTPException(403, "Sign in with ORCID first")
+    orcid_id, name = pending["orcid"], pending["name"]
+    email = body.email.lower()
+    person = db.execute(
+        select(Person).where(func.lower(Person.email) == email)
+    ).scalar_one_or_none()
+    if person is not None:
+        login = db.execute(select(User).where(User.person_id == person.id)).scalar_one_or_none()
+        if (person.orcid is not None and person.orcid != orcid_id) or (
+            login is not None and login.orcid is not None and login.orcid != orcid_id
+        ):
+            _park_conflicting_signin(db, background, person, orcid_id, name)
+        else:
+            token = make_orcid_claim_token(orcid=orcid_id, person_id=person.id)
+            link = f"{_api_base(request)}/api/v1/auth/orcid/claim/verify?token={token}"
+            notifications.queue(
+                background, notifications.orcid_claim_verification(person, orcid_id, link)
+            )
+    return OrcidClaimAck()
+
+
+@router.get("/orcid/claim/verify")
+def orcid_claim_verify(
+    request: Request, token: str, db: Session = Depends(get_db)
+) -> RedirectResponse:
+    """The emailed verification link: link the ORCID iD to the record and
+    sign the member in (an unapproved record is linked but, as always, gets
+    no session until approved). May be opened in any browser — the token
+    alone carries the claim."""
+
+    def bounce(dest: str) -> RedirectResponse:
+        r = RedirectResponse(dest)
+        clear_orcid_registration_cookie(r)
+        return r
+
+    claim = read_orcid_claim_token(token)
+    if claim is None:
+        return bounce("/login?error=orcid_claim_expired")
+    orcid_id = claim["orcid"]
+    person = db.get(Person, claim["person_id"])
+    if person is None:
+        return bounce("/login?error=orcid_claim_expired")
+
+    # Re-check what the claim endpoint checked — the records may have moved
+    # on since the mail went out.
+    other = db.execute(
+        select(Person).where(Person.orcid == orcid_id, Person.id != person.id)
+    ).scalar_one_or_none()
+    if other is not None or (person.orcid is not None and person.orcid != orcid_id):
+        return bounce("/login?error=orcid_conflict")
+    user = db.execute(select(User).where(User.person_id == person.id)).scalar_one_or_none()
+    by_orcid = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
+    if user is None:
+        if by_orcid is not None and by_orcid.person_id is None:
+            # A parked conflict login for this iD: it becomes the record's.
+            user = by_orcid
+            user.person_id = person.id
+        elif by_orcid is not None:
+            return bounce("/login?error=orcid_conflict")
+        else:
+            user = User(orcid=orcid_id, person_id=person.id, role=UserRole.member)
+            db.add(user)
+    elif user.orcid is None:
+        if by_orcid is not None:
+            return bounce("/login?error=orcid_conflict")
+        user.orcid = orcid_id
+    elif user.orcid != orcid_id:
+        return bounce("/login?error=orcid_conflict")
+    person.orcid = orcid_id
+    db.commit()
+    db.refresh(user)
+
+    if not user.is_active:
+        return bounce("/login?error=account_disabled")
+    if user.role == UserRole.member:
+        if person.status == MemberStatus.pending:
+            return bounce("/login?error=membership_pending")
+        if person.status == MemberStatus.rejected:
+            return bounce("/login?error=membership_rejected")
+
+    user.last_login_at = datetime.now(UTC)
+    _log_login(db, request, method="orcid", success=True, user=user)
+    db.commit()
+    response = bounce("/")
+    set_session_cookie(response, request, create_access_token(user))
+    return response
+
+
+def _api_base(request: Request) -> str:
+    settings = get_settings()
+    if settings.site_url:
+        return settings.site_url.rstrip("/")
+    return str(request.base_url).rstrip("/")

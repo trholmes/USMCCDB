@@ -129,8 +129,8 @@ export default function AdminPage() {
 
   const personLabel = (p: PersonSummary) => `${p.given_name} ${p.family_name}`
 
-  // An unapproved registration (typically provisioned by a first ORCID
-  // sign-in): a duplicate of a directory record the login belongs to, or a
+  // An unapproved registration (typically one an ORCID newcomer submitted):
+  // a duplicate of a directory record the login belongs to, or a
   // membership an office/admin login does not need.
   const linkedPerson = manage?.person_id ? people.find((p) => p.id === manage.person_id) : undefined
   const removablePerson =
@@ -235,7 +235,7 @@ export default function AdminPage() {
         `privileged role; '${loginLabel(other)}' is deleted.`,
     ]
     // Two different people: the unapproved one is the duplicate an ORCID
-    // sign-in provisioned and goes with the merge (the backend refuses when
+    // newcomer registered and goes with the merge (the backend refuses when
     // neither, or both, is unapproved).
     if (linkedPerson && otherPerson && linkedPerson.id !== otherPerson.id) {
       const dup = [linkedPerson, otherPerson].find((p) =>

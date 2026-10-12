@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.models import UserRole
 from app.schemas.common import ORMModel
@@ -35,8 +35,8 @@ class UserUpdate(BaseModel):
     person_id: int | None = None
     # With person_id: also delete the person currently linked to the login,
     # provided it is an unapproved (pending/rejected) registration — the
-    # duplicate an ORCID sign-in provisions when the directory record it
-    # belongs to carried a different (mistyped) iD.
+    # duplicate an ORCID newcomer registers when the directory record they
+    # belong to carried a different (mistyped) iD.
     replace_person: bool = False
 
 
@@ -60,3 +60,32 @@ class MeOut(BaseModel):
     # actions that send notifications only when it does.
     email_enabled: bool
     contact_email: str
+
+
+class OrcidRegistrationOut(BaseModel):
+    """What the registration form shows an ORCID sign-in that matched no
+    record (served from the signed hand-off cookie)."""
+
+    orcid: str
+    name: str
+    given_name: str
+    family_name: str
+    # Exactly one directory record without an ORCID iD carries this name —
+    # a hint that they may already be a member (never a link by itself).
+    name_match: bool
+
+
+class OrcidClaimRequest(BaseModel):
+    """"I'm already a member": the email on the directory record."""
+
+    email: EmailStr
+
+
+class OrcidClaimAck(BaseModel):
+    """Always the same answer — the endpoint must not reveal whether the
+    address belongs to a member record (issue #62)."""
+
+    detail: str = (
+        "If that address is on a member record, a verification link is on "
+        "its way to it — follow it to link your ORCID iD."
+    )

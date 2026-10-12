@@ -1,4 +1,5 @@
 import {
+  Alert,
   Anchor,
   Autocomplete,
   Avatar,
@@ -6,6 +7,8 @@ import {
   Card,
   Center,
   Checkbox,
+  Collapse,
+  Divider,
   FileInput,
   Group,
   MultiSelect,
@@ -33,6 +36,19 @@ interface InstitutionPublic {
   name: string
   short_name: string | null
   is_us: boolean
+}
+
+// The ORCID sign-in waiting to be registered (GET /auth/orcid/registration):
+// the authenticated iD lives in a short-lived cookie, and nothing is created
+// until the form is submitted — or the member links an existing record.
+interface OrcidRegistration {
+  orcid: string
+  name: string
+  given_name: string
+  family_name: string
+  // Exactly one unlinked directory record carries this name: open the
+  // "already a member" path by default.
+  name_match: boolean
 }
 
 // The form takes no ORCID iD: an iD reaches a person record only through an
@@ -76,6 +92,18 @@ export default function RegisterPage() {
   const fromOrcid = params.get('welcome') === 'orcid'
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
+  // ORCID arrivals: 'loading' until the hand-off is read, null once it has
+  // expired (they sign in again), otherwise the iD and name to prefill.
+  const [orcidReg, setOrcidReg] = useState<OrcidRegistration | null | 'loading'>(
+    fromOrcid ? 'loading' : null,
+  )
+  // "Already a member?" — link the ORCID iD to an existing record instead
+  // of registering again. A verification link goes to the record's email.
+  const [claimOpen, setClaimOpen] = useState(false)
+  const [claimEmail, setClaimEmail] = useState('')
+  const [claimBusy, setClaimBusy] = useState(false)
+  const [claimSent, setClaimSent] = useState(false)
+
   const pickPhoto = async (file: File | null) => {
     setPhotoFile(file)
     if (!file) {
@@ -95,6 +123,35 @@ export default function RegisterPage() {
     api.get<AuthConfig>('/auth/config').then(setConfig).catch(() => setConfig(null))
     api.get<InstitutionPublic[]>('/institutions/public').then(setInsts).catch(() => setInsts([]))
   }, [])
+
+  useEffect(() => {
+    if (!fromOrcid) return
+    api
+      .get<OrcidRegistration>('/auth/orcid/registration')
+      .then((reg) => {
+        setOrcidReg(reg)
+        setClaimOpen(reg.name_match)
+        setForm((f) => ({
+          ...f,
+          given_name: f.given_name || reg.given_name,
+          family_name: f.family_name || reg.family_name,
+        }))
+      })
+      .catch(() => setOrcidReg(null))
+  }, [fromOrcid])
+
+  const sendClaim = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setClaimBusy(true)
+    try {
+      await api.post('/auth/orcid/claim', { email: claimEmail.trim() })
+      setClaimSent(true)
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setClaimBusy(false)
+    }
+  }
 
   // Typed text that names a known institution (by full or short name) links
   // to it — no US question, no duplicate entry for the office to merge.
@@ -201,10 +258,18 @@ export default function RegisterPage() {
       <Card withBorder w={{ base: '100%', sm: 560 }} p="xl">
         <Stack>
           <div>
-            <Title order={3}>Join USMCC</Title>
-            {fromOrcid && (
+            <Title order={3}>{fromOrcid ? 'Complete your registration' : 'Join USMCC'}</Title>
+            {fromOrcid && orcidReg && orcidReg !== 'loading' && (
               <Text c="green" size="sm">
-                Your ORCID sign-in worked — please complete your membership registration.
+                Signed in with ORCID iD {orcidReg.orcid}. New to the USMCC? Fill in the form
+                below to register.
+              </Text>
+            )}
+            {fromOrcid && orcidReg === null && (
+              <Text c="red" size="sm">
+                Your ORCID sign-in has expired —{' '}
+                <Anchor href="/api/v1/auth/orcid/login">sign in with ORCID again</Anchor> to
+                continue.
               </Text>
             )}
             {/* Someone who reached the form directly (not via the ORCID
@@ -220,6 +285,60 @@ export default function RegisterPage() {
               </Text>
             )}
           </div>
+          {fromOrcid && orcidReg && orcidReg !== 'loading' && (
+            <Card withBorder bg="var(--mantine-color-default-hover)" p="md">
+              {orcidReg.name_match ? (
+                <Alert color="yellow" title="You may already be a member" mb="xs">
+                  The directory has a member record matching your name. If that's you,
+                  link your ORCID iD to it here instead of registering again.
+                </Alert>
+              ) : (
+                <Group justify="space-between" wrap="nowrap">
+                  <Text size="sm" fw={600}>
+                    Already a USMCC member?
+                  </Text>
+                  <Button variant="subtle" size="compact-sm" onClick={() => setClaimOpen((o) => !o)}>
+                    {claimOpen ? 'Hide' : 'Link my existing record'}
+                  </Button>
+                </Group>
+              )}
+              <Collapse in={claimOpen}>
+                {claimSent ? (
+                  <Text size="sm" mt="xs">
+                    If that address is on a member record, a verification link is on its way
+                    to it — open the link to connect your ORCID iD and sign in. You can close
+                    this page.
+                  </Text>
+                ) : (
+                  <form onSubmit={sendClaim}>
+                    <Stack gap="xs" mt="xs">
+                      <Text size="sm" c="dimmed">
+                        Enter the email address on your member record and we'll send it a
+                        verification link. Opening the link connects your ORCID iD to your
+                        record — nothing else is needed.
+                      </Text>
+                      <Group align="flex-end" wrap="nowrap">
+                        <TextInput
+                          label="Email on your member record"
+                          type="email"
+                          required
+                          value={claimEmail}
+                          onChange={(e) => setClaimEmail(e.currentTarget.value)}
+                          style={{ flex: 1 }}
+                        />
+                        <Button type="submit" loading={claimBusy}>
+                          Send link
+                        </Button>
+                      </Group>
+                    </Stack>
+                  </form>
+                )}
+              </Collapse>
+            </Card>
+          )}
+          {fromOrcid && orcidReg && orcidReg !== 'loading' && (
+            <Divider label="New member? Register below" labelPosition="center" />
+          )}
           <form onSubmit={submit}>
             <Stack gap="sm">
               <TextInput

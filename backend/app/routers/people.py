@@ -11,6 +11,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from fastapi.responses import FileResponse
@@ -59,10 +60,12 @@ from app.ratelimit import enforce, registration_limiter
 from app.security import (
     actor_id,
     actor_of,
-    get_registrant_user,
+    clear_orcid_registration_cookie,
     get_current_user,
+    get_optional_user,
     is_admin_contact_for,
     is_office,
+    read_orcid_registration,
     require_admin,
     require_office,
 )
@@ -260,13 +263,15 @@ def register(
     body: PersonRegistration,
     background: BackgroundTasks,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
-    registrant: User | None = Depends(get_registrant_user),
+    registrant: User | None = Depends(get_optional_user),
 ) -> PersonSummary | RegistrationAck:
     """Public membership registration; creates a pending person record and
-    notifies everyone who can approve it. A signed-in ORCID user still
-    carrying the placeholder record from their first sign-in completes that
-    record instead of creating a duplicate.
+    notifies everyone who can approve it. After an ORCID sign-in that
+    matched no record, the authenticated iD waits in a signed cookie (see
+    /auth/orcid/callback): the record is created with that iD and a login
+    is created alongside it — nothing exists until the form is submitted.
 
     Non-office callers always get the same neutral acknowledgement: a
     submission matching an existing record creates nothing and is reported
@@ -284,16 +289,24 @@ def register(
     # before any record is created.
     photo_bytes = _decode_registration_photo(body.photo) if body.photo else None
 
-    person: Person | None = None
-    if registrant is not None and registrant.person_id is not None:
-        candidate = db.get(Person, registrant.person_id)
-        if candidate is not None and candidate.email.endswith("@orcid.placeholder"):
-            person = candidate
+    # An ORCID newcomer's authenticated iD (None for the plain form and for
+    # office entry). The cookie is single-use: cleared whichever way this
+    # ends, so a resubmission cannot create a second login.
+    pending_orcid = read_orcid_registration(request) if not office_caller else None
+    orcid_id = pending_orcid["orcid"] if pending_orcid else None
+    if pending_orcid:
+        clear_orcid_registration_cookie(response)
 
-    email_clash = select(Person).where(Person.email == email)
-    if person is not None:
-        email_clash = email_clash.where(Person.id != person.id)
-    clash = db.execute(email_clash).scalar_one_or_none()
+    clash = db.execute(select(Person).where(Person.email == email)).scalar_one_or_none()
+    if clash is None and orcid_id is not None:
+        # The iD reached a record (or a login) since the sign-in — the
+        # office set it, or this is a resubmitted form. Same neutral answer
+        # and the office hears about it.
+        clash = db.execute(select(Person).where(Person.orcid == orcid_id)).scalar_one_or_none()
+        if clash is None:
+            login = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
+            if login is not None and login.person_id is not None:
+                clash = db.get(Person, login.person_id)
     if clash is not None:
         if office_caller:
             raise HTTPException(409, "A record with this email already exists")
@@ -326,10 +339,7 @@ def register(
                 "undergrad or grad student) — either update your position or "
                 "register as a non-voting member.",
             )
-        current = _open_primary(db, person.id) if person is not None else None
-        if current is not None:
-            institution_is_us = current.institution.is_us
-        elif body.institution_id is not None:
+        if body.institution_id is not None:
             inst = db.get(Institution, body.institution_id)
             if inst is None:
                 raise HTTPException(404, "institution_id not found")
@@ -348,51 +358,40 @@ def register(
                 "your US institution or register as a non-voting member.",
             )
 
-    if person is None:
-        person = Person(
-            given_name=body.given_name,
-            middle_name=body.middle_name,
-            family_name=body.family_name,
-            preferred_name=body.preferred_name,
-            email=email,
-            career_stage=body.career_stage,
-            professional_title=body.professional_title,
-            department=body.department,
-            usmcc_percent=body.usmcc_percent,
-            status=MemberStatus.pending,
-            is_voting=body.is_voting,
-            advisor_approved=body.advisor_approved,
-            public_listing_consent=body.public_listing_consent,
-            research_areas=body.research_areas,
-            expertise=body.expertise,
-            notes=body.notes,
-        )
-        db.add(person)
-        db.flush()
-        db.add(MembershipEvent(person_id=person.id, from_status=None, to_status="pending"))
-    else:
-        # Completing an ORCID-provisioned placeholder: fill in the form
-        # fields. The ORCID iD stays the authenticated one from sign-in, and
-        # the pending membership event was already recorded at provisioning.
-        person.given_name = body.given_name
-        person.middle_name = body.middle_name
-        person.family_name = body.family_name
-        person.preferred_name = body.preferred_name
-        person.email = email
-        person.career_stage = body.career_stage
-        person.professional_title = body.professional_title
-        person.department = body.department
-        person.usmcc_percent = body.usmcc_percent
-        person.is_voting = body.is_voting
-        person.advisor_approved = body.advisor_approved
-        person.public_listing_consent = body.public_listing_consent
-        person.research_areas = body.research_areas
-        person.expertise = body.expertise
-        person.notes = body.notes
+    person = Person(
+        given_name=body.given_name,
+        middle_name=body.middle_name,
+        family_name=body.family_name,
+        preferred_name=body.preferred_name,
+        email=email,
+        # Only ever the iD an ORCID sign-in authenticated — never typed.
+        orcid=orcid_id,
+        career_stage=body.career_stage,
+        professional_title=body.professional_title,
+        department=body.department,
+        usmcc_percent=body.usmcc_percent,
+        status=MemberStatus.pending,
+        is_voting=body.is_voting,
+        advisor_approved=body.advisor_approved,
+        public_listing_consent=body.public_listing_consent,
+        research_areas=body.research_areas,
+        expertise=body.expertise,
+        notes=body.notes,
+    )
+    db.add(person)
+    db.flush()
+    db.add(MembershipEvent(person_id=person.id, from_status=None, to_status="pending"))
+    if orcid_id is not None:
+        # The sign-in's login, created with the record it belongs to. A
+        # member login whose person is pending gets no access until the
+        # registration is approved (membership_block_reason).
+        login = db.execute(select(User).where(User.orcid == orcid_id)).scalar_one_or_none()
+        if login is None:
+            db.add(User(orcid=orcid_id, person_id=person.id, role=UserRole.member))
+        else:
+            login.person_id = person.id  # a parked conflict login, now resolved
 
-    if (
-        body.institution_id is not None or (body.institution_name or "").strip()
-    ) and _open_primary(db, person.id) is None:
+    if body.institution_id is not None or (body.institution_name or "").strip():
         institution_id = _resolve_institution_id(
             db, body.institution_id, body.institution_name, body.institution_is_us
         )

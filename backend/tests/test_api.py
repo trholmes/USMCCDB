@@ -2710,111 +2710,159 @@ def _no_session_cookie(r) -> bool:
     )
 
 
+def _orcid_register(admin, monkeypatch, orcid_id, given, family, email, **extra):
+    """An ORCID sign-in that matches nothing, then the registration form:
+    the person (carrying the authenticated iD) and the login are created
+    together on submit. Returns (client, person id, login id)."""
+    import app.services.email as email_mod
+
+    monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
+    c, r = _orcid_signin(monkeypatch, orcid_id, f"{given} {family}")
+    assert r.headers["location"] == "/register?welcome=orcid", r.headers
+    r = c.post(
+        "/api/v1/people/register",
+        json={"given_name": given, "family_name": family, "email": email, **extra},
+    )
+    assert r.status_code == 201, r.text
+    pid = admin.get("/api/v1/people", params={"q": email}).json()[0]["id"]
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid_id)
+    return c, pid, uid
+
+
 def test_orcid_stranger_gets_no_access_until_approved(admin, monkeypatch):
     import app.services.email as email_mod
 
     sent = []
     monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    orcid = "0000-0002-1825-0097"
 
-    stranger, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
+    stranger, r = _orcid_signin(monkeypatch, orcid, "Josiah Carberry")
     assert r.status_code == 307, r.text
     assert r.headers["location"] == "/register?welcome=orcid"
+    # No session, and — crucially — no record yet: the sign-in only parks
+    # the authenticated iD in a cookie for the form. Closing the form
+    # leaves nothing behind for the office to clean up.
+    assert _no_session_cookie(r)
+    assert stranger.get("/api/v1/auth/me").status_code == 401
+    assert admin.get("/api/v1/people", params={"q": "Carberry"}).json() == []
+    assert all(u["orcid"] != orcid for u in admin.get("/api/v1/auth/users").json())
+    assert not [
+        a for a in admin.get("/api/v1/alerts").json()["pending_registrations"]
+        if "Carberry" in a["name"]
+    ]
 
-    # Signed in, but the pending stub grants no member-level access (issue
-    # #50: a free ORCID iD must not open the member directory or statistics).
-    assert stranger.get("/api/v1/auth/me").status_code == 403
-    assert stranger.get("/api/v1/people").status_code == 403
-    assert stranger.get("/api/v1/stats/members").status_code == 403
-    assert stranger.get("/api/v1/working-groups").status_code == 403
+    # The form reads the iD and profile name to prefill; without the
+    # sign-in there is nothing waiting.
+    reg = stranger.get("/api/v1/auth/orcid/registration")
+    assert reg.status_code == 200, reg.text
+    assert reg.json() == {
+        "orcid": orcid,
+        "name": "Josiah Carberry",
+        "given_name": "Josiah",
+        "family_name": "Carberry",
+        "name_match": False,
+    }
+    assert TestClient(app).get("/api/v1/auth/orcid/registration").status_code == 404
 
-    # The sign-in left a pending person stub with an audit event.
-    pend = admin.get(
-        "/api/v1/people", params={"status": "pending", "q": "0000-0002-1825-0097"}
-    ).json()
-    assert len(pend) == 1
-    pid = pend[0]["id"]
-    assert pend[0]["orcid"] == "0000-0002-1825-0097"
-
-    # Completing the registration form updates that same record — no
-    # duplicate person, ORCID iD kept from the authenticated sign-in.
-    r = stranger.post(
-        "/api/v1/people/register",
-        json={
-            "given_name": "Josiah",
-            "family_name": "Carberry",
-            "email": "josiah.carberry@example.edu",
-            "career_stage": "faculty",
-            "institution_name": "Brown University",
-            "institution_is_us": True,
-        },
-    )
+    # Submitting creates the pending person with the authenticated iD and
+    # its login, in one go.
+    form = {
+        "given_name": "Josiah",
+        "family_name": "Carberry",
+        "email": "josiah.carberry@example.edu",
+        "career_stage": "faculty",
+        "institution_name": "Brown University",
+        "institution_is_us": True,
+    }
+    r = stranger.post("/api/v1/people/register", json=form)
     assert r.status_code == 201, r.text
     # Non-office registration answers with the neutral acknowledgement only
     # (issue #62); the record itself shows the completed registration.
     assert set(r.json()) == {"detail"}
-    completed = admin.get(f"/api/v1/people/{pid}").json()
-    assert completed["email"] == "josiah.carberry@example.edu"
-    assert completed["orcid"] == "0000-0002-1825-0097"
-    assert completed["status"] == "pending"
+    pend = admin.get("/api/v1/people", params={"status": "pending", "q": "Carberry"}).json()
+    assert len(pend) == 1
+    pid = pend[0]["id"]
+    assert pend[0]["orcid"] == orcid
+    assert pend[0]["email"] == "josiah.carberry@example.edu"
     events = admin.get(f"/api/v1/people/{pid}/events").json()
     assert [e["to_status"] for e in events] == ["pending"]
+    login = next(u for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid)
+    assert login["person_id"] == pid and login["role"] == "member"
 
     # The submission asked the approvers to review it.
     assert len(sent) == 1
     assert "office@example.edu" in sent[0]["To"]
     assert sent[0]["Subject"] == "New membership registration: Josiah Carberry"
 
-    # Still no access while pending; a fresh ORCID sign-in parks at the login
-    # page without a session.
-    assert stranger.get("/api/v1/people").status_code == 403
-    parked, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
+    # The hand-off cookie was spent: a resubmission (double click, reload)
+    # creates nothing more — it is a duplicate for the office, like any
+    # other registration with a known email.
+    assert stranger.get("/api/v1/auth/orcid/registration").status_code == 404
+    r = stranger.post("/api/v1/people/register", json=form)
+    assert r.status_code == 201, r.text
+    assert len(admin.get("/api/v1/people", params={"q": "Carberry"}).json()) == 1
+    assert len(admin.get("/api/v1/auth/users").json()) == len(
+        {u["id"] for u in admin.get("/api/v1/auth/users").json()}
+    )
+    assert sent[-1]["Subject"] == "Duplicate membership registration: Josiah Carberry"
+
+    # Still no access while pending: no session was ever granted, and a
+    # fresh ORCID sign-in parks at the login page without one.
+    assert stranger.get("/api/v1/people").status_code == 401
+    parked, r = _orcid_signin(monkeypatch, orcid, "Josiah Carberry")
     assert r.headers["location"] == "/login?error=membership_pending"
     assert _no_session_cookie(r)
 
-    # Approval opens the door: the existing session works immediately and a
-    # new ORCID sign-in lands on the home page.
+    # Approval opens the door: a new ORCID sign-in lands on the home page.
     assert admin.post(
         f"/api/v1/people/{pid}/status", json={"status": "active"}
     ).status_code == 200
-    assert stranger.get("/api/v1/people").status_code == 200
-    assert stranger.get("/api/v1/auth/me").json()["person_id"] == pid
-    approved, r = _orcid_signin(monkeypatch, "0000-0002-1825-0097", "Josiah Carberry")
+    approved, r = _orcid_signin(monkeypatch, orcid, "Josiah Carberry")
     assert r.headers["location"] == "/"
     assert approved.get("/api/v1/people").status_code == 200
+    assert approved.get("/api/v1/auth/me").json()["person_id"] == pid
 
 
-def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
+def test_orcid_handoff_cookie_is_the_only_way_to_carry_an_orcid(admin, monkeypatch):
+    """A plain form submission — no sign-in — never gets an ORCID iD or a
+    login, and a forged hand-off cookie is ignored."""
     import app.services.email as email_mod
 
     monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
-
-    stranger, r = _orcid_signin(monkeypatch, "0000-0003-1111-2222", "Rae Jected")
-    assert r.headers["location"] == "/register?welcome=orcid"
-    r = stranger.post(
+    c = TestClient(app)
+    c.cookies.set("usmccdb_orcid_registration", "forged")
+    r = c.post(
         "/api/v1/people/register",
-        json={"given_name": "Rae", "family_name": "Jected", "email": "rae.jected@example.edu"},
+        json={"given_name": "Plain", "family_name": "Former", "email": "plain.former@example.edu"},
     )
     assert r.status_code == 201, r.text
-    pid = admin.get("/api/v1/people", params={"q": "rae.jected@example.edu"}).json()[0]["id"]
+    person = admin.get("/api/v1/people", params={"q": "plain.former"}).json()[0]
+    assert person["orcid"] is None
+    assert all(u["person_id"] != person["id"] for u in admin.get("/api/v1/auth/users").json())
+
+
+def test_orcid_rejected_registration_turned_away(admin, monkeypatch):
+    stranger, pid, _ = _orcid_register(
+        admin, monkeypatch, "0000-0003-1111-2222", "Rae", "Jected", "rae.jected@example.edu"
+    )
     admin.post(f"/api/v1/people/{pid}/status", json={"status": "rejected"})
 
-    # The rejection cuts off the existing session and future sign-ins alike.
-    assert stranger.get("/api/v1/people").status_code == 403
+    # The rejection keeps future sign-ins out.
+    assert stranger.get("/api/v1/people").status_code == 401
     _, r = _orcid_signin(monkeypatch, "0000-0003-1111-2222", "Rae Jected")
     assert r.headers["location"] == "/login?error=membership_rejected"
     assert _no_session_cookie(r)
 
 
 def test_orcid_admin_without_membership(admin, monkeypatch):
-    """An ORCID sign-in provisions a pending person; an admin can drop that
-    person whatever the login's role. As a member the login then has no
-    access (nothing approved to point at); made office/admin it is a
-    non-member account."""
+    """An ORCID registration is a pending person plus its login; an admin
+    can drop that person whatever the login's role. As a member the login
+    then has no access (nothing approved to point at); made office/admin it
+    is a non-member account."""
     orcid_id = "0000-0003-4444-5555"
-    stranger, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
-    assert r.headers["location"] == "/register?welcome=orcid"
-    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid_id)
-    pid = admin.get("/api/v1/people", params={"q": orcid_id}).json()[0]["id"]
+    stranger, pid, uid = _orcid_register(
+        admin, monkeypatch, orcid_id, "Nora", "Member", "nora.member@example.edu"
+    )
 
     # Removing the person from a member-role login works, and the login is
     # then blocked at the membership gate rather than let through it.
@@ -2822,15 +2870,12 @@ def test_orcid_admin_without_membership(admin, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["person_id"] is None and r.json()["role"] == "member"
     assert admin.get(f"/api/v1/people/{pid}").status_code == 404
-    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
-    r = stranger.get("/api/v1/people")
-    assert r.status_code == 403, r.text
-    assert "not linked" in r.json()["detail"]
+    assert admin.get("/api/v1/people", params={"q": "nora.member"}).json() == []
     blocked, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
     assert r.headers["location"] == "/login?error=account_unlinked"
     assert _no_session_cookie(r)
-    # Still no second pending person was provisioned: the login exists.
-    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+    # No second pending person was provisioned: the login exists.
+    assert admin.get("/api/v1/people", params={"q": "nora.member"}).json() == []
 
     # As admin the same login is a legitimate non-member account: a fresh
     # sign-in reuses it — no new pending person, no registration redirect.
@@ -2838,7 +2883,7 @@ def test_orcid_admin_without_membership(admin, monkeypatch):
     again, r = _orcid_signin(monkeypatch, orcid_id, "Nora Member")
     assert r.headers["location"] == "/"
     assert again.get("/api/v1/auth/users").status_code == 200
-    assert admin.get("/api/v1/people", params={"q": orcid_id}).json() == []
+    assert admin.get("/api/v1/people", params={"q": "nora.member"}).json() == []
 
     # Nothing left to remove.
     assert admin.delete(f"/api/v1/auth/users/{uid}/person").status_code == 400
@@ -2884,8 +2929,8 @@ def test_orcid_links_existing_approved_member(admin, monkeypatch):
 def _wrong_orcid_import(admin, monkeypatch, *, given, family, email, wrong, right):
     """The scenario behind the relink tools: the directory record was imported
     with a mistyped ORCID iD, so the person's real sign-in matched nothing
-    and provisioned a pending duplicate plus a login. Returns (directory
-    person id, duplicate person id, login id)."""
+    and they registered a pending duplicate (plus its login). Returns
+    (directory person id, duplicate person id, login id)."""
     import app.services.email as email_mod
 
     monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
@@ -2896,11 +2941,13 @@ def _wrong_orcid_import(admin, monkeypatch, *, given, family, email, wrong, righ
     admin.patch(f"/api/v1/people/{person['id']}", json={"orcid": wrong})
     admin.post(f"/api/v1/people/{person['id']}/status", json={"status": "active"})
 
-    _, r = _orcid_signin(monkeypatch, right, f"{given} {family}")
-    assert r.headers["location"] == "/register?welcome=orcid"
-    dup = admin.get("/api/v1/people", params={"q": right}).json()
-    assert len(dup) == 1 and dup[0]["id"] != person["id"]
-    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == right)
+    # Their real sign-in matched nothing, and they registered again (with
+    # another address — the record's own would have been a duplicate).
+    _, dup_id, uid = _orcid_register(
+        admin, monkeypatch, right, given, family, email.replace("@", ".again@")
+    )
+    dup = admin.get("/api/v1/people", params={"q": email.replace("@", ".again@")}).json()
+    assert len(dup) == 1 and dup[0]["id"] == dup_id and dup_id != person["id"]
     # The directory record cannot simply take the right iD: the duplicate holds it.
     r = admin.patch(f"/api/v1/people/{person['id']}", json={"orcid": right})
     assert r.status_code == 409, r.text
@@ -2937,7 +2984,6 @@ def test_relink_orcid_login_replaces_duplicate_and_corrects_orcid(admin, monkeyp
     assert r.headers["location"] == "/"
     assert member.get("/api/v1/auth/me").json()["person_id"] == pid
     # No second duplicate was provisioned: the sign-in's iD is on one record.
-    assert admin.get("/api/v1/people", params={"q": f"{right}@orcid.placeholder"}).json() == []
 
     # replace_person never deletes an approved member.
     other = admin.post(
@@ -3030,15 +3076,16 @@ def test_merge_drops_unapproved_duplicate_person(admin, monkeypatch):
     uy = next(u["id"] for u in users if u["person_id"] == pid_y)
     # One local + one ORCID-less local would fail the username rule first;
     # give one of them an ORCID-only shape via a fresh sign-in instead.
-    _, r = _orcid_signin(monkeypatch, "0000-0002-6060-0041", "Zed Pending")
-    uz = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-6060-0041")
+    _, _, uz = _orcid_register(
+        admin, monkeypatch, "0000-0002-6060-0041", "Zed", "Pending", "zed.pending@example.edu"
+    )
     r = admin.post(f"/api/v1/auth/users/{ux}/merge/{uz}")
     assert r.status_code == 200, r.text  # pending duplicate dropped, as above
     assert admin.get(f"/api/v1/people/{pid_x}").json()["orcid"] == "0000-0002-6060-0041"
-    assert admin.get("/api/v1/people", params={"q": "0000-0002-6060-0041"}).json() == []
-    _, r = _orcid_signin(monkeypatch, "0000-0002-6060-0042", "Zoe Pending")
-    uz2 = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-6060-0042")
-    pz2 = admin.get("/api/v1/people", params={"q": "0000-0002-6060-0042"}).json()[0]["id"]
+    assert admin.get("/api/v1/people", params={"q": "zed.pending"}).json() == []
+    _, pz2, uz2 = _orcid_register(
+        admin, monkeypatch, "0000-0002-6060-0042", "Zoe", "Pending", "zoe.pending@example.edu"
+    )
     admin.post(f"/api/v1/people/{pz2}/status", json={"status": "active"})
     r = admin.post(f"/api/v1/auth/users/{uy}/merge/{uz2}")
     assert r.status_code == 409, r.text
@@ -3062,21 +3109,20 @@ def test_member_cannot_self_edit_orcid(admin, monkeypatch):
 
 def test_orcid_conflicting_directory_record_goes_to_office_review(admin, monkeypatch):
     """A directory person carries the ORCID iD but their login already has a
-    *different* one: the sign-in must not guess. It gets a fresh pending
-    registration (no crash on the unique orcid column) and the office is
-    emailed to reconcile the two records."""
+    *different* one: the sign-in must not guess. No person is created; the
+    sign-in is turned away, parked as a login with no person, and the
+    office is emailed (once) to reconcile."""
     import app.services.email as email_mod
 
     sent = []
     monkeypatch.setattr(email_mod, "_deliver", sent.append)
 
-    # An ORCID account whose person record the office later points at a
+    # An ORCID registration whose record the office later points at a
     # different iD (say, correcting what they believe is a typo).
-    _, r = _orcid_signin(monkeypatch, "0000-0002-7777-0001", "Orig Holder")
-    assert r.status_code == 307
-    holder_pid = admin.get(
-        "/api/v1/people", params={"status": "pending", "q": "0000-0002-7777-0001"}
-    ).json()[0]["id"]
+    _, holder_pid, holder_uid = _orcid_register(
+        admin, monkeypatch, "0000-0002-7777-0001", "Orig", "Holder", "orig.holder@example.edu"
+    )
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
     assert admin.patch(
         f"/api/v1/people/{holder_pid}", json={"orcid": "0000-0002-7777-0002"}
     ).status_code == 200
@@ -3086,30 +3132,49 @@ def test_orcid_conflicting_directory_record_goes_to_office_review(admin, monkeyp
     # but its login carries a different iD — ambiguous, office decides.
     stranger, r = _orcid_signin(monkeypatch, "0000-0002-7777-0002", "Connie Conflict")
     assert r.status_code == 307, r.text
-    assert r.headers["location"] == "/register?welcome=orcid"
-    # Registration-only session, like any unknown-ORCID sign-in.
-    assert stranger.get("/api/v1/people").status_code == 403
+    assert r.headers["location"] == "/login?error=orcid_conflict"
+    assert _no_session_cookie(r)
+    assert stranger.get("/api/v1/auth/orcid/registration").status_code == 404
 
-    # A fresh pending record was created for the sign-in; the directory
-    # person keeps the (unique) iD on their record, the login keeps the
-    # authenticated one.
-    pend = admin.get("/api/v1/people", params={"status": "pending", "q": "Conflict"}).json()
-    assert len(pend) == 1
-    assert pend[0]["orcid"] is None
+    # No person was created; the sign-in is a parked login with no person
+    # (no access), the directory person keeps the (unique) iD.
+    assert admin.get("/api/v1/people", params={"q": "Connie"}).json() == []
     users = admin.get("/api/v1/auth/users").json()
-    signin_user = next(u for u in users if u["orcid"] == "0000-0002-7777-0002")
-    assert signin_user["person_id"] == pend[0]["id"]
+    parked = [u for u in users if u["orcid"] == "0000-0002-7777-0002"]
+    assert len(parked) == 1
+    assert parked[0]["person_id"] is None and parked[0]["role"] == "member"
+    assert next(u for u in users if u["id"] == holder_uid)["orcid"] == "0000-0002-7777-0001"
 
     # The office was told to sort it out.
     assert len(sent) == 1
     assert sent[0]["Subject"] == "ORCID sign-in needs review: 0000-0002-7777-0002"
     assert "office@example.edu" in sent[0]["To"]
+    assert "Connie Conflict" in sent[0].get_content()
+
+    # Signing in again reuses the parked login — no duplicate, no more mail.
+    sent.clear()
+    _, r = _orcid_signin(monkeypatch, "0000-0002-7777-0002", "Connie Conflict")
+    assert r.headers["location"] == "/login?error=account_unlinked"
+    assert _no_session_cookie(r)
+    assert sent == []
+    users = admin.get("/api/v1/auth/users").json()
+    assert len([u for u in users if u["orcid"] == "0000-0002-7777-0002"]) == 1
+
+    # The office decides the new iD is the right one: drop the old login and
+    # link the parked one to the record — which then signs straight in.
+    admin.post(f"/api/v1/people/{holder_pid}/status", json={"status": "active"})
+    assert admin.delete(f"/api/v1/auth/users/{holder_uid}").status_code == 204
+    r = admin.patch(f"/api/v1/auth/users/{parked[0]['id']}", json={"person_id": holder_pid})
+    assert r.status_code == 200, r.text
+    linked, r = _orcid_signin(monkeypatch, "0000-0002-7777-0002", "Connie Conflict")
+    assert r.headers["location"] == "/"
+    assert linked.get("/api/v1/auth/me").json()["person_id"] == holder_pid
 
 
 def test_orcid_signin_does_not_attach_to_privileged_account(admin, monkeypatch):
     """A directory match alone must not open an office/admin account: a
     mistyped iD on such a record would sign a stranger into it. The sign-in
-    is parked as a pending registration and the office reviews the link."""
+    is parked as a person-less login and the office reviews the link."""
     import app.services.email as email_mod
 
     sent = []
@@ -3139,20 +3204,223 @@ def test_orcid_signin_does_not_attach_to_privileged_account(admin, monkeypatch):
     sent.clear()
     c, r = _orcid_signin(monkeypatch, orcid, "Office Holder")
     assert r.status_code == 307, r.text
-    assert r.headers["location"] == "/register?welcome=orcid"
+    assert r.headers["location"] == "/login?error=orcid_conflict"
+    assert _no_session_cookie(r)
 
-    # The office account was not touched and the session is not it.
+    # The office account was not touched; the sign-in is parked.
     users = admin.get("/api/v1/auth/users").json()
     office_user = next(u for u in users if u["id"] == uid)
     assert office_user["orcid"] is None
-    signin_user = next(u for u in users if u["orcid"] == orcid)
-    assert signin_user["role"] == "member"
-    assert signin_user["person_id"] != pid
-    assert c.get("/api/v1/people").status_code == 403
+    parked = next(u for u in users if u["orcid"] == orcid)
+    assert parked["role"] == "member" and parked["person_id"] is None
+    assert c.get("/api/v1/people").status_code == 401
 
     # The office was told to review the link.
     assert len(sent) == 1
     assert sent[0]["Subject"] == f"ORCID sign-in needs review: {orcid}"
+
+    # It really is them: merging the parked login into the office login
+    # gives it the iD, and the next sign-in is the office account.
+    r = admin.post(f"/api/v1/auth/users/{uid}/merge/{parked['id']}")
+    assert r.status_code == 200, r.text
+    assert r.json()["orcid"] == orcid and r.json()["role"] == "office"
+    again, r = _orcid_signin(monkeypatch, orcid, "Office Holder")
+    assert r.headers["location"] == "/"
+    assert again.get("/api/v1/auth/me").json()["user"]["role"] == "office"
+
+
+def _claim_link(msg) -> str:
+    import re
+
+    m = re.search(r"https?://\S+/api/v1/auth/orcid/claim/verify\?token=\S+", msg.get_content())
+    assert m, msg.get_content()
+    return m.group(0)
+
+
+def test_orcid_claim_links_existing_member_record(admin, monkeypatch):
+    """The case behind this flow: a long-standing member whose directory
+    record has no ORCID iD signs in with ORCID for the first time. Instead
+    of registering again they give the email on their record; a
+    verification link goes there, and following it links the iD and signs
+    them in. Nothing is linked on a name match alone, and the claim
+    endpoint never says whether an address is a member's (issue #62)."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    orcid = "0000-0002-9999-0001"
+
+    person = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Jullian", "family_name": "Watts", "email": "jullian.watts@example.edu"},
+    ).json()
+    pid = person["id"]
+    admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"})
+
+    sent.clear()
+    c, r = _orcid_signin(monkeypatch, orcid, "Jullian Watts")
+    assert r.headers["location"] == "/register?welcome=orcid"
+    # The form is told a record with this name exists — a hint only.
+    assert c.get("/api/v1/auth/orcid/registration").json()["name_match"] is True
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] is None
+
+    # Without the sign-in there is nothing to claim.
+    r = TestClient(app).post("/api/v1/auth/orcid/claim", json={"email": "jullian.watts@example.edu"})
+    assert r.status_code == 403, r.text
+
+    # An address on no record: the same acknowledgement, no mail.
+    r = c.post("/api/v1/auth/orcid/claim", json={"email": "nobody@example.edu"})
+    assert r.status_code == 200, r.text
+    ack = r.json()
+    assert sent == []
+
+    # The record's address (any case): same acknowledgement, and the
+    # record's address gets the verification link.
+    r = c.post("/api/v1/auth/orcid/claim", json={"email": "Jullian.Watts@example.edu"})
+    assert r.status_code == 200, r.text
+    assert r.json() == ack
+    assert len(sent) == 1
+    assert sent[0]["To"] == "jullian.watts@example.edu"
+    assert sent[0]["Subject"] == "Link your ORCID iD to your USMCC member record"
+    link = _claim_link(sent[0])
+    # Still nothing linked or created.
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] is None
+    assert all(u["orcid"] != orcid for u in admin.get("/api/v1/auth/users").json())
+
+    # A bad token links nothing.
+    other = TestClient(app)
+    r = other.get("/api/v1/auth/orcid/claim/verify?token=forged", follow_redirects=False)
+    assert r.headers["location"] == "/login?error=orcid_claim_expired"
+    assert _no_session_cookie(r)
+
+    # Following the link — in any browser, the mail client opens whatever
+    # it likes — links the iD to the record and signs them in.
+    r = other.get(link, follow_redirects=False)
+    assert r.status_code == 307, r.text
+    assert r.headers["location"] == "/"
+    assert not _no_session_cookie(r)
+    assert other.get("/api/v1/auth/me").json()["person_id"] == pid
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == orcid
+    logins = [u for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == orcid]
+    assert len(logins) == 1
+    assert logins[0]["person_id"] == pid and logins[0]["role"] == "member"
+    # The directory now matches the iD: a fresh sign-in goes straight in.
+    again, r = _orcid_signin(monkeypatch, orcid, "Jullian Watts")
+    assert r.headers["location"] == "/"
+    assert again.get("/api/v1/auth/me").json()["person_id"] == pid
+
+
+def test_orcid_claim_attaches_to_existing_local_login(admin, monkeypatch):
+    """A member who already signs in with a local account: the verified
+    claim puts the iD on that account rather than creating a parallel
+    login. A pending record is linked too, but stays without a session."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    _, pid = _linked_member(admin, given="Loc", family="Alone", email="loc.alone@example.edu")
+    uid = next(u["id"] for u in admin.get("/api/v1/auth/users").json() if u["person_id"] == pid)
+    orcid = "0000-0002-9999-0002"
+
+    sent.clear()
+    c, r = _orcid_signin(monkeypatch, orcid, "Loc Alone")
+    assert c.post("/api/v1/auth/orcid/claim", json={"email": "loc.alone@example.edu"}).status_code == 200
+    r = TestClient(app).get(_claim_link(sent[0]), follow_redirects=False)
+    assert r.headers["location"] == "/"
+    login = next(u for u in admin.get("/api/v1/auth/users").json() if u["id"] == uid)
+    assert login["orcid"] == orcid and login["username"] == "loc.alone"
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == orcid
+
+    # Pending record: linked, approval still gates access.
+    pend = admin.post(
+        "/api/v1/people/register",
+        json={"given_name": "Pen", "family_name": "Ding", "email": "pen.ding@example.edu"},
+    ).json()
+    sent.clear()
+    c, r = _orcid_signin(monkeypatch, "0000-0002-9999-0003", "Pen Ding")
+    assert c.post("/api/v1/auth/orcid/claim", json={"email": "pen.ding@example.edu"}).status_code == 200
+    r = TestClient(app).get(_claim_link(sent[0]), follow_redirects=False)
+    assert r.headers["location"] == "/login?error=membership_pending"
+    assert _no_session_cookie(r)
+    assert admin.get(f"/api/v1/people/{pend['id']}").json()["orcid"] == "0000-0002-9999-0003"
+    login = next(u for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-9999-0003")
+    assert login["person_id"] == pend["id"]
+
+
+def test_orcid_claim_conflict_goes_to_office(admin, monkeypatch):
+    """Claiming a record whose login already carries another ORCID iD is
+    the same conflict as the sign-in's: no verification mail, the sign-in
+    is parked and the office told."""
+    import app.services.email as email_mod
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    _, pid, _ = _orcid_register(
+        admin, monkeypatch, "0000-0002-9999-0010", "Tay", "Ken", "tay.ken@example.edu"
+    )
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"})
+
+    sent.clear()
+    c, r = _orcid_signin(monkeypatch, "0000-0002-9999-0011", "Tay Ken")
+    r = c.post("/api/v1/auth/orcid/claim", json={"email": "tay.ken@example.edu"})
+    assert r.status_code == 200, r.text
+    assert [m["Subject"] for m in sent] == ["ORCID sign-in needs review: 0000-0002-9999-0011"]
+    assert "office@example.edu" in sent[0]["To"]
+    parked = next(u for u in admin.get("/api/v1/auth/users").json() if u["orcid"] == "0000-0002-9999-0011")
+    assert parked["person_id"] is None
+    assert admin.get(f"/api/v1/people/{pid}").json()["orcid"] == "0000-0002-9999-0010"
+
+
+def test_incomplete_orcid_registration_stubs_are_listed_and_discarded(admin):
+    """Records an earlier design left behind (an ORCID sign-in created the
+    person before the form was submitted): listed for the admin, kept out
+    of the pending-registrations list, and removable with their login — one
+    by one from the alert, or in bulk by the CLI."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.cli import purge_incomplete_registrations
+    from app.db import SessionLocal
+    from app.models import MemberStatus, MembershipEvent, Person, User, UserRole
+
+    with SessionLocal() as db:
+        stubs = []
+        for i, age in enumerate((30, 1)):
+            p = Person(
+                given_name="Half",
+                family_name=f"Filled{i}",
+                email=f"0000-0002-5555-000{i}@orcid.placeholder",
+                orcid=f"0000-0002-5555-000{i}",
+                status=MemberStatus.pending,
+            )
+            db.add(p)
+            db.flush()
+            p.created_at = datetime.now(UTC) - timedelta(days=age)
+            db.add(MembershipEvent(person_id=p.id, from_status=None, to_status="pending"))
+            db.add(User(orcid=p.orcid, person_id=p.id, role=UserRole.member))
+            stubs.append(p.id)
+        db.commit()
+    old_id, new_id = stubs
+
+    alerts = admin.get("/api/v1/alerts").json()
+    listed = {a["person_id"]: a for a in alerts["incomplete_orcid_registrations"]}
+    assert set(stubs) <= set(listed)
+    assert listed[old_id]["detail"] == "ORCID iD 0000-0002-5555-0000"
+    assert not {old_id, new_id} & {a["person_id"] for a in alerts["pending_registrations"]}
+
+    # The alert's Discard button: the record and its login go together.
+    assert admin.delete(f"/api/v1/people/{new_id}").status_code == 204
+    assert all(u["orcid"] != "0000-0002-5555-0001" for u in admin.get("/api/v1/auth/users").json())
+    assert new_id not in {
+        a["person_id"] for a in admin.get("/api/v1/alerts").json()["incomplete_orcid_registrations"]
+    }
+
+    # The CLI: a dry run touches nothing; the real run removes only the old ones.
+    purge_incomplete_registrations(older_than_days=7, dry_run=True)
+    assert admin.get(f"/api/v1/people/{old_id}").status_code == 200
+    purge_incomplete_registrations(older_than_days=7, dry_run=False)
+    assert admin.get(f"/api/v1/people/{old_id}").status_code == 404
+    assert all(u["orcid"] != "0000-0002-5555-0000" for u in admin.get("/api/v1/auth/users").json())
 
 
 def test_admin_contact_approves_pending_registration(admin, monkeypatch):
@@ -3640,11 +3908,12 @@ def test_admin_merges_local_and_orcid_accounts(admin, monkeypatch):
     import app.services.email as email_mod
 
     monkeypatch.setattr(email_mod, "_deliver", lambda msg: None)
-    # An ORCID sign-in that created its own account (stranger flow)...
-    _, r = _orcid_signin(monkeypatch, "0000-0001-5109-3700", "Merge Target")
-    assert r.status_code == 307
+    # An ORCID sign-in that registered its own account (stranger flow)...
+    _, _, orcid_uid = _orcid_register(
+        admin, monkeypatch, "0000-0001-5109-3700", "Merge", "Target", "merge.target@example.edu"
+    )
     users = admin.get("/api/v1/auth/users").json()
-    orcid_user = next(u for u in users if u["orcid"] == "0000-0001-5109-3700")
+    orcid_user = next(u for u in users if u["id"] == orcid_uid)
     # ...and a separate local account for the same human.
     local = admin.post(
         "/api/v1/auth/users",

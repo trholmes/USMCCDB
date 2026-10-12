@@ -141,8 +141,10 @@ network) and Apache terminates TLS in front of it. The proxy vhost must:
    `./scripts/start.sh`.
 
 Members whose ORCID iD is already in the database are linked automatically on
-first sign-in; unknown ORCIDs get a pending membership for the office to
-approve. Set `ORCID_HOST=sandbox.orcid.org` to test against the ORCID sandbox.
+first sign-in; an unknown ORCID iD lands on the registration form, where a
+newcomer registers (a pending membership for the office to approve) and an
+existing member instead links the iD to their record through a verification
+link sent to the email on that record. Set `ORCID_HOST=sandbox.orcid.org` to test against the ORCID sandbox.
 
 ### Email notifications
 
@@ -271,7 +273,10 @@ instance:
    with the spreadsheet are linked to their record automatically on first
    sign-in.
 
-There are also `import-members` (plain CSV), `create-admin`, and `seed-demo`
+There are also `import-members` (plain CSV), `create-admin`,
+`purge-incomplete-registrations` (bulk removal of the stubs an earlier version
+left behind when an ORCID sign-in never finished the form — the Alerts panel
+lists and discards them one at a time), and `seed-demo`
 (fictional demo data) commands — see `python -m app.cli --help`.
 
 #### Bulk public-listing consent
@@ -374,6 +379,9 @@ to admin accounts):
   directory records, merge a
   member's local + ORCID accounts, **reset a locked-out local account's
   password** (shows a one-time temporary password), search, and delete logins.
+  An ORCID sign-in that matches a record it must not open by itself (the
+  record's login carries another iD, or a role above member) is parked here
+  as a login with no person for you to link or merge; the office is emailed.
 - **Site settings** — an **announcement banner** (info/warning/critical, shown
   on the login page and above every page), a **login-page message**, and the
   **CARTO API key** for the institution map's basemap tiles; all apply
