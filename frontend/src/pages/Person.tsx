@@ -32,6 +32,7 @@ import type {
   WorkingGroup,
 } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
+import { PublicListingChoice } from '../components/PublicListingChoice'
 import RoleDetailInput from '../components/RoleDetailInput'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
@@ -771,7 +772,7 @@ export default function PersonPage() {
             )}
             <TextInput
               label="Preferred name"
-              description="Shown in place of your first/given name in listings; your family name always stays."
+              description="Shown in place of your first/given name in listings."
               value={form.preferred_name}
               disabled={!canEditFull}
               onChange={(e) => setForm({ ...form, preferred_name: e.currentTarget.value })}
@@ -839,11 +840,11 @@ export default function PersonPage() {
                   : undefined
               }
             />
-            <Checkbox
-              label="Name and photo may be listed on the public muoncollider.us/people page"
-              checked={publicListing}
+            <PublicListingChoice
+              value={publicListing}
+              onChange={setPublicListing}
               disabled={!canEditFull}
-              onChange={(e) => setPublicListing(e.currentTarget.checked)}
+              saved={person.public_listing_consent}
             />
             <Group align="flex-end" gap="xs">
               <TagsInput
@@ -922,8 +923,8 @@ export default function PersonPage() {
             <Text size="sm">
               <b>Public people page:</b>{' '}
               {person.public_listing_consent
-                ? 'name and photo may be listed on muoncollider.us/people'
-                : 'not listed on muoncollider.us/people'}
+                ? 'listed (name and photo on muoncollider.us/people)'
+                : 'opted out of muoncollider.us/people'}
             </Text>
             {STUDENT_STAGES.includes(person.career_stage) && (
               <Text size="sm">
