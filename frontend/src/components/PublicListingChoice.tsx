@@ -21,9 +21,9 @@ type Props = {
  * profile editor.
  *
  * Being listed is the collaboration's default: the "listed" option is
- * pre-selected and marked recommended, and opting out is a separate,
- * explicitly worded choice rather than an unticked checkbox, so nobody ends
- * up unlisted just by skimming past the question.
+ * pre-selected and opting out is a separate, explicitly worded choice
+ * rather than an unticked checkbox, so nobody ends up unlisted just by
+ * skimming past the question.
  */
 export function PublicListingChoice({ value, onChange, disabled, note, saved }: Props) {
   const optingOut = saved === true && !value
@@ -34,8 +34,7 @@ export function PublicListingChoice({ value, onChange, disabled, note, saved }: 
         <>
           <Text span size="xs" c="dimmed">
             muoncollider.us/people lists collaboration members by name and photo, showing the
-            size and breadth of the US Muon Collider Collaboration. Members are listed by
-            default; please keep it that way unless you really prefer not to appear.
+            size and breadth of the US Muon Collider Collaboration.
           </Text>
           {note && (
             <Text span size="xs" c="dimmed">
@@ -52,13 +51,12 @@ export function PublicListingChoice({ value, onChange, disabled, note, saved }: 
         <Radio
           value="listed"
           disabled={disabled}
-          label="Yes, list name and photo on muoncollider.us/people (recommended)"
+          label="Yes, list name and photo on muoncollider.us/people"
         />
         <Radio
           value="not_listed"
           disabled={disabled}
           label="No, do not list on the public page"
-          description="Choose this only if you really prefer not to appear there."
         />
       </Stack>
       {optingOut && (
