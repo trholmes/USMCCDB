@@ -141,7 +141,9 @@ class Person(TimestampedBase):
     # undergrad students; recorded for the office, not re-checked later).
     advisor_approved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # Permission to list the member's name and photo on the public
-    # muoncollider.us/people page. Asked at registration, self-editable.
+    # muoncollider.us/people page. Asked at registration (the form defaults
+    # to listed; the API default stays False so an omitted answer never
+    # publishes anyone), self-editable.
     public_listing_consent: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )

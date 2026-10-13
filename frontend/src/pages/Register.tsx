@@ -25,6 +25,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useSession } from '../auth/SessionContext'
 import { CAREER_STAGES, joinList, RESEARCH_AREAS, STUDENT_STAGES } from '../constants'
+import { PublicListingChoice } from '../components/PublicListingChoice'
 import { ACCEPTED_PHOTO_TYPES, preparePhoto } from '../photos'
 
 interface AuthConfig {
@@ -72,8 +73,9 @@ export default function RegisterPage() {
     // Students confirm their advisor approved them joining (required for
     // grad/undergrad; the backend refuses a student registration without it).
     advisor_approved: false,
-    // Permission to list name and photo on muoncollider.us/people.
-    public_listing_consent: false,
+    // Permission to list name and photo on muoncollider.us/people. Listed
+    // by default — members opt out explicitly (see PublicListingChoice).
+    public_listing_consent: true,
     research_areas: [] as string[],
   })
   // "Too uncertain to estimate" for the research-time question: an answer is
@@ -448,11 +450,10 @@ export default function RegisterPage() {
                   style={{ flex: 1 }}
                 />
               </Group>
-              <Checkbox
-                label="My name and photo may be listed on the public muoncollider.us/people page"
-                description="You can change this later on your profile."
-                checked={form.public_listing_consent}
-                onChange={(e) => set('public_listing_consent', e.currentTarget.checked)}
+              <PublicListingChoice
+                value={form.public_listing_consent}
+                onChange={(v) => set('public_listing_consent', v)}
+                note="You can change this later on your profile."
               />
               <div>
                 <Text size="sm" fw={700}>
