@@ -355,6 +355,7 @@ export interface AdminAlerts {
   pending_registrations: PersonAlert[]
   unreviewed_institutions: InstitutionAlert[]
   institutions_missing_admin_contact: InstitutionAlert[]
+  incomplete_orcid_registrations: PersonAlert[]
   unlinked_accounts: AccountAlert[]
   role_suggestions: RoleSuggestionAlert[]
   active_without_affiliation: PersonAlert[]

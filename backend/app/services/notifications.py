@@ -37,8 +37,10 @@ from app.models import (
 from app.security import actor_id, actor_of
 from app.services.email import Message, send_email
 
-# Sign-ins provisioned from ORCID carry this until the registration form is
-# completed; never a deliverable address.
+# Records provisioned by an ORCID sign-in before the form was submitted
+# (an earlier design; such stubs are no longer created, see
+# /auth/orcid/callback) carry this until cleaned up; never a deliverable
+# address.
 PLACEHOLDER_DOMAIN = "@orcid.placeholder"
 
 # Leadership Council positions whose holders count as "leadership" for
@@ -167,7 +169,7 @@ def publication_contacts(db, pub: Publication) -> set[str]:
 
 
 def person_address(person: Person | None) -> set[str]:
-    """The member themselves — nothing for a placeholder record."""
+    """The member themselves — nothing for a leftover placeholder record."""
     if person is None or not person.email or person.email.endswith(PLACEHOLDER_DOMAIN):
         return set()
     return {person.email}
@@ -337,42 +339,70 @@ def registration_duplicate(
     )
 
 
-def orcid_link_conflict(db, existing: Person, created: Person, orcid_id: str) -> Message | None:
+def orcid_link_conflict(db, existing: Person, orcid_id: str, name: str) -> Message | None:
     """Tell the office an authenticated ORCID sign-in matched a directory
-    record it could not be linked to safely: the record's login already
-    carries a different ORCID iD, or it holds a role above member that a
-    directory match alone must not open. The sign-in was given a fresh
-    pending registration instead; the office reconciles the two records."""
+    record it could not be linked to safely: the record (or its login)
+    already carries a different ORCID iD, or the login holds a role above
+    member that a directory match alone must not open. The sign-in was
+    parked as a login with no person — no access, listed under "sign-ins
+    not linked" — for the office to link or merge."""
     to = finalize(office(db))
     if not to:
         return None
 
     lines = [
-        f"Someone signed in with ORCID iD {orcid_id}, which is on the "
-        f"directory record of {existing.display_name}, but that record's "
-        "login could not take the link automatically (it already carries a "
-        "different ORCID iD, or it holds a role above member).",
+        f"{name or 'Someone'} signed in with ORCID iD {orcid_id}, which matches "
+        f"the directory record of {existing.display_name}, but the two could "
+        "not be linked automatically: the record or its login already carries "
+        "a different ORCID iD, or the login holds a role above member.",
         "",
         f"Existing record: {existing.display_name}",
     ]
     lines += _person_link(existing)
-    lines += ["", f"New pending registration created for the sign-in: {created.display_name}"]
-    lines += _person_link(created)
     lines += [
         "",
-        "The new registration stays pending with no access. If the sign-in "
-        "really is the person on the existing record, open Admin → Accounts, "
-        "manage the new ORCID login and link it to the existing record (or "
-        "merge it into that record's login): the pending duplicate is deleted "
-        "and the record takes the authenticated ORCID iD. If not, the existing "
-        "record is carrying someone else's ORCID iD.",
+        "The sign-in was turned away with a note that the office will sort "
+        "this out. Its login (ORCID iD only, no person, no access) is listed "
+        "under Admin → Accounts: if it really is the person on the existing "
+        "record, merge it into the record's login — or, when that login "
+        "carries a different ORCID iD, decide which iD is right, remove the "
+        "wrong login, and link the right one to the record — and the record "
+        "takes the authenticated ORCID iD. If not, the existing record is "
+        "carrying someone else's ORCID iD.",
     ]
     return Message(
         to,
         f"ORCID sign-in needs review: {orcid_id}",
         "\n".join(lines),
         kind="orcid_link_conflict",
-        person_id=created.id,
+        person_id=existing.id,
+    )
+
+
+def orcid_claim_verification(person: Person, orcid_id: str, link: str) -> Message | None:
+    """An ORCID sign-in said "I'm already a member" and gave this record's
+    email: send the record's address the link that proves it. Following the
+    link links the iD to the record and signs them in."""
+    to = finalize(person_address(person))
+    if not to:
+        return None
+    lines = [
+        f"Someone signed in to the USMCC database with ORCID iD {orcid_id} and "
+        f"asked to link it to your member record ({person.display_name}).",
+        "",
+        "If that was you, open this link to confirm and sign in:",
+        link,
+        "",
+        "The link works for 24 hours. If you did not do this, ignore this "
+        "message — nothing is linked without it.",
+    ]
+    lines += _footer()
+    return Message(
+        to,
+        "Link your ORCID iD to your USMCC member record",
+        "\n".join(lines),
+        kind="orcid_claim_verification",
+        person_id=person.id,
     )
 
 

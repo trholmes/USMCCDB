@@ -111,13 +111,21 @@ itself, so the database just has to exist.
   person at all — gets **no API access** (`membership_block_reason` in
   `app/security.py`) — ORCID self-registration must not grant member-level
   access before approval; a registration submission emails everyone who can
-  approve it. Because the gate is there, an admin may unlink or remove a
-  login's unapproved person whatever its role. A duplicate registration
-  (an ORCID sign-in whose directory record carried a mistyped iD) is fixed
-  from Admin → Accounts: link the login to the real record with
-  `replace_person`, or merge the two logins — the duplicate is deleted and
-  the record takes the login's authenticated ORCID iD (`_link_person`,
-  `_carry_orcid`, `merge_users` in `app/routers/auth.py`). A person holding
+  approve it. An ORCID sign-in that matches nothing **creates no records**:
+  the iD rides in a signed cookie (`read_orcid_registration` in
+  `app/security.py`) and `/people/register` creates the person and login
+  together, so an abandoned form leaves nothing behind. From that form an
+  existing member can instead claim their record: `/auth/orcid/claim` emails
+  the record's address a verification link whose token binds the iD to that
+  one record (`orcid_claim_verify`). A match the sign-in must not link by
+  itself (the record's login carries another iD or a role above member) is
+  parked as a person-less login and reported to the office
+  (`_park_conflicting_signin`). Because the gate is there, an admin may
+  unlink or remove a login's unapproved person whatever its role. A duplicate
+  registration is fixed from Admin → Accounts: link the login to the real
+  record with `replace_person`, or merge the two logins — the duplicate is
+  deleted and the record takes the login's authenticated ORCID iD
+  (`_link_person`, `_carry_orcid`, `merge_users` in `app/routers/auth.py`). A person holding
   an active `admin_contact` collab role (Administrative Institutional Contact,
   institution-scoped) may also edit the `ADMIN_CONTACT_EDITABLE` fields of
   people currently at their institution. Voting membership

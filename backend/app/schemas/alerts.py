@@ -56,6 +56,9 @@ class AdminAlerts(BaseModel):
     pending_registrations: list[PersonAlert]
     unreviewed_institutions: list[InstitutionAlert]
     institutions_missing_admin_contact: list[InstitutionAlert]
+    # Leftover stubs from ORCID sign-ins that never submitted the form
+    # (admin): discard, or link the sign-in to the member's real record.
+    incomplete_orcid_registrations: list[PersonAlert]
     unlinked_accounts: list[AccountAlert]
     role_suggestions: list[RoleSuggestionAlert]
     active_without_affiliation: list[PersonAlert]

@@ -30,15 +30,16 @@ request, …). The recipient wording lives in `frontend/src/emailWarnings.ts`
 (`EMAIL_RECIPIENTS`) — update it alongside this catalogue. When the server has
 no mail delivery configured (`SMTP_HOST` empty; `email_enabled` on `/auth/me`)
 nothing is sent, so those actions run without the prompt. Automatic mail
-(a registration submission, an ORCID conflict) is announced on the form
-instead.
+(a registration submission, an ORCID conflict, the "link my record"
+verification) is announced on the form instead.
 
 ## Audiences
 
 Recipients are built from these groups (helpers in `notifications.py`), combined
-with set unions. Every message then drops blank and placeholder addresses
-(ORCID sign-ins that have not completed the form) and — unless noted — the
-person whose action triggered it, who already knows.
+with set unions. Every message then drops blank addresses, the placeholder
+addresses of leftover ORCID registration stubs (an earlier design; see the
+"Incomplete ORCID registrations" alert) and — unless noted — the person whose
+action triggered it, who already knows.
 
 | Audience | Who that is |
 |---|---|
@@ -65,9 +66,10 @@ Kind is the key shown in the Admin → Email log and stored in `email_log.kind`.
 
 | Kind | Trigger | Recipients | Notes |
 |---|---|---|---|
-| `registration_submitted` | Someone submits the registration form or completes an ORCID sign-up. | office + admin contacts of the registrant's institution; never the registrant. | Carries name, email, ORCID iD, institution, position and a link. Says the registration stays pending with no access until approved. |
-| `registration_duplicate` | A public registration matched an existing person record (by email), so nothing was created. | office | The submitter got the same neutral acknowledgement as everyone else (issue #62) and is **not** told about the match; the office follows up by hand. |
-| `orcid_link_conflict` | An ORCID sign-in matched a directory record that could not be linked automatically (its login already carries a different iD, or holds a role above member). | office | A fresh pending registration was created for the sign-in; the office reconciles the two from Admin → Accounts (link the ORCID login to the existing record, or merge it into that record's login — the duplicate is deleted and the record takes the authenticated iD). |
+| `registration_submitted` | Someone submits the registration form (with or without an ORCID sign-in first). | office + admin contacts of the registrant's institution; never the registrant. | Carries name, email, ORCID iD, institution, position and a link. Says the registration stays pending with no access until approved. |
+| `registration_duplicate` | A public registration matched an existing person record (by email, or by the ORCID iD of the sign-in behind it), so nothing was created. | office | The submitter got the same neutral acknowledgement as everyone else (issue #62) and is **not** told about the match; the office follows up by hand. |
+| `orcid_link_conflict` | An ORCID sign-in (or a "link my record" request) matched a directory record that could not be linked automatically: the record or its login already carries a different iD, or the login holds a role above member. | office | The sign-in was turned away with a note that the office will sort it out, and parked as a login with no person (no access; listed under "sign-ins not linked"). The office links it to the record, or merges it into the record's login, from Admin → Accounts — the record then takes the authenticated iD. Sent once per parked login. |
+| `orcid_claim_verification` | An ORCID sign-in that matched no record said "I'm already a member" and gave the email on their record. | the person (the record's address) | Carries a 24-hour link; following it links the iD to the record and signs them in. The requester is only told that a link was sent *if* the address is on a record (issue #62). A record whose login carries a different iD gets `orcid_link_conflict` instead. |
 | `registration_approved` | A pending person is set to **active** by the office or an institution admin contact. | the person | Welcome note with the site link and how to sign in: "use your account" if one is linked, "Sign in with ORCID" if ORCID is enabled, otherwise "the office will send your details". |
 | `registration_rejected` | A pending person is set to **rejected**. | the person | Deliberately neutral; the office's note on the transition is internal and is **never** included. Gives `CONTACT_EMAIL`. |
 | `membership_status_changed` | Any other status change made by someone other than the person (active → inactive, alumni, back to active, …). | the person | Names the old and new status and who made the change. A member's own status change tells nobody. |

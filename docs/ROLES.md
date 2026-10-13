@@ -106,8 +106,10 @@ date, actor, note); notes and actors are office-internal.
 
 - A **`member`-role account whose person is `pending` or `rejected` has no
   API access at all** (`membership_block_reason`): self-registration — by
-  form or ORCID — must not grant access before approval. The one exception is
-  completing the registration form after an ORCID sign-in.
+  form or ORCID — must not grant access before approval. An ORCID sign-in
+  that matches no record creates nothing: the authenticated iD waits in a
+  short-lived cookie, and the registration form creates the person and the
+  login together on submit (abandoning the form leaves nothing behind).
 - Accounts with any higher role are exempt: their access comes from the role,
   and someone has to be able to approve.
 - Voting membership cannot be held while not `active`.
@@ -151,7 +153,12 @@ positions change.
   acknowledgement).
 - Read the public institution list (for the registration form) and the public
   publication list.
-- Start an ORCID sign-in.
+- Start an ORCID sign-in. After one that matched no record: read the iD and
+  name waiting to be registered, and ask for a "link my record" verification
+  link to the email on an existing record (rate limited; always the same
+  neutral acknowledgement). Following that link links the iD to the record —
+  whatever role its login holds, the address and the iD were both proven —
+  and signs them in.
 
 ## Where to look when changing a rule
 

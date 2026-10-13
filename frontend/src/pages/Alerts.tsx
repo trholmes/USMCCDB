@@ -55,6 +55,40 @@ function PersonRow({ item }: { item: PersonAlert }) {
   )
 }
 
+function IncompleteRegistrationRow({
+  item,
+  onDiscarded,
+}: {
+  item: PersonAlert
+  onDiscarded: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const discard = async () => {
+    if (!window.confirm(`Discard the incomplete registration '${item.name}' and its sign-in?`)) {
+      return
+    }
+    setBusy(true)
+    try {
+      // DELETE /people/{id} removes a member-role login along with the record.
+      await api.delete(`/people/${item.person_id}`)
+      notifications.show({ message: 'Incomplete registration discarded' })
+      onDiscarded()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Group gap="xs" wrap="nowrap">
+      <PersonRow item={item} />
+      <Button variant="light" color="red" size="compact-xs" loading={busy} onClick={discard}>
+        Discard
+      </Button>
+    </Group>
+  )
+}
+
 function InstitutionRow({ item }: { item: InstitutionAlert }) {
   return (
     <Group gap="xs">
@@ -206,6 +240,16 @@ export default function AlertsPage() {
       >
         {alerts.institutions_missing_admin_contact.map((i) => (
           <InstitutionRow key={i.institution_id} item={i} />
+        ))}
+      </Section>
+
+      <Section
+        title="Incomplete ORCID registrations"
+        count={alerts.incomplete_orcid_registrations.length}
+        description="Records left behind by ORCID sign-ins that never submitted the registration form (the sign-in used to create the record up front; it no longer does). Discard them — or, if the sign-in belongs to an existing member, link its login to their real record under Admin → User accounts (the stub is deleted with it)."
+      >
+        {alerts.incomplete_orcid_registrations.map((p) => (
+          <IncompleteRegistrationRow key={p.person_id} item={p} onDiscarded={refresh} />
         ))}
       </Section>
 

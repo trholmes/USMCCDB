@@ -4,6 +4,7 @@ from functools import lru_cache
 
 import jwt
 from fastapi import Depends, HTTPException, Request, Response, status
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -114,7 +115,8 @@ def membership_block_reason(db: Session, user: User) -> str | None:
     the form) must not grant member-level access to the database. The same
     goes for a member-role account with no person at all: member access
     comes from an approved membership, and there is none to point at (the
-    admin removed a duplicate registration, or never linked the login).
+    admin removed a duplicate registration, never linked the login, or an
+    ORCID sign-in matched a record it could not be linked to).
     Accounts with any other role are exempt: their access comes from the
     role, which only an admin can assign, and someone has to be able to
     approve."""
@@ -242,11 +244,72 @@ def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User |
     return user
 
 
-def get_registrant_user(request: Request, db: Session = Depends(get_db)) -> User | None:
-    """Signed-in user WITHOUT the moderation-state gate. Only for the public
-    registration endpoint: a pending ORCID sign-in must be able to complete
-    its own placeholder person record — and nothing else."""
-    return _session_user(request, db)
+# --- ORCID registration hand-off ------------------------------------------------
+#
+# An ORCID sign-in that matches nothing creates no records: the authenticated
+# iD rides in a short-lived signed cookie to the registration form, and the
+# person + login are created together when the form is submitted (abandoning
+# the form leaves nothing behind). The same cookie lets an existing member
+# claim their directory record instead: a verification link goes to the
+# record's email, and clicking it proves both the iD and the address.
+
+ORCID_REG_COOKIE = "usmccdb_orcid_registration"
+ORCID_REG_MAX_AGE = 3600  # seconds — long enough to fill in the form
+ORCID_CLAIM_MAX_AGE = 24 * 3600  # seconds — the emailed verification link
+
+
+def _orcid_serializer(salt: str) -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(get_settings().secret_key, salt=salt)
+
+
+def set_orcid_registration_cookie(
+    response: Response, request: Request, *, orcid: str, name: str
+) -> None:
+    value = _orcid_serializer("orcid-registration").dumps({"orcid": orcid, "name": name})
+    response.set_cookie(
+        ORCID_REG_COOKIE,
+        value,
+        max_age=ORCID_REG_MAX_AGE,
+        httponly=True,
+        secure=cookie_secure(request),
+        samesite="lax",
+        path="/",
+    )
+
+
+def clear_orcid_registration_cookie(response: Response) -> None:
+    response.delete_cookie(ORCID_REG_COOKIE, path="/")
+
+
+def read_orcid_registration(request: Request) -> dict | None:
+    """The authenticated ORCID iD and profile name waiting to be registered,
+    or None when there is no (valid, unexpired) hand-off cookie."""
+    raw = request.cookies.get(ORCID_REG_COOKIE)
+    if not raw:
+        return None
+    try:
+        data = _orcid_serializer("orcid-registration").loads(raw, max_age=ORCID_REG_MAX_AGE)
+    except BadSignature:
+        return None
+    if not isinstance(data, dict) or not data.get("orcid"):
+        return None
+    return {"orcid": str(data["orcid"]), "name": str(data.get("name") or "")}
+
+
+def make_orcid_claim_token(*, orcid: str, person_id: int) -> str:
+    """Single-purpose token for the emailed "link this ORCID iD to my record"
+    verification link; binds the iD to the one record it may be linked to."""
+    return _orcid_serializer("orcid-claim").dumps({"orcid": orcid, "person_id": person_id})
+
+
+def read_orcid_claim_token(token: str) -> dict | None:
+    try:
+        data = _orcid_serializer("orcid-claim").loads(token, max_age=ORCID_CLAIM_MAX_AGE)
+    except BadSignature:
+        return None
+    if not isinstance(data, dict) or not data.get("orcid") or not data.get("person_id"):
+        return None
+    return {"orcid": str(data["orcid"]), "person_id": int(data["person_id"])}
 
 
 def require_role(*roles: UserRole):

@@ -33,6 +33,9 @@ const SIGNIN_ERRORS: Record<string, string> = {
   account_unlinked: 'This sign-in is not linked to a collaboration member — contact the office.',
   membership_pending: 'Your membership registration is awaiting approval.',
   membership_rejected: 'Your membership registration was not approved — contact the office.',
+  orcid_conflict:
+    'Your ORCID iD matches a member record that could not be linked automatically. The office has been notified and will connect it for you.',
+  orcid_claim_expired: 'That verification link has expired — sign in with ORCID and request a new one.',
 }
 
 export default function LoginPage() {

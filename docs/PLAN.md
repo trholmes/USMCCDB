@@ -93,7 +93,7 @@ Permissions: FastAPI dependencies `require_role()`, `require_self_or(office)`, `
 ### ORCID OAuth (authlib)
 
 - Register with authorize/token URLs on `https://{ORCID_HOST}`, scope `/authenticate`; token response includes `orcid` + `name` directly (no extra API call)
-- Callback: (1) users.orcid match → login; (2) people.orcid match → auto-create linked user, login; (3) unknown → create pending person + user, frontend routes to "complete registration" form; office approves later
+- Callback: (1) users.orcid match → login; (2) people.orcid match → auto-create linked user, login (a record whose login carries another iD or a role above member is a conflict: parked person-less login + office mail); (3) unknown → nothing created; iD + name in a signed 1h cookie, frontend routes to the registration form, which creates person + user on submit — or the member claims an existing record via an emailed verification link; office approves later
 - JWT claims sub/role/person_id, 12h, httpOnly+SameSite=Lax, Secure per COOKIE_SECURE=auto
 
 ### Author-list generation

@@ -11,7 +11,7 @@ CSV columns (header required):
 import csv
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import typer
@@ -58,6 +58,50 @@ def create_admin(
         user.is_active = True
         db.commit()
     typer.echo("Done.")
+
+
+@cli.command()
+def purge_incomplete_registrations(
+    older_than_days: int = typer.Option(
+        7, help="Only stubs whose sign-in is at least this many days old."
+    ),
+    dry_run: bool = typer.Option(False, help="List what would be removed and stop."),
+):
+    """Remove the stubs ORCID sign-ins used to leave behind when the
+    registration form was never submitted (a person with a placeholder
+    email plus its login). Nothing creates them any more; the admin alerts
+    panel lists and discards them one by one, this does it in bulk."""
+    from datetime import timedelta
+
+    from app.services.notifications import PLACEHOLDER_DOMAIN
+
+    cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
+    with SessionLocal() as db:
+        stubs = (
+            db.execute(
+                select(Person)
+                .where(Person.email.like(f"%{PLACEHOLDER_DOMAIN}"), Person.created_at <= cutoff)
+                .order_by(Person.created_at)
+            )
+            .scalars()
+            .all()
+        )
+        for person in stubs:
+            login = db.execute(
+                select(User).where(User.person_id == person.id)
+            ).scalar_one_or_none()
+            typer.echo(
+                f"{'Would remove' if dry_run else 'Removing'} {person.display_name} "
+                f"(ORCID iD {person.orcid or '?'}, signed in {person.created_at:%Y-%m-%d})"
+            )
+            if dry_run:
+                continue
+            if login is not None and login.role == UserRole.member:
+                db.delete(login)
+            db.delete(person)
+        if not dry_run:
+            db.commit()
+    typer.echo(f"{len(stubs)} incomplete registration(s) {'found' if dry_run else 'removed'}.")
 
 
 def _ensure_activation_event(db, person: Person, effective: date) -> None:
