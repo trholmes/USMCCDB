@@ -361,6 +361,24 @@ class PersonSummary(ORMModel):
     primary_institution: InstitutionRef | None = None
 
 
+class PersonPublic(BaseModel):
+    """A member on the public muoncollider.us/people page (issue #173).
+    Only active members who gave public-listing consent appear, and only
+    what the page shows — never email, status, voting flag or notes. The id
+    exists solely to address the public photo endpoint."""
+
+    id: int
+    name: str
+    career_stage: CareerStage
+    research_areas: str | None = None
+    # Current primary institution; the page groups members by it.
+    institution: str | None = None
+    institution_short: str | None = None
+    orcid: str | None = None
+    # Whether GET /people/public/{id}/photo will serve a photo.
+    has_photo: bool = False
+
+
 class WorkingGroupRef(ORMModel):
     """Small reference used for cross-links (collab-role rows, etc.)."""
 

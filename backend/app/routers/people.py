@@ -48,6 +48,7 @@ from app.schemas.membership import (
     MemberStats,
     PersonRegistration,
     PersonOut,
+    PersonPublic,
     PersonSummary,
     PersonUpdate,
     RegistrationAck,
@@ -415,6 +416,64 @@ def register(
     if office_caller:
         return PersonSummary.model_validate(person)
     return _registration_ack()
+
+
+# Declared before any /{person_id} route so "public" is never parsed as an id.
+@router.get("/public")
+def list_people_public(db: Session = Depends(get_db)) -> list[PersonPublic]:
+    """Unauthenticated: the active members who consented to public listing,
+    for the muoncollider.us/people page (issue #173). Name, career stage,
+    research areas, current primary institution, ORCID iD and whether the
+    public photo endpoint has a photo — never email, voting flag, status or
+    anything else internal."""
+    stmt = (
+        select(Person)
+        .options(selectinload(Person.affiliations).selectinload(Affiliation.institution))
+        .where(
+            Person.status == MemberStatus.active,
+            Person.public_listing_consent.is_(True),
+        )
+        .order_by(Person.family_name, Person.given_name)
+    )
+    out = []
+    for p in db.execute(stmt).scalars().unique().all():
+        primary = next(
+            (a for a in p.affiliations if a.is_primary and a.end_date is None), None
+        )
+        inst = primary.institution if primary is not None else None
+        out.append(
+            PersonPublic(
+                id=p.id,
+                name=p.display_name,
+                career_stage=p.career_stage,
+                research_areas=p.research_areas,
+                institution=inst.name if inst is not None else None,
+                institution_short=(inst.short_name or inst.name) if inst is not None else None,
+                orcid=p.orcid,
+                has_photo=bool(p.photo_file),
+            )
+        )
+    return out
+
+
+@router.get("/public/{person_id}/photo")
+def get_photo_public(person_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    """Unauthenticated member photo for the public people page. The photo is
+    covered by the same public-listing consent as the name, so it is served
+    only while the person is active and consenting — plain 404 otherwise, so
+    the response never reveals whether the id exists."""
+    person = db.get(Person, person_id)
+    if (
+        person is None
+        or person.status != MemberStatus.active
+        or not person.public_listing_consent
+        or not person.photo_file
+    ):
+        raise HTTPException(404, "No photo")
+    path = Path(get_settings().photos_dir) / person.photo_file
+    if not path.is_file():
+        raise HTTPException(404, "No photo")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=3600"})
 
 
 @router.get("")

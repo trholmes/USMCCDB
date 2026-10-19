@@ -299,6 +299,20 @@ excluded email that matches nobody aborts the run before writing anything,
 since a typo there would publish someone who asked not to be. Members can
 still change their own answer afterwards on their profile.
 
+The `import-members-xlsx` command also honors the spreadsheet's own `Public`
+column when one is present ('Opt out' hides, any other explicit answer lists,
+a blank cell keeps the stored choice), so imported accounts follow the
+selection they made on the old system.
+
+#### Public website feed
+
+`GET /api/v1/people/public` (no sign-in) lists the active members who
+consented to public listing — name, career stage, research areas, current
+institution, ORCID iD — and `GET /api/v1/people/public/{id}/photo` serves
+their photo under the same consent. The website's `scripts/getPeople.py`
+(in the muoncollider.us repository) rebuilds the public People page from
+this feed, so opt-outs are enforced at the source.
+
 #### The whole sequence at a glance
 
 Input files go in `data/` (mounted read-only in the backend container at
