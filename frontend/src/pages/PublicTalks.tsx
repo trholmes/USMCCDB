@@ -152,38 +152,49 @@ function ExternalLink({ href, label }: { href: string | null; label: string }) {
   );
 }
 
-function GroupHeading({ group }: { group: TalkGroup }) {
+// All groups share one table (and so one column grid); each conference is a
+// full-width heading row above its talks, keeping the listing compact enough
+// to scan. Event metadata (location, dates, link) rides along when an event
+// record exists.
+function GroupHeadingRow({
+  group,
+  colSpan,
+}: {
+  group: TalkGroup;
+  colSpan: number;
+}) {
   const e = group.event;
-  if (!group.name) {
-    return (
-      <div>
-        <Title order={4}>Seminars, colloquia & outreach</Title>
-        <Text size="sm" c="dimmed">
-          Talks given outside a conference, at the host shown.
-        </Text>
-      </div>
-    );
-  }
   const url = safeUrl(e?.url ?? null);
   const when = e ? formatDateRange(e.start_date, e.end_date) : "";
-  const meta = [e?.location, when].filter(Boolean).join(" · ");
+  const meta = group.name
+    ? [e?.location, when].filter(Boolean).join(" · ")
+    : "given outside a conference, at the host shown with each talk";
   return (
-    <div>
-      <Title order={4}>
-        {url ? (
-          <Anchor href={url} target="_blank" rel="noopener noreferrer" inherit>
-            {group.name}
-          </Anchor>
-        ) : (
-          group.name
-        )}
-      </Title>
-      {meta && (
-        <Text size="sm" c="dimmed">
-          {meta}
+    <Table.Tr bg="var(--mantine-color-default-hover)">
+      <Table.Td colSpan={colSpan} pt={10} pb={8}>
+        <Text fw={700} size="sm" span>
+          {!group.name ? (
+            "Seminars, colloquia & outreach"
+          ) : url ? (
+            <Anchor
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              inherit
+            >
+              {group.name}
+            </Anchor>
+          ) : (
+            group.name
+          )}
         </Text>
-      )}
-    </div>
+        {meta && (
+          <Text size="xs" c="dimmed" span ml="sm">
+            {meta}
+          </Text>
+        )}
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -273,9 +284,13 @@ export default function PublicTalksPage() {
   }, [talks, q, year, types, when]);
 
   const shown = groups.reduce((n, g) => n + g.talks.length, 0);
+  // The Area column appears once, for the whole table, so every group lines
+  // up on the same column grid.
+  const hasArea = groups.some((g) => g.talks.some((t) => t.working_group));
+  const colSpan = hasArea ? 7 : 6;
 
   const body = (
-    <Stack gap="xl">
+    <Stack gap="md">
       <div>
         <Title order={3}>Talks & presentations</Title>
         <Text size="sm" c="dimmed">
@@ -338,82 +353,77 @@ export default function PublicTalksPage() {
             {shown} talk{shown === 1 ? "" : "s"} in {groups.length} group
             {groups.length === 1 ? "" : "s"}
           </Text>
-          {groups.map((g) => {
-            const hasArea = g.talks.some((t) => t.working_group);
-            return (
-              <Stack key={g.key} gap="xs">
-                <GroupHeading group={g} />
-                <Table.ScrollContainer minWidth={760}>
-                  <Table striped>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th w={110}>Date</Table.Th>
-                        <Table.Th>Title</Table.Th>
-                        <Table.Th>Speaker</Table.Th>
-                        <Table.Th>Institution</Table.Th>
-                        {!g.name && <Table.Th>Host</Table.Th>}
-                        {hasArea && <Table.Th>Area</Table.Th>}
-                        <Table.Th>Type</Table.Th>
-                        <Table.Th>Links</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {g.talks.map((t) => (
-                        <Table.Tr key={t.id}>
-                          <Table.Td>{t.date ?? "—"}</Table.Td>
-                          <Table.Td>
-                            {safeUrl(t.url) ? (
-                              <Anchor
-                                href={safeUrl(t.url)!}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                size="sm"
-                              >
-                                {t.title}
-                              </Anchor>
-                            ) : (
-                              t.title
-                            )}
-                          </Table.Td>
-                          <Table.Td>{t.speaker_name ?? "—"}</Table.Td>
-                          <Table.Td>{t.speaker_institution ?? "—"}</Table.Td>
-                          {!g.name && <Table.Td>{t.venue ?? "—"}</Table.Td>}
-                          {hasArea && (
-                            <Table.Td>{t.working_group ?? "—"}</Table.Td>
-                          )}
-                          <Table.Td>
-                            {t.talk_type}
-                            {t.is_invited && (
-                              <Badge
-                                ml={6}
-                                size="xs"
-                                variant="light"
-                                color="grape"
-                              >
-                                invited
-                              </Badge>
-                            )}
-                          </Table.Td>
-                          <Table.Td>
-                            <Group gap="sm" wrap="nowrap">
-                              <ExternalLink
-                                href={t.slides_url}
-                                label="Slides"
-                              />
-                              <ExternalLink
-                                href={t.recording_url}
-                                label="Recording"
-                              />
-                            </Group>
-                          </Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </Table.ScrollContainer>
-              </Stack>
-            );
-          })}
+          <Table.ScrollContainer minWidth={820}>
+            {/* tableLayout: fixed pins the column widths to the header row,
+                so columns stay put from group to group instead of resizing
+                to each group's content. */}
+            <Table verticalSpacing={5} style={{ tableLayout: "fixed" }}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={104}>Date</Table.Th>
+                  <Table.Th>Title</Table.Th>
+                  <Table.Th w="16%">Speaker</Table.Th>
+                  <Table.Th w="12%">Institution</Table.Th>
+                  {hasArea && <Table.Th w="11%">Area</Table.Th>}
+                  <Table.Th w={132}>Type</Table.Th>
+                  <Table.Th w={150}>Links</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              {groups.map((g) => (
+                <Table.Tbody key={g.key}>
+                  <GroupHeadingRow group={g} colSpan={colSpan} />
+                  {g.talks.map((t) => (
+                    <Table.Tr key={t.id}>
+                      <Table.Td style={{ whiteSpace: "nowrap" }}>
+                        {t.date ?? "—"}
+                      </Table.Td>
+                      <Table.Td>
+                        {safeUrl(t.url) ? (
+                          <Anchor
+                            href={safeUrl(t.url)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            size="sm"
+                          >
+                            {t.title}
+                          </Anchor>
+                        ) : (
+                          t.title
+                        )}
+                        {/* Seminar-type talks carry their host here — the
+                            bucket has no conference heading to say where. */}
+                        {!g.name && t.venue && (
+                          <Text size="xs" c="dimmed">
+                            {t.venue}
+                          </Text>
+                        )}
+                      </Table.Td>
+                      <Table.Td>{t.speaker_name ?? "—"}</Table.Td>
+                      <Table.Td>{t.speaker_institution ?? "—"}</Table.Td>
+                      {hasArea && <Table.Td>{t.working_group ?? "—"}</Table.Td>}
+                      <Table.Td>
+                        {t.talk_type}
+                        {t.is_invited && (
+                          <Badge ml={6} size="xs" variant="light" color="grape">
+                            invited
+                          </Badge>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="sm" wrap="nowrap">
+                          <ExternalLink href={t.slides_url} label="Slides" />
+                          <ExternalLink
+                            href={t.recording_url}
+                            label="Recording"
+                          />
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              ))}
+            </Table>
+          </Table.ScrollContainer>
         </>
       )}
     </Stack>
