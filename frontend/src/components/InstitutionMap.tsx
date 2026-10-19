@@ -1,4 +1,4 @@
-import { Text, useComputedColorScheme } from '@mantine/core'
+import { Anchor, Text, useComputedColorScheme } from '@mantine/core'
 import { LatLngBounds } from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useState } from 'react'
@@ -69,7 +69,9 @@ export default function InstitutionMap({ institutions }: { institutions: Institu
             pathOptions={{ color: '#4c6ef5', fillColor: '#4c6ef5', fillOpacity: 0.55, weight: 1.5 }}
           >
             <Popup>
-              <Link to={`/institutions/${i.id}`}>{i.name}</Link>
+              <Anchor component={Link} to={`/institutions/${i.id}`} size="sm">
+                {i.name}
+              </Anchor>
               <br />
               {i.people_count} member{i.people_count === 1 ? '' : 's'}
             </Popup>

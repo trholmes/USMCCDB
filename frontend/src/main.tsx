@@ -1,4 +1,4 @@
-import { MantineProvider, createTheme } from '@mantine/core'
+import { Anchor, MantineProvider, createTheme } from '@mantine/core'
 import '@mantine/core/styles.css'
 import { Notifications } from '@mantine/notifications'
 import '@mantine/notifications/styles.css'
@@ -20,6 +20,13 @@ const theme = createTheme({
     ],
   },
   defaultRadius: 'md',
+  components: {
+    // Every link in the app — in-app (`component={Link}`), external, and
+    // link-styled actions (`component="button"`) — is a Mantine Anchor:
+    // theme blue, underlined only on hover (issue #186). Plain <a> / <Link>
+    // elements get the same look from global.css.
+    Anchor: Anchor.extend({ defaultProps: { underline: 'hover' } }),
+  },
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

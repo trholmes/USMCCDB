@@ -361,16 +361,9 @@ export default function PublicationDetailPage() {
                       <Text size="xs">
                         {pp.contribution}
                         {(me?.person_id === pp.person.id || canManage) && (
-                          <Text
-                            size="xs"
-                            c="blue"
-                            component="span"
-                            ml={6}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => openContrib(pp)}
-                          >
+                          <Anchor component="button" size="xs" ml={6} onClick={() => openContrib(pp)}>
                             edit
-                          </Text>
+                          </Anchor>
                         )}
                       </Text>
                     ) : me?.person_id === pp.person.id ? (
@@ -381,17 +374,15 @@ export default function PublicationDetailPage() {
                       <Text size="xs" c="dimmed" fs="italic">
                         no contribution described yet
                         {canManage && (
-                          <Text
+                          <Anchor
+                            component="button"
                             size="xs"
-                            c="blue"
-                            component="span"
                             ml={6}
                             fs="normal"
-                            style={{ cursor: 'pointer' }}
                             onClick={() => openContrib(pp)}
                           >
                             add
-                          </Text>
+                          </Anchor>
                         )}
                       </Text>
                     ))}

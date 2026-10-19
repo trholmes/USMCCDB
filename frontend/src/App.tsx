@@ -1,10 +1,11 @@
 import {
   ActionIcon,
   Alert,
+  Anchor,
   AppShell,
   Badge,
-  Button,
   Burger,
+  Button,
   Group,
   Loader,
   NavLink,
@@ -142,29 +143,27 @@ export default function App() {
             >
               ⚙
             </ActionIcon>
-            <Text
+            <Anchor
               component={Link}
               to={me.person_id ? `/people/${me.person_id}` : '/account'}
               size="sm"
-              c="indigo"
-              style={{ cursor: 'pointer' }}
               title={me.person_id ? 'View / edit your profile' : 'Account settings'}
               visibleFrom="sm"
             >
               {me.display_name || me.user.username || me.user.orcid}
               {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
-            </Text>
-            <Text
+            </Anchor>
+            <Anchor
+              component="button"
               size="sm"
-              c="indigo"
-              style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
+              style={{ whiteSpace: 'nowrap' }}
               onClick={async () => {
                 await logout()
                 navigate('/login')
               }}
             >
               Sign out
-            </Text>
+            </Anchor>
           </Group>
         </Group>
       </AppShell.Header>

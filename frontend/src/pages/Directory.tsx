@@ -10,7 +10,7 @@ import {
   Title,
 } from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary } from '../api/types'
 import ExportEmails from '../components/ExportEmails'
@@ -188,18 +188,14 @@ export default function DirectoryPage() {
               </Table.Td>
               <Table.Td>
                 {p.primary_institution && (
-                  <Text
+                  <Anchor
+                    component={Link}
+                    to={`/institutions/${p.primary_institution.id}`}
                     size="sm"
-                    c="blue"
-                    component="span"
-                    style={{ cursor: 'pointer' }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      navigate(`/institutions/${p.primary_institution!.id}`)
-                    }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {p.primary_institution.short_name || p.primary_institution.name}
-                  </Text>
+                  </Anchor>
                 )}
               </Table.Td>
               <Table.Td>{p.email}</Table.Td>

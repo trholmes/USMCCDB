@@ -3,3 +3,15 @@
 input::-webkit-caps-lock-indicator {
   visibility: hidden;
 }
+
+/* Links are Mantine Anchors (see the theme in main.tsx). Any plain <a> that
+   slips through without a class — a bare react-router <Link>, markup from a
+   third-party widget — gets the same look so link styling stays uniform
+   (issue #186). */
+a:not([class]) {
+  color: var(--mantine-color-anchor);
+  text-decoration: none;
+}
+a:not([class]):hover {
+  text-decoration: underline;
+}

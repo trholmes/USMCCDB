@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -88,9 +89,9 @@ export default function AccountPage() {
               Member profile
             </Text>
             {me.person_id ? (
-              <Text size="sm" component={Link} to={`/people/${me.person_id}`} c="indigo">
+              <Anchor component={Link} to={`/people/${me.person_id}`} size="sm">
                 {me.display_name || 'View profile'}
-              </Text>
+              </Anchor>
             ) : (
               <Text size="sm" c="dimmed">
                 not linked — contact the office to link this account to your directory record

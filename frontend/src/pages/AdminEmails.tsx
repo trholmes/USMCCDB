@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -175,9 +176,14 @@ export default function AdminEmails() {
                 </Table.Td>
                 <Table.Td>
                   {e.person_id && e.person_name ? (
-                    <Link to={`/people/${e.person_id}`} onClick={(ev) => ev.stopPropagation()}>
+                    <Anchor
+                      component={Link}
+                      to={`/people/${e.person_id}`}
+                      size="sm"
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
                       {e.person_name}
-                    </Link>
+                    </Anchor>
                   ) : (
                     <Text size="sm" c="dimmed">
                       {e.context ?? '—'}

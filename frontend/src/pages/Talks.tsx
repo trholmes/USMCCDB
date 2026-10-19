@@ -334,18 +334,14 @@ export default function TalksPage() {
               </Table.Td>
               <Table.Td>
                 {t.speaker ? (
-                  <Text
+                  <Anchor
+                    component={Link}
+                    to={`/people/${t.speaker.id}`}
                     size="sm"
-                    c="blue"
-                    component="span"
-                    style={{ cursor: 'pointer' }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      navigate(`/people/${t.speaker!.id}`)
-                    }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {t.speaker.given_name} {t.speaker.family_name}
-                  </Text>
+                  </Anchor>
                 ) : (
                   '—'
                 )}
@@ -433,9 +429,9 @@ export default function TalksPage() {
               )}
               {detail.nominations.map((n) => (
                 <Group key={n.id} justify="space-between" mb={4}>
-                  <Text size="sm" component={Link} to={`/people/${n.person.id}`} c="blue">
+                  <Anchor component={Link} to={`/people/${n.person.id}`} size="sm">
                     {n.person.given_name} {n.person.family_name}
-                  </Text>
+                  </Anchor>
                   <Group gap="xs">
                     <StatusBadge status={n.status} />
                     {canManageTalks && n.status !== 'assigned' && (
