@@ -20,16 +20,21 @@ import { api } from "../api/client";
 import type { EventPublic, TalkPublic } from "../api/types";
 import { useSession } from "../auth/SessionContext";
 import SiteBanner from "../components/SiteBanner";
-import { TALK_TYPES } from "../constants";
+import { NON_CONFERENCE_TALK_TYPES, TALK_TYPES } from "../constants";
 import { today } from "../dates";
 import { safeUrl } from "../urls";
 
-// Talks without a conference (seminars, colloquia, outreach) are listed
+// Seminar-type talks (and talks with nowhere recorded at all) are listed
 // together after the conferences, by venue.
 const NO_EVENT = "none";
 
 type TalkGroup = {
   key: string;
+  // Heading: the conference name talks were recorded under — a linked
+  // event's name or a free-text venue; null for the seminars bucket.
+  name: string | null;
+  // Event metadata (dates, location, url) when any talk in the group is
+  // linked to an event record.
   event: EventPublic | null;
   talks: TalkPublic[];
   // Newest talk in the group; orders the groups and stands in for a
@@ -110,7 +115,7 @@ const downloadCsv = (groups: TalkGroup[]) => {
     g.talks.map((t) =>
       [
         t.date,
-        g.event?.name,
+        g.name,
         g.event?.location,
         t.title,
         t.speaker_name,
@@ -149,7 +154,7 @@ function ExternalLink({ href, label }: { href: string | null; label: string }) {
 
 function GroupHeading({ group }: { group: TalkGroup }) {
   const e = group.event;
-  if (!e) {
+  if (!group.name) {
     return (
       <div>
         <Title order={4}>Seminars, colloquia & outreach</Title>
@@ -159,18 +164,18 @@ function GroupHeading({ group }: { group: TalkGroup }) {
       </div>
     );
   }
-  const url = safeUrl(e.url);
-  const when = formatDateRange(e.start_date, e.end_date);
-  const meta = [e.location, when].filter(Boolean).join(" · ");
+  const url = safeUrl(e?.url ?? null);
+  const when = e ? formatDateRange(e.start_date, e.end_date) : "";
+  const meta = [e?.location, when].filter(Boolean).join(" · ");
   return (
     <div>
       <Title order={4}>
         {url ? (
           <Anchor href={url} target="_blank" rel="noopener noreferrer" inherit>
-            {e.name}
+            {group.name}
           </Anchor>
         ) : (
-          e.name
+          group.name
         )}
       </Title>
       {meta && (
@@ -185,10 +190,13 @@ function GroupHeading({ group }: { group: TalkGroup }) {
 /**
  * The public talks page (issue #175): every assigned or given USMCC talk,
  * grouped by conference like Glance's "talks by conference" listing, with
- * no sign-in required. The data comes from GET /talks/public, which names
- * a speaker only with their public-listing consent, so this page needs no
- * filtering of its own. Rendered standalone for visitors and inside the
- * app shell for signed-in members (same route).
+ * no sign-in required. Conferences are identified by name — a linked
+ * event's or the free-text venue talks were saved with — because the
+ * events table is no longer curated; what talks carry is the truth. The
+ * data comes from GET /talks/public, which names a speaker only with
+ * their public-listing consent, so this page needs no filtering of its
+ * own. Rendered standalone for visitors and inside the app shell for
+ * signed-in members (same route).
  */
 export default function PublicTalksPage() {
   const { me } = useSession();
@@ -233,11 +241,25 @@ export default function PublicTalksPage() {
     const byKey = new Map<string, TalkGroup>();
     for (const t of talks ?? []) {
       if (!matches(t)) continue;
-      const key = t.event ? String(t.event.id) : NO_EVENT;
+      // A conference is a name, matched case-insensitively: the linked
+      // event's or the free-text venue the talk was saved with. Seminar-type
+      // talks keep their venue as a host and land in the bucket instead.
+      const name = (
+        t.event?.name ??
+        (NON_CONFERENCE_TALK_TYPES.includes(t.talk_type) ? null : t.venue) ??
+        ""
+      ).trim();
+      const key = name ? name.toLowerCase() : NO_EVENT;
       let g = byKey.get(key);
       if (!g) {
-        g = { key, event: t.event, talks: [], latest: "" };
+        g = { key, name: name || null, event: null, talks: [], latest: "" };
         byKey.set(key, g);
+      }
+      if (!g.event && t.event) {
+        // An event record adds dates, location and link; its name is the
+        // canonical spelling for the heading.
+        g.event = t.event;
+        g.name = t.event.name;
       }
       g.talks.push(t);
       if (t.date && t.date > g.latest) g.latest = t.date;
@@ -245,7 +267,7 @@ export default function PublicTalksPage() {
     const sortKey = (g: TalkGroup) => g.event?.start_date || g.latest;
     return [...byKey.values()].sort((a, b) => {
       // Conferences first (newest first), the no-conference group last.
-      if (!a.event !== !b.event) return a.event ? -1 : 1;
+      if (!a.name !== !b.name) return a.name ? -1 : 1;
       return sortKey(b).localeCompare(sortKey(a)) || a.key.localeCompare(b.key);
     });
   }, [talks, q, year, types, when]);
@@ -329,7 +351,7 @@ export default function PublicTalksPage() {
                         <Table.Th>Title</Table.Th>
                         <Table.Th>Speaker</Table.Th>
                         <Table.Th>Institution</Table.Th>
-                        {!g.event && <Table.Th>Host</Table.Th>}
+                        {!g.name && <Table.Th>Host</Table.Th>}
                         {hasArea && <Table.Th>Area</Table.Th>}
                         <Table.Th>Type</Table.Th>
                         <Table.Th>Links</Table.Th>
@@ -355,7 +377,7 @@ export default function PublicTalksPage() {
                           </Table.Td>
                           <Table.Td>{t.speaker_name ?? "—"}</Table.Td>
                           <Table.Td>{t.speaker_institution ?? "—"}</Table.Td>
-                          {!g.event && <Table.Td>{t.venue ?? "—"}</Table.Td>}
+                          {!g.name && <Table.Td>{t.venue ?? "—"}</Table.Td>}
                           {hasArea && (
                             <Table.Td>{t.working_group ?? "—"}</Table.Td>
                           )}
