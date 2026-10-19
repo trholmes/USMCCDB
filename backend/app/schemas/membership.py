@@ -229,7 +229,8 @@ class PersonRegistration(BaseModel):
     # Students must confirm their advisor approved them joining (checked in
     # the register endpoint against the career stage).
     advisor_approved: bool = False
-    # May the name and photo appear on the public muoncollider.us/people page?
+    # May the name and photo appear on the public muoncollider.us/people page
+    # (and the name on the public talks page)?
     public_listing_consent: bool = False
     research_areas: str | None = None
     expertise: str | None = None

@@ -5386,3 +5386,132 @@ def test_set_public_listing_bulk_update(admin, tmp_path):
     assert consent(already) is True
     assert consent(no_flag) is False
     assert consent(no_file) is False
+
+
+def test_public_talks_list(admin):
+    """The public talks page (issue #175) needs no sign-in and shows assigned
+    and given talks with their conference — but names a speaker only with
+    their public-listing consent, strips non-http links, and never leaks
+    notes, nominations, status or the committee's open slots."""
+    listed = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Pat",
+            "family_name": "Public",
+            "preferred_name": "Patty",
+            "email": "pat.public@example.edu",
+            "public_listing_consent": True,
+        },
+    ).json()
+    private = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Quinn",
+            "family_name": "Quiet",
+            "email": "quinn.quiet@example.edu",
+            "public_listing_consent": False,
+        },
+    ).json()
+    for p in (listed, private):
+        admin.post(f"/api/v1/people/{p['id']}/status", json={"status": "active"})
+    # Institution history: at Old U until the move, at New U from 2026-06-01.
+    old_u = admin.post("/api/v1/institutions", json={"name": "Old Public U", "short_name": "OldU"}).json()
+    new_u = admin.post("/api/v1/institutions", json={"name": "New Public U", "short_name": "NewU"}).json()
+    admin.post(
+        f"/api/v1/people/{listed['id']}/institution",
+        json={"institution_id": old_u["id"], "start_date": "2020-01-01"},
+    )
+    admin.post(
+        f"/api/v1/people/{listed['id']}/institution",
+        json={"institution_id": new_u["id"], "start_date": "2026-06-01"},
+    )
+    wg = admin.post(
+        "/api/v1/working-groups", json={"name": "Public Detector WG", "slug": "public-det"}
+    ).json()
+    event = admin.post(
+        "/api/v1/events",
+        json={
+            "name": "Public Talks Conf 2026",
+            "url": "javascript:alert(1)",
+            "location": "Knoxville, TN",
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-05",
+            "notes": "internal planning notes",
+        },
+    ).json()
+
+    def talk(**extra):
+        body = {"title": "t", "event_id": event["id"], "status": "given", **extra}
+        r = admin.post("/api/v1/talks", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    shown = talk(
+        title="Muon collider overview",
+        speaker_person_id=listed["id"],
+        date="2026-06-02",
+        talk_type="plenary",
+        is_invited=True,
+        url="https://indico.example.org/contrib/1",
+        slides_url="ftp://not-allowed.example.org/slides",
+        notes="selection committee discussion",
+        working_group_id=wg["id"],
+    )
+    withheld = talk(title="Detector status", speaker_person_id=private["id"], date="2026-06-03")
+    upcoming = talk(title="Upcoming plenary", status="assigned", date="2026-06-04")
+    seminar = talk(
+        title="Campus colloquium",
+        event_id=None,
+        venue="UTK physics colloquium",
+        talk_type="colloquium",
+        speaker_person_id=listed["id"],
+        date="2026-05-20",
+    )
+    hidden = [
+        talk(title="Open slot", status="open")["id"],
+        talk(title="Nominations running", status="nominations")["id"],
+        talk(title="Cancelled talk", status="cancelled")["id"],
+    ]
+
+    anon = TestClient(app)
+    r = anon.get("/api/v1/talks/public")
+    assert r.status_code == 200, r.text
+    by_id = {t["id"]: t for t in r.json()}
+    assert shown["id"] in by_id and withheld["id"] in by_id
+    assert upcoming["id"] in by_id and seminar["id"] in by_id
+    assert not any(h in by_id for h in hidden)
+
+    s = by_id[shown["id"]]
+    # Preferred name, like the directory shows it; invited flag and links kept.
+    assert s["speaker_name"] == "Patty Public"
+    # Institution as of the talk date (moved to NewU on 2026-06-01) and the
+    # working group as the "area".
+    assert s["speaker_institution"] == "NewU"
+    assert s["working_group"] == "Public Detector WG"
+    assert by_id[seminar["id"]]["speaker_institution"] == "OldU"  # 2026-05-20
+    assert s["is_invited"] is True and s["talk_type"] == "plenary"
+    assert s["url"] == "https://indico.example.org/contrib/1"
+    assert s["slides_url"] is None  # non-http scheme dropped
+    assert s["event"]["name"] == "Public Talks Conf 2026"
+    assert s["event"]["location"] == "Knoxville, TN"
+    assert s["event"]["url"] is None  # javascript: scheme dropped
+    # Nothing internal in either the talk or the conference.
+    for key in ("notes", "nominations", "status", "speaker_person_id", "speaker", "created_by_user_id"):
+        assert key not in s
+    assert "notes" not in s["event"] and "abstract_deadline" not in s["event"]
+
+    # No consent → talk listed, speaker not named (nor placed).
+    assert by_id[withheld["id"]]["speaker_name"] is None
+    assert by_id[withheld["id"]]["speaker_institution"] is None
+    # Seminars carry their venue and no conference.
+    assert by_id[seminar["id"]]["event"] is None
+    assert by_id[seminar["id"]]["venue"] == "UTK physics colloquium"
+
+    # Withdrawing consent takes the name off the public page immediately.
+    admin.patch(f"/api/v1/people/{listed['id']}", json={"public_listing_consent": False})
+    assert {t["id"]: t for t in anon.get("/api/v1/talks/public").json()}[shown["id"]][
+        "speaker_name"
+    ] is None
+
+    # The member-facing list still needs a session.
+    assert anon.get("/api/v1/talks").status_code in (401, 403)

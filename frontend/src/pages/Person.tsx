@@ -923,8 +923,8 @@ export default function PersonPage() {
             <Text size="sm">
               <b>Public people page:</b>{' '}
               {person.public_listing_consent
-                ? 'listed (name and photo on muoncollider.us/people)'
-                : 'opted out of muoncollider.us/people'}
+                ? 'listed (name and photo on muoncollider.us/people; named on the public talks page)'
+                : 'opted out of muoncollider.us/people and of being named on the public talks page'}
             </Text>
             {STUDENT_STAGES.includes(person.career_stage) && (
               <Text size="sm">

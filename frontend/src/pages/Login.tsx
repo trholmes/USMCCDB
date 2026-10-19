@@ -14,7 +14,7 @@ import {
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { SiteSettings } from '../api/types'
 import { useSession } from '../auth/SessionContext'
@@ -172,6 +172,13 @@ export default function LoginPage() {
                 <Anchor href={`mailto:${config.contact_email}`}>{config.contact_email}</Anchor>.
               </>
             )}
+          </Text>
+          <Text size="sm" c="dimmed">
+            Just looking for a talk? The{' '}
+            <Anchor component={Link} to="/public/talks">
+              public talks page
+            </Anchor>{' '}
+            needs no sign-in.
           </Text>
         </Stack>
       </Card>

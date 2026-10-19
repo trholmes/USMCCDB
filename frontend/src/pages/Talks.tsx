@@ -264,7 +264,16 @@ export default function TalksPage() {
   return (
     <>
       <Group justify="space-between" mb="md">
-        <Title order={3}>Talks & speakers</Title>
+        <div>
+          <Title order={3}>Talks & speakers</Title>
+          <Text size="xs" c="dimmed">
+            Assigned and given talks also appear on the{' '}
+            <Anchor component={Link} to="/public/talks" inherit>
+              public talks page
+            </Anchor>{' '}
+            (speakers named only with their public-listing consent).
+          </Text>
+        </div>
         <Button onClick={openCreate}>Add talk</Button>
       </Group>
 

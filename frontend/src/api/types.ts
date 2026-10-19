@@ -219,6 +219,36 @@ export interface Talk {
   nominations: Nomination[]
 }
 
+// Public talks page (issue #175): what anonymous visitors get from
+// GET /talks/public — no status, notes or nominations, and the speaker's
+// name only with their public-listing consent.
+export interface EventPublic {
+  id: number
+  name: string
+  url: string | null
+  location: string | null
+  start_date: string | null
+  end_date: string | null
+}
+
+export interface TalkPublic {
+  id: number
+  title: string
+  talk_type: string
+  date: string | null
+  is_invited: boolean
+  url: string | null
+  slides_url: string | null
+  recording_url: string | null
+  venue: string | null
+  speaker_name: string | null
+  // The speaker's institution at the time of the talk; only with the name.
+  speaker_institution: string | null
+  // Working group ("area") the talk was given for.
+  working_group: string | null
+  event: EventPublic | null
+}
+
 export interface TalkStatRow {
   key: string
   key_id: number

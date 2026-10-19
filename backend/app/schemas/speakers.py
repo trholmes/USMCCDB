@@ -112,6 +112,42 @@ class TalkOut(ORMModel):
     nominations: list[NominationOut] = []
 
 
+class EventPublic(ORMModel):
+    """Conference details exposed to anonymous visitors (issue #175)."""
+
+    id: int
+    name: str
+    url: str | None
+    location: str | None
+    start_date: date | None
+    end_date: date | None
+
+
+class TalkPublic(ORMModel):
+    """A talk on the public talks page (issue #175): what a conference
+    programme already shows, nothing about the selection process. The
+    speaker's name appears only with their public-listing consent; notes,
+    nominations and status never do."""
+
+    id: int
+    title: str
+    talk_type: TalkType
+    date: dt.date | None
+    is_invited: bool
+    url: str | None
+    slides_url: str | None
+    recording_url: str | None
+    # Where a talk without a conference was given (seminar / colloquium host).
+    venue: str | None
+    speaker_name: str | None = None
+    # The speaker's (primary) institution at the time of the talk — like the
+    # Institute column on Glance's public talks page; only with the name.
+    speaker_institution: str | None = None
+    # The working group the talk was given for (Glance's "Area").
+    working_group: str | None = None
+    event: EventPublic | None = None
+
+
 class TalkStatRow(BaseModel):
     key: str  # person or institution display name
     key_id: int

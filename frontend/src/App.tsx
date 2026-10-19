@@ -31,6 +31,7 @@ import LoginPage from './pages/Login'
 import PersonPage from './pages/Person'
 import PublicationsPage from './pages/Publications'
 import PublicationDetailPage from './pages/PublicationDetail'
+import PublicTalksPage from './pages/PublicTalks'
 import StatsPage from './pages/Stats'
 import TalksPage from './pages/Talks'
 import WorkingGroupsPage from './pages/WorkingGroups'
@@ -80,13 +81,15 @@ export default function App() {
     )
   }
 
-  // Unauthenticated users only see login + registration.
+  // Unauthenticated users see login, registration and the public talks
+  // page (issue #175).
   if (!me) {
     return (
       <>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/public/talks" element={<PublicTalksPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <Footer />
@@ -247,6 +250,7 @@ export default function App() {
           <Route path="/leadership" element={<LeadershipPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/talks" element={<TalksPage />} />
+          <Route path="/public/talks" element={<PublicTalksPage />} />
           <Route path="/publications" element={<PublicationsPage />} />
           <Route path="/publications/:id" element={<PublicationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />

@@ -18,12 +18,14 @@ from app.models import (
 from app.schemas.speakers import (
     EventCreate,
     EventOut,
+    EventPublic,
     EventUpdate,
     NominationCreate,
     NominationOut,
     NominationUpdate,
     TalkCreate,
     TalkOut,
+    TalkPublic,
     TalkStatRow,
     TalkUpdate,
 )
@@ -98,6 +100,83 @@ def _load_talk(db: Session, talk_id: int) -> Talk:
     if talk is None:
         raise HTTPException(404, "Talk not found")
     return talk
+
+
+# Talk statuses that appear on the public page: a speaker has been chosen
+# (or the talk is already given). Open slots and nominations are the
+# committee's business; cancelled talks never happened.
+PUBLIC_TALK_STATUSES = (TalkStatus.assigned, TalkStatus.given)
+
+
+def _public_url(url: str | None) -> str | None:
+    """Only http(s) links leave the building: stored URLs are member input and
+    the public page renders them as hrefs."""
+    if url and url.lower().startswith(("http://", "https://")):
+        return url
+    return None
+
+
+def _institution_on(person: Person, on) -> str | None:
+    """Short name of the person's primary institution on a date (inclusive
+    range, like everywhere else), falling back to the current one for a talk
+    without a date or predating the recorded history."""
+    primaries = [a for a in person.affiliations if a.is_primary]
+    hits = (
+        [a for a in primaries if a.start_date <= on and (a.end_date is None or a.end_date >= on)]
+        if on is not None
+        else []
+    ) or [a for a in primaries if a.end_date is None]
+    if not hits:
+        return None
+    inst = hits[0].institution
+    return inst.short_name or inst.name
+
+
+# Declared before any /talks/{talk_id} route so "public" is never parsed as
+# an id.
+@router.get("/talks/public")
+def list_talks_public(db: Session = Depends(get_db)) -> list[TalkPublic]:
+    """Unauthenticated: the collaboration's talks for the public talks page
+    (issue #175), newest first, with the conference attached so the page can
+    group by it. Only assigned and given talks; the speaker is named only
+    when they consented to public listing (the same consent as the
+    muoncollider.us/people page), and notes, nominations and status stay
+    internal."""
+    stmt = (
+        select(Talk)
+        .options(
+            selectinload(Talk.speaker)
+            .selectinload(Person.affiliations)
+            .selectinload(Affiliation.institution),
+            selectinload(Talk.event),
+            selectinload(Talk.working_group),
+        )
+        .where(Talk.status.in_(PUBLIC_TALK_STATUSES))
+        .order_by(Talk.date.desc().nulls_last(), Talk.id.desc())
+    )
+    out = []
+    for t in db.execute(stmt).scalars().unique().all():
+        row = TalkPublic(
+            id=t.id,
+            title=t.title,
+            talk_type=t.talk_type,
+            date=t.date,
+            is_invited=t.is_invited,
+            url=_public_url(t.url),
+            slides_url=_public_url(t.slides_url),
+            recording_url=_public_url(t.recording_url),
+            venue=t.venue,
+            working_group=t.working_group.name if t.working_group is not None else None,
+            event=EventPublic.model_validate(t.event) if t.event is not None else None,
+        )
+        if row.event is not None:
+            row.event.url = _public_url(row.event.url)
+        s = t.speaker
+        if s is not None and s.public_listing_consent:
+            row.speaker_name = f"{s.preferred_name or s.given_name} {s.family_name}"
+            row.speaker_institution = _institution_on(s, t.date)
+        out.append(row)
+    return out
 
 
 @router.get("/talks")

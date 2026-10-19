@@ -1,7 +1,8 @@
 import { Alert, Radio, Stack, Text } from '@mantine/core'
 
 type Props = {
-  /** Current consent: true = listed on muoncollider.us/people. */
+  /** Current consent: true = listed on muoncollider.us/people and named on
+   *  the public talks page. */
   value: boolean
   onChange: (value: boolean) => void
   disabled?: boolean
@@ -17,7 +18,8 @@ type Props = {
 
 /**
  * The public-listing consent question (name and photo on the public
- * muoncollider.us/people page), shared by the registration form and the
+ * muoncollider.us/people page, and the name next to one's talks on the
+ * database's public talks page), shared by the registration form and the
  * profile editor.
  *
  * Being listed is the collaboration's default: the "listed" option is
@@ -34,7 +36,8 @@ export function PublicListingChoice({ value, onChange, disabled, note, saved }: 
         <>
           <Text span size="xs" c="dimmed">
             muoncollider.us/people lists collaboration members by name and photo, showing the
-            size and breadth of the US Muon Collider Collaboration.
+            size and breadth of the US Muon Collider Collaboration. The same choice decides
+            whether the public talks page names you as the speaker of your talks.
           </Text>
           {note && (
             <Text span size="xs" c="dimmed">
@@ -61,7 +64,8 @@ export function PublicListingChoice({ value, onChange, disabled, note, saved }: 
       </Stack>
       {optingOut && (
         <Alert color="yellow" variant="light" mt="xs" py="xs">
-          Saving removes the name and photo from muoncollider.us/people.
+          Saving removes the name and photo from muoncollider.us/people and the name from
+          the public talks page.
         </Alert>
       )}
     </Radio.Group>
