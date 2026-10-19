@@ -73,6 +73,7 @@ from app.security import (
 )
 from app.services import notifications
 from app.services import photos as photo_service
+from app.services import website
 
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
@@ -600,6 +601,7 @@ def get_person(
 def update_person(
     person_id: int,
     body: PersonUpdate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PersonOut:
@@ -669,6 +671,7 @@ def update_person(
         if open_primary is not None:
             open_primary.career_stage = person.career_stage
     db.commit()
+    website.queue(background)
     return get_person(person_id, db, user)
 
 
@@ -748,6 +751,7 @@ def change_status(
         )
     db.commit()
     db.refresh(person)
+    website.queue(background)
     return PersonSummary.model_validate(person)
 
 
@@ -800,6 +804,7 @@ def get_photo(
 async def upload_photo(
     person_id: int,
     file: UploadFile,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PersonSummary:
@@ -822,6 +827,7 @@ async def upload_photo(
     _store_photo(person, content)
     db.commit()
     db.refresh(person)
+    website.queue(background)
     return PersonSummary.model_validate(person)
 
 
@@ -870,6 +876,7 @@ def _decode_registration_photo(data_url: str) -> bytes:
 @router.delete("/{person_id}", status_code=204)
 def delete_person(
     person_id: int,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> None:
@@ -895,11 +902,13 @@ def delete_person(
             path.unlink()
     db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
     db.commit()
+    website.queue(background)
 
 
 @router.delete("/{person_id}/photo", status_code=204)
 def delete_photo(
     person_id: int,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
@@ -911,6 +920,7 @@ def delete_photo(
             path.unlink()
         person.photo_file = None
         db.commit()
+        website.queue(background)
 
 
 # --- Institution move (self-service or office) --------------------------------
@@ -920,6 +930,7 @@ def delete_photo(
 def change_institution(
     person_id: int,
     body: InstitutionChange,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> AffiliationOut:
@@ -974,6 +985,7 @@ def change_institution(
     db.add(affil)
     db.commit()
     db.refresh(affil)
+    website.queue(background)
     return AffiliationOut.model_validate(affil)
 
 

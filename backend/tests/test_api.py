@@ -5742,6 +5742,66 @@ def test_public_people_list(admin, tmp_path_factory):
     assert anon.get("/api/v1/people").status_code in (401, 403)
 
 
+def test_website_rebuild_dispatch(admin, monkeypatch):
+    """When WEBSITE_REPO + WEBSITE_DISPATCH_TOKEN are set, changes to what
+    the public People page shows poke the website repository with a GitHub
+    repository_dispatch so the page rebuilds right away; unset (the default),
+    nothing is sent and the nightly schedule is the only trigger."""
+    import httpx
+
+    from app.config import get_settings
+
+    calls: list[tuple[str, dict]] = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    pid = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Wanda",
+            "family_name": "Webhook",
+            "email": "wanda.webhook@example.edu",
+        },
+    ).json()["id"]
+
+    # Default (unset): approving a member sends nothing.
+    get_settings.cache_clear()
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    assert calls == []
+
+    monkeypatch.setenv("WEBSITE_REPO", "example-org/example-site")
+    monkeypatch.setenv("WEBSITE_DISPATCH_TOKEN", "test-token")
+    get_settings.cache_clear()
+    try:
+        r = admin.patch(f"/api/v1/people/{pid}", json={"public_listing_consent": True})
+        assert r.status_code == 200, r.text
+        assert len(calls) == 1
+        url, kwargs = calls[0]
+        assert url == "https://api.github.com/repos/example-org/example-site/dispatches"
+        assert kwargs["json"] == {"event_type": "membership-updated"}
+        assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+
+        # A dispatch failure is logged, never surfaced to the member.
+        def failing_post(url, **kwargs):
+            raise httpx.ConnectError("github unreachable")
+
+        monkeypatch.setattr(httpx, "post", failing_post)
+        r = admin.post(f"/api/v1/people/{pid}/status", json={"status": "inactive"})
+        assert r.status_code == 200, r.text
+    finally:
+        monkeypatch.delenv("WEBSITE_REPO")
+        monkeypatch.delenv("WEBSITE_DISPATCH_TOKEN")
+        get_settings.cache_clear()
+
+
 def test_talk_and_event_links_must_be_http(admin):
     """Talk and conference links render as hrefs for every member, so the API
     stores only http(s) URLs (issue #188): a javascript: link would run when

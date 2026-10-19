@@ -39,6 +39,13 @@ services:
       # Shown in the admin Backups panel (the schedule itself lives in the
       # backup container below).
       BACKUP_HOUR: ${BACKUP_HOUR:-02}
+      # Optional: poke the public website to rebuild its People page when
+      # membership data changes (issue #173) — the website repo
+      # (owner/name) and a fine-grained GitHub token with Contents
+      # read/write on it. Unset, the website only updates on its own
+      # schedule.
+      WEBSITE_REPO: ${WEBSITE_REPO:-}
+      WEBSITE_DISPATCH_TOKEN: ${WEBSITE_DISPATCH_TOKEN:-}
     volumes:
       # Drop spreadsheets/CSVs here (gitignored) to import them, e.g.:
       #   docker compose exec backend python -m app.cli import-members-xlsx /data/USMCC_Membership.xlsx
