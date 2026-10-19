@@ -1,11 +1,25 @@
 import datetime as dt
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models import NominationStatus, TalkStatus, TalkType
 from app.schemas.common import ORMModel
 from app.schemas.membership import PersonSummary
+
+
+def _http_url(value: str | None) -> str | None:
+    """Links are member input and every page renders them as hrefs, so only
+    http(s) is stored (issue #188): a javascript: URL would run when a
+    colleague clicked it. Blank means no link."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if not value.lower().startswith(("http://", "https://")):
+        raise ValueError("must be a full http:// or https:// address")
+    return value
 
 
 class EventCreate(BaseModel):
@@ -17,6 +31,11 @@ class EventCreate(BaseModel):
     abstract_deadline: date | None = None
     notes: str | None = None
 
+    @field_validator("url")
+    @classmethod
+    def _links_http_only(cls, v: str | None) -> str | None:
+        return _http_url(v)
+
 
 class EventUpdate(BaseModel):
     name: str | None = None
@@ -26,6 +45,11 @@ class EventUpdate(BaseModel):
     end_date: date | None = None
     abstract_deadline: date | None = None
     notes: str | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _links_http_only(cls, v: str | None) -> str | None:
+        return _http_url(v)
 
 
 class EventOut(ORMModel):
@@ -55,6 +79,11 @@ class TalkCreate(BaseModel):
     is_invited: bool = False
     notes: str | None = None
 
+    @field_validator("url", "slides_url", "recording_url")
+    @classmethod
+    def _links_http_only(cls, v: str | None) -> str | None:
+        return _http_url(v)
+
 
 class TalkUpdate(BaseModel):
     title: str | None = None
@@ -70,6 +99,11 @@ class TalkUpdate(BaseModel):
     status: TalkStatus | None = None
     is_invited: bool | None = None
     notes: str | None = None
+
+    @field_validator("url", "slides_url", "recording_url")
+    @classmethod
+    def _links_http_only(cls, v: str | None) -> str | None:
+        return _http_url(v)
 
 
 class NominationCreate(BaseModel):

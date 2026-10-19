@@ -5432,7 +5432,7 @@ def test_public_talks_list(admin):
         "/api/v1/events",
         json={
             "name": "Public Talks Conf 2026",
-            "url": "javascript:alert(1)",
+            "url": "https://conf.example.org/2026",
             "location": "Knoxville, TN",
             "start_date": "2026-06-01",
             "end_date": "2026-06-05",
@@ -5453,10 +5453,25 @@ def test_public_talks_list(admin):
         talk_type="plenary",
         is_invited=True,
         url="https://indico.example.org/contrib/1",
-        slides_url="ftp://not-allowed.example.org/slides",
         notes="selection committee discussion",
         working_group_id=wg["id"],
     )
+    # The API refuses non-http links (issue #188), but imported or legacy
+    # rows may carry them — plant some below the API and make sure the
+    # public page still drops them.
+    from sqlalchemy import text
+
+    from app.db import engine
+
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE talks SET slides_url = 'ftp://not-allowed.example.org/slides' WHERE id = :id"),
+            {"id": shown["id"]},
+        )
+        conn.execute(
+            text("UPDATE events SET url = 'javascript:alert(1)' WHERE id = :id"),
+            {"id": event["id"]},
+        )
     withheld = talk(title="Detector status", speaker_person_id=private["id"], date="2026-06-03")
     upcoming = talk(title="Upcoming plenary", status="assigned", date="2026-06-04")
     seminar = talk(
@@ -5515,3 +5530,33 @@ def test_public_talks_list(admin):
 
     # The member-facing list still needs a session.
     assert anon.get("/api/v1/talks").status_code in (401, 403)
+
+
+def test_talk_and_event_links_must_be_http(admin):
+    """Talk and conference links render as hrefs for every member, so the API
+    stores only http(s) URLs (issue #188): a javascript: link would run when
+    a colleague clicked it. Blank clears a link."""
+    for bad in ("javascript:alert(1)", "ftp://files.example.org/x", "indico.example.org/e/1"):
+        r = admin.post("/api/v1/events", json={"name": "Bad Link Conf", "url": bad})
+        assert r.status_code == 422, (bad, r.text)
+        for field in ("url", "slides_url", "recording_url"):
+            r = admin.post("/api/v1/talks", json={"title": "Bad link talk", field: bad})
+            assert r.status_code == 422, (field, bad, r.text)
+
+    event = admin.post("/api/v1/events", json={"name": "Good Link Conf"}).json()
+    talk = admin.post(
+        "/api/v1/talks",
+        json={"title": "Good link talk", "url": "https://indico.example.org/e/1", "event_id": event["id"]},
+    ).json()
+    assert talk["url"] == "https://indico.example.org/e/1"
+    assert admin.patch(f"/api/v1/talks/{talk['id']}", json={"slides_url": "javascript:x"}).status_code == 422
+    assert admin.patch(f"/api/v1/events/{event['id']}", json={"url": "data:text/html,x"}).status_code == 422
+    # Surrounding whitespace is trimmed; blank clears.
+    r = admin.patch(f"/api/v1/talks/{talk['id']}", json={"slides_url": "  https://x.example.org/s.pdf "})
+    assert r.status_code == 200 and r.json()["slides_url"] == "https://x.example.org/s.pdf"
+    r = admin.patch(f"/api/v1/talks/{talk['id']}", json={"slides_url": "   "})
+    assert r.status_code == 200 and r.json()["slides_url"] is None
+    r = admin.patch(f"/api/v1/events/{event['id']}", json={"url": "HTTP://CONF.example.org"})
+    assert r.status_code == 200 and r.json()["url"] == "HTTP://CONF.example.org"
+    assert admin.delete(f"/api/v1/talks/{talk['id']}").status_code == 204
+    assert admin.delete(f"/api/v1/events/{event['id']}").status_code == 204
