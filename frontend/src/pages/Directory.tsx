@@ -64,11 +64,20 @@ export default function DirectoryPage() {
 
   const filtered = useMemo(() => {
     const needle = q.toLowerCase()
+    // Match on the given, preferred and family names in any combination —
+    // "Preferred Family" as shown in the table, "Given Family" as registered,
+    // or any single name — plus email (issue #181).
+    const matchesName = (p: PersonSummary) =>
+      [
+        `${p.given_name} ${p.family_name}`,
+        `${p.preferred_name ?? ''} ${p.family_name}`,
+        `${p.family_name}, ${p.preferred_name || p.given_name}`,
+        p.preferred_name ?? '',
+        p.email,
+      ].some((s) => s.toLowerCase().includes(needle))
     return people.filter(
       (p) =>
-        (!needle ||
-          `${p.given_name} ${p.family_name}`.toLowerCase().includes(needle) ||
-          p.email.toLowerCase().includes(needle)) &&
+        (!needle || matchesName(p)) &&
         (statuses.length === 0 || statuses.includes(p.status)) &&
         (stages.length === 0 || stages.includes(p.career_stage)) &&
         (institutions.length === 0 ||
