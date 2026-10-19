@@ -31,9 +31,10 @@ import { safeUrl } from '../urls'
 
 const emptyForm = {
   title: '',
-  // One "where" field covers both cases: text matching a conference name
-  // links the talk to that conference, anything else is a free-text venue
-  // (seminar / colloquium host).
+  // One "where" field covers both cases: text matching an existing event
+  // record links the talk to it, anything else is stored as a free-text
+  // venue — the conference name for conference talks, the host for
+  // seminars / colloquia.
   where: '',
   url: '',
   slides_url: '',
@@ -79,6 +80,19 @@ export default function TalksPage() {
   // Conference name for conference talks, free-text venue for seminars/colloquia.
   const whereGiven = (t: Talk) => eventName(t.event_id) || t.venue || ''
 
+  // Autofill and the conference filter offer where talks were actually given
+  // (newest first), not the events table — that list is no longer curated
+  // (it holds stale entries like "CPAD" where talks want "CPAD 2026"), and
+  // the public page groups by the names talks carry.
+  const wherePlaces = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const t of talks) {
+      const w = whereGiven(t).trim()
+      if (w && !seen.has(w.toLowerCase())) seen.set(w.toLowerCase(), w)
+    }
+    return [...seen.values()]
+  }, [talks, events])
+
   const accessors = useMemo<Accessors<Talk>>(
     () => ({
       date: (t) => t.date,
@@ -102,7 +116,9 @@ export default function TalksPage() {
             `${t.speaker.given_name} ${t.speaker.family_name}`.toLowerCase().includes(needle))) &&
         (eventFilter.length === 0 ||
           eventFilter.some((f) =>
-            f === 'none' ? t.event_id === null : String(t.event_id) === f,
+            f === 'none'
+              ? !whereGiven(t).trim()
+              : whereGiven(t).trim().toLowerCase() === f,
           )) &&
         (typeFilter.length === 0 || typeFilter.includes(t.talk_type)) &&
         (statusFilter.length === 0 || statusFilter.includes(t.status)),
@@ -122,8 +138,10 @@ export default function TalksPage() {
     setCreateOpen(true)
   }
 
-  // The typed "where" text resolves to a conference when it names one
-  // (case-insensitively), and to a free-text venue otherwise.
+  // The typed "where" text resolves to an event record when it names one
+  // (case-insensitively) — keeping already-linked talks grouped with new
+  // ones — and to a free-text venue otherwise. Venue talks group by name on
+  // the public page, so no event record needs to exist.
   const resolveWhere = () => {
     const text = form.where.trim()
     const event = events.find((e) => e.name.toLowerCase() === text.toLowerCase())
@@ -302,8 +320,8 @@ export default function TalksPage() {
         />
         <MultiSelect
           data={[
-            { value: 'none', label: 'No conference (seminars & colloquia)' },
-            ...events.map((e) => ({ value: String(e.id), label: e.name })),
+            { value: 'none', label: 'No conference / venue recorded' },
+            ...wherePlaces.map((w) => ({ value: w.toLowerCase(), label: w })),
           ]}
           value={eventFilter}
           onChange={setEventFilter}
@@ -526,18 +544,21 @@ export default function TalksPage() {
           />
           <Autocomplete
             label="Conference / venue"
-            description="Pick a conference from the list (e.g. “CPAD 2026”), or type any venue (e.g. “UTK Physics Colloquium”)"
+            description="Where was it given? Suggestions come from other talks — talks typed with the same name (e.g. “CPAD 2026”) are listed together"
             placeholder="Where was it given?"
-            data={events.map((e) => e.name)}
+            data={wherePlaces}
             limit={8}
             value={form.where}
             onChange={(v) => setForm({ ...form, where: v })}
           />
           {form.where.trim() && (
             <Text size="xs" c="dimmed" mt={-8}>
-              {resolveWhere().event_id !== null
-                ? '✓ Will be linked to this conference'
-                : 'Will be recorded as a seminar / colloquium venue'}
+              {resolveWhere().event_id !== null ||
+              wherePlaces.some(
+                (w) => w.toLowerCase() === form.where.trim().toLowerCase(),
+              )
+                ? '✓ Will be listed with other talks given here'
+                : 'First talk recorded here — later talks typing the same name will join it'}
             </Text>
           )}
           <Group grow>

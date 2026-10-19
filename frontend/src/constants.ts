@@ -163,6 +163,10 @@ export const TALK_TYPES = [
   'outreach',
 ]
 
+// Types given outside a conference: the public page lists these together
+// (their venue is a host, not a conference to group by).
+export const NON_CONFERENCE_TALK_TYPES = ['seminar', 'colloquium', 'outreach']
+
 // people.research_areas and people.expertise are comma-separated text
 // columns; these round-trip them to arrays for the multi-value inputs
 // (splitting on semicolons too, for imported free text).
