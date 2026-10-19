@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     orcid_client_secret: str = ""
     orcid_host: str = "orcid.org"
 
+    # Public-website rebuild hook (issue #173): when both are set, changes to
+    # the data the muoncollider.us People page shows fire a GitHub
+    # repository_dispatch ("membership-updated") at the website repository,
+    # whose update workflow regenerates the page right away instead of
+    # waiting for its nightly schedule. The token needs Contents read/write
+    # on that one repository (fine-grained PAT).
+    website_repo: str = ""  # e.g. lawrenceleejr/usmccwebsite
+    website_dispatch_token: str = ""
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

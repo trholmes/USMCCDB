@@ -48,6 +48,8 @@ from app.schemas.membership import (
     MemberStats,
     PersonRegistration,
     PersonOut,
+    PersonPublic,
+    PersonPublicStats,
     PersonSummary,
     PersonUpdate,
     RegistrationAck,
@@ -71,6 +73,7 @@ from app.security import (
 )
 from app.services import notifications
 from app.services import photos as photo_service
+from app.services import website
 
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
@@ -417,6 +420,89 @@ def register(
     return _registration_ack()
 
 
+# Declared before any /{person_id} route so "public" is never parsed as an id.
+@router.get("/public")
+def list_people_public(db: Session = Depends(get_db)) -> list[PersonPublic]:
+    """Unauthenticated: the active members who consented to public listing,
+    for the muoncollider.us/people page (issue #173). Name, career stage,
+    research areas, current primary institution, ORCID iD and whether the
+    public photo endpoint has a photo — never email, voting flag, status or
+    anything else internal."""
+    stmt = (
+        select(Person)
+        .options(selectinload(Person.affiliations).selectinload(Affiliation.institution))
+        .where(
+            Person.status == MemberStatus.active,
+            Person.public_listing_consent.is_(True),
+        )
+        .order_by(Person.family_name, Person.given_name)
+    )
+    out = []
+    for p in db.execute(stmt).scalars().unique().all():
+        primary = next(
+            (a for a in p.affiliations if a.is_primary and a.end_date is None), None
+        )
+        inst = primary.institution if primary is not None else None
+        out.append(
+            PersonPublic(
+                id=p.id,
+                name=p.display_name,
+                career_stage=p.career_stage,
+                research_areas=p.research_areas,
+                institution=inst.name if inst is not None else None,
+                institution_short=(inst.short_name or inst.name) if inst is not None else None,
+                orcid=p.orcid,
+                has_photo=bool(p.photo_file),
+            )
+        )
+    return out
+
+
+@router.get("/public/stats")
+def public_member_stats(db: Session = Depends(get_db)) -> PersonPublicStats:
+    """Unauthenticated, anonymous aggregates over ALL active members for the
+    public page's membership charts. Unlike the /public listing, this counts
+    members who opted out of public listing too — the consent covers their
+    name and photo, not their presence in a headcount."""
+    rows = db.execute(
+        select(Person.career_stage, Person.research_areas).where(
+            Person.status == MemberStatus.active
+        )
+    ).all()
+    by_stage: dict[str, int] = {}
+    by_area: dict[str, int] = {}
+    for stage, areas_raw in rows:
+        by_stage[stage.value] = by_stage.get(stage.value, 0) + 1
+        areas = [a.strip() for a in (areas_raw or "").split(",") if a.strip()]
+        if len(areas) > 1:
+            by_area["Multiple"] = by_area.get("Multiple", 0) + 1
+        elif areas:
+            by_area[areas[0]] = by_area.get(areas[0], 0) + 1
+    return PersonPublicStats(
+        total=len(rows), by_career_stage=by_stage, by_research_area=by_area
+    )
+
+
+@router.get("/public/{person_id}/photo")
+def get_photo_public(person_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    """Unauthenticated member photo for the public people page. The photo is
+    covered by the same public-listing consent as the name, so it is served
+    only while the person is active and consenting — plain 404 otherwise, so
+    the response never reveals whether the id exists."""
+    person = db.get(Person, person_id)
+    if (
+        person is None
+        or person.status != MemberStatus.active
+        or not person.public_listing_consent
+        or not person.photo_file
+    ):
+        raise HTTPException(404, "No photo")
+    path = Path(get_settings().photos_dir) / person.photo_file
+    if not path.is_file():
+        raise HTTPException(404, "No photo")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=3600"})
+
+
 @router.get("")
 def list_people(
     db: Session = Depends(get_db),
@@ -515,6 +601,7 @@ def get_person(
 def update_person(
     person_id: int,
     body: PersonUpdate,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PersonOut:
@@ -584,6 +671,7 @@ def update_person(
         if open_primary is not None:
             open_primary.career_stage = person.career_stage
     db.commit()
+    website.queue(background)
     return get_person(person_id, db, user)
 
 
@@ -663,6 +751,7 @@ def change_status(
         )
     db.commit()
     db.refresh(person)
+    website.queue(background)
     return PersonSummary.model_validate(person)
 
 
@@ -715,6 +804,7 @@ def get_photo(
 async def upload_photo(
     person_id: int,
     file: UploadFile,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PersonSummary:
@@ -737,6 +827,7 @@ async def upload_photo(
     _store_photo(person, content)
     db.commit()
     db.refresh(person)
+    website.queue(background)
     return PersonSummary.model_validate(person)
 
 
@@ -785,6 +876,7 @@ def _decode_registration_photo(data_url: str) -> bytes:
 @router.delete("/{person_id}", status_code=204)
 def delete_person(
     person_id: int,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> None:
@@ -810,11 +902,13 @@ def delete_person(
             path.unlink()
     db.delete(person)  # FKs cascade / SET NULL, incl. users.person_id
     db.commit()
+    website.queue(background)
 
 
 @router.delete("/{person_id}/photo", status_code=204)
 def delete_photo(
     person_id: int,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
@@ -826,6 +920,7 @@ def delete_photo(
             path.unlink()
         person.photo_file = None
         db.commit()
+        website.queue(background)
 
 
 # --- Institution move (self-service or office) --------------------------------
@@ -835,6 +930,7 @@ def delete_photo(
 def change_institution(
     person_id: int,
     body: InstitutionChange,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> AffiliationOut:
@@ -889,6 +985,7 @@ def change_institution(
     db.add(affil)
     db.commit()
     db.refresh(affil)
+    website.queue(background)
     return AffiliationOut.model_validate(affil)
 
 

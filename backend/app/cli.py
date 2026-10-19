@@ -897,7 +897,10 @@ def import_members_xlsx(
     """Import the USMCC membership registration spreadsheet (Google-form
     export: Timestamp, voting question, First/Middle/Last Name, Primary
     Affiliation, additional affiliations, Email, ORCID, Position, ...,
-    Area(s) of Expertise, percent of research time)."""
+    Area(s) of Expertise, percent of research time, and — when present — the
+    "Public" column, whose opt-out selections carry over to
+    public_listing_consent so imported accounts keep the choice they made
+    on the old system (issue #173)."""
     import openpyxl
 
     from app.routers.people import _current_institution_is_us, _voting_eligible
@@ -931,6 +934,10 @@ def import_members_xlsx(
     c_percent = col_opt("Simplified time")
     if c_percent is None:
         c_percent = col_opt("What percent of your research time")
+    # The old system's public-listing question ('Opt out' hid the member from
+    # muoncollider.us/people; anything else listed them). Optional: older
+    # exports don't have it.
+    c_public = col_opt("Public")
 
     created = updated = skipped = 0
     created_institutions: list[str] = []
@@ -1000,6 +1007,16 @@ def import_members_xlsx(
                     person.usmcc_percent = percent
                 updated += 1
             _ensure_activation_event(db, person, start)
+
+            # Carry the old system's public-listing selection over: an
+            # explicit answer decides ('Opt out' hides, anything else lists —
+            # the old site showed everyone who didn't opt out), a blank cell
+            # keeps the stored value (new people keep the non-published
+            # default until they answer somewhere).
+            if c_public is not None:
+                public_answer = str(row[c_public] or "").strip()
+                if public_answer:
+                    person.public_listing_consent = "opt out" not in public_answer.lower()
 
             primary_name = str(row[c_primary] or "").strip()
             if primary_name:

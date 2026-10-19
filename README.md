@@ -299,6 +299,35 @@ excluded email that matches nobody aborts the run before writing anything,
 since a typo there would publish someone who asked not to be. Members can
 still change their own answer afterwards on their profile.
 
+The `import-members-xlsx` command also honors the spreadsheet's own `Public`
+column when one is present ('Opt out' hides, any other explicit answer lists,
+a blank cell keeps the stored choice), so imported accounts follow the
+selection they made on the old system.
+
+#### Public website feed
+
+`GET /api/v1/people/public` (no sign-in) lists the active members who
+consented to public listing — name, career stage, research areas, current
+institution, ORCID iD — and `GET /api/v1/people/public/{id}/photo` serves
+their photo under the same consent. `GET /api/v1/people/public/stats`
+returns anonymous aggregate counts over **all** active members (career
+stages, research areas), since the consent covers names and photos, not the
+headcount. The website's `scripts/getPeople.py` (in the muoncollider.us
+repository) rebuilds the public People page from these feeds, so opt-outs
+are enforced at the source while the page's charts still reflect the whole
+collaboration.
+
+The website repository rebuilds that page nightly on its own (its
+`update-people` GitHub Actions workflow). For same-day updates — a new
+member approved, a profile or photo changed — set `WEBSITE_REPO`
+(e.g. `lawrenceleejr/usmccwebsite`) and `WEBSITE_DISPATCH_TOKEN` in `.env`:
+the backend then pokes that repository (a GitHub `repository_dispatch`
+event, type `membership-updated`) whenever listed data changes, and the
+page regenerates within minutes. The token is a fine-grained GitHub PAT
+with **Contents read/write** on the website repository only, created by
+someone with write access to it. Delivery is best-effort (failures are
+logged, members never see them); the nightly run catches anything missed.
+
 #### The whole sequence at a glance
 
 Input files go in `data/` (mounted read-only in the backend container at

@@ -361,6 +361,38 @@ class PersonSummary(ORMModel):
     primary_institution: InstitutionRef | None = None
 
 
+class PersonPublic(BaseModel):
+    """A member on the public muoncollider.us/people page (issue #173).
+    Only active members who gave public-listing consent appear, and only
+    what the page shows — never email, status, voting flag or notes. The id
+    exists solely to address the public photo endpoint."""
+
+    id: int
+    name: str
+    career_stage: CareerStage
+    research_areas: str | None = None
+    # Current primary institution; the page groups members by it.
+    institution: str | None = None
+    institution_short: str | None = None
+    orcid: str | None = None
+    # Whether GET /people/public/{id}/photo will serve a photo.
+    has_photo: bool = False
+
+
+class PersonPublicStats(BaseModel):
+    """Anonymous aggregates over ALL active members for the public page's
+    charts (issue #173). The public-listing consent governs names and photos,
+    not these counts, so opted-out members are still counted here."""
+
+    total: int
+    # CareerStage value -> number of active members.
+    by_career_stage: dict[str, int] = {}
+    # Standard research area -> active members with exactly that one area;
+    # "Multiple" counts those with more than one. Members with no recorded
+    # area appear only in total / by_career_stage.
+    by_research_area: dict[str, int] = {}
+
+
 class WorkingGroupRef(ORMModel):
     """Small reference used for cross-links (collab-role rows, etc.)."""
 

@@ -2400,6 +2400,103 @@ def test_import_members_xlsx_percent_time(admin, tmp_path):
     assert admin.get(f"/api/v1/people/{ulla['id']}").json()["usmcc_percent"] == 75
 
 
+def test_import_members_xlsx_public_column(admin, tmp_path):
+    # The old system's spreadsheet carries a "Public" column ('Opt out' kept
+    # the member off muoncollider.us/people). Imported accounts must follow
+    # the selection they had (issue #173): an explicit answer decides, a
+    # blank cell keeps the stored value.
+    from datetime import datetime
+
+    import openpyxl
+
+    from app.cli import import_members_xlsx
+
+    header = [
+        "Timestamp",
+        "According to this definition, are you registering to be a voting "
+        "or non-voting member of USMCC?",
+        "First Name",
+        "Middle Name",
+        "Last Name",
+        "Primary Affiliation",
+        "Any additional affiliations",
+        "Email",
+        "ORCID ID (if available)",
+        "Position",
+        "Area(s) of Expertise",
+        "Public",
+    ]
+
+    def build(rows):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws.append(header)
+        for r in rows:
+            ws.append(r)
+        path = tmp_path / "members.xlsx"
+        wb.save(path)
+        return path
+
+    def person(email_fragment: str) -> dict:
+        hit = admin.get("/api/v1/people", params={"q": email_fragment}).json()[0]
+        return admin.get(f"/api/v1/people/{hit['id']}").json()
+
+    common = [datetime(2025, 4, 10), "Non-voting member"]
+    path = build(
+        [
+            common + ["Olive", None, "Optout", "PubColU", None,
+                      "olive.optout@example.edu", None, "Faculty",
+                      "Accelerator Physics", "Opt out"],
+            common + ["Ivan", None, "Included", "PubColU", None,
+                      "ivan.included@example.edu", None, "Faculty",
+                      "Accelerator Physics", "Include me"],
+            common + ["Bela", None, "Blank", "PubColU", None,
+                      "bela.blank@example.edu", None, "Faculty",
+                      "Accelerator Physics", None],
+        ]
+    )
+    import_members_xlsx(
+        xlsx_path=path, sheet="Members", authors_from_voting=False, dry_run=False
+    )
+    assert person("olive.optout")["public_listing_consent"] is False
+    assert person("ivan.included")["public_listing_consent"] is True
+    # A blank answer never publishes anyone.
+    assert person("bela.blank")["public_listing_consent"] is False
+
+    # Re-import with blank cells: stored selections survive.
+    path = build(
+        [
+            common + ["Ivan", None, "Included", "PubColU", None,
+                      "ivan.included@example.edu", None, "Faculty",
+                      "Accelerator Physics", None],
+            common + ["Olive", None, "Optout", "PubColU", None,
+                      "olive.optout@example.edu", None, "Faculty",
+                      "Accelerator Physics", None],
+        ]
+    )
+    import_members_xlsx(
+        xlsx_path=path, sheet="Members", authors_from_voting=False, dry_run=False
+    )
+    assert person("ivan.included")["public_listing_consent"] is True
+    assert person("olive.optout")["public_listing_consent"] is False
+
+    # A sheet without the column (older export) touches nothing.
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Members"
+    ws.append(header[:-1])
+    ws.append(common + ["Ivan", None, "Included", "PubColU", None,
+                        "ivan.included@example.edu", None, "Faculty",
+                        "Accelerator Physics"])
+    old_path = tmp_path / "members-old.xlsx"
+    wb.save(old_path)
+    import_members_xlsx(
+        xlsx_path=old_path, sheet="Members", authors_from_voting=False, dry_run=False
+    )
+    assert person("ivan.included")["public_listing_consent"] is True
+
+
 def test_import_members_xlsx_voting_eligibility(admin, tmp_path):
     # A blank voting answer must not grant the flag, and explicit voting
     # requests are subject to the same charter rules the API enforces:
@@ -5530,6 +5627,179 @@ def test_public_talks_list(admin):
 
     # The member-facing list still needs a session.
     assert anon.get("/api/v1/talks").status_code in (401, 403)
+
+
+def test_public_people_list(admin, tmp_path_factory):
+    """The public members export (issue #173) feeds muoncollider.us/people:
+    no sign-in, only active members with public-listing consent, and only
+    what the page shows — never email, status or the voting flag. The photo
+    rides the same consent."""
+    os.environ["PHOTOS_DIR"] = str(tmp_path_factory.mktemp("public-photos"))
+    from io import BytesIO
+
+    from PIL import Image
+
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+    inst = admin.post(
+        "/api/v1/institutions", json={"name": "Public Export U", "short_name": "PubU"}
+    ).json()
+
+    anon = TestClient(app)
+    # Snapshot the public stats before adding anyone; the DB is module-scoped,
+    # so the assertions below work on deltas.
+    stats_before = anon.get("/api/v1/people/public/stats").json()
+
+    def make(given: str, family: str, consent: bool, status: str | None = "active") -> int:
+        r = admin.post(
+            "/api/v1/people/register",
+            json={
+                "given_name": given,
+                "family_name": family,
+                "email": f"{given}.{family}@example.edu".lower(),
+                "career_stage": "postdoc",
+                "research_areas": "Accelerator Physics",
+                "institution_id": inst["id"],
+                "public_listing_consent": consent,
+            },
+        )
+        assert r.status_code == 201, r.text
+        pid = r.json()["id"]
+        if status is not None:
+            admin.post(f"/api/v1/people/{pid}/status", json={"status": status})
+        return pid
+
+    listed = make("Lena", "Listed", True)
+    private = make("Priit", "Unlisted", False)
+    pending = make("Penn", "Pendington", True, status=None)  # stays pending
+    gone = make("Ingrid", "Inactive", True)
+    admin.post(f"/api/v1/people/{gone}/status", json={"status": "inactive"})
+    admin.patch(
+        f"/api/v1/people/{listed}",
+        json={"preferred_name": "Leni", "orcid": "0000-0002-9079-593X"},
+    )
+
+    buf = BytesIO()
+    Image.new("RGB", (300, 300), "blue").save(buf, format="PNG")
+    for pid in (listed, private):
+        r = admin.post(
+            f"/api/v1/people/{pid}/photo",
+            files={"file": ("me.png", buf.getvalue(), "image/png")},
+        )
+        assert r.status_code == 201, r.text
+
+    r = anon.get("/api/v1/people/public")
+    assert r.status_code == 200, r.text
+    rows = {p["id"]: p for p in r.json()}
+    assert listed in rows
+    assert not any(pid in rows for pid in (private, pending, gone))
+
+    row = rows[listed]
+    # Preferred name like the directory; institution for the page's grouping.
+    assert row["name"] == "Leni Listed"
+    assert row["career_stage"] == "postdoc"
+    assert row["research_areas"] == "Accelerator Physics"
+    assert row["institution"] == "Public Export U"
+    assert row["institution_short"] == "PubU"
+    assert row["orcid"] == "0000-0002-9079-593X"
+    assert row["has_photo"] is True
+    # Nothing internal leaves the building.
+    for key in ("email", "status", "is_voting", "notes", "usmcc_percent", "photo_file"):
+        assert key not in row
+
+    # The photo follows the consent: served for the listed member, a plain
+    # 404 for everyone else (no consent, unknown id — indistinguishable).
+    served = anon.get(f"/api/v1/people/public/{listed}/photo")
+    assert served.status_code == 200
+    assert Image.open(BytesIO(served.content)).format == "WEBP"
+    assert anon.get(f"/api/v1/people/public/{private}/photo").status_code == 404
+    assert anon.get("/api/v1/people/public/999999/photo").status_code == 404
+
+    # The anonymous stats count ALL active members — opted-out included,
+    # pending and inactive not: of the four added, listed + private are the
+    # two new active ones (both postdocs with one research area).
+    stats = anon.get("/api/v1/people/public/stats").json()
+    assert stats["total"] == stats_before["total"] + 2
+    assert (
+        stats["by_career_stage"].get("postdoc", 0)
+        == stats_before["by_career_stage"].get("postdoc", 0) + 2
+    )
+    assert (
+        stats["by_research_area"].get("Accelerator Physics", 0)
+        == stats_before["by_research_area"].get("Accelerator Physics", 0) + 2
+    )
+
+    # Withdrawing consent takes the member (and photo) off immediately.
+    admin.patch(f"/api/v1/people/{listed}", json={"public_listing_consent": False})
+    assert listed not in {p["id"] for p in anon.get("/api/v1/people/public").json()}
+    assert anon.get(f"/api/v1/people/public/{listed}/photo").status_code == 404
+    # ... but never out of the headcount.
+    assert anon.get("/api/v1/people/public/stats").json()["total"] == stats["total"]
+
+    # The member directory itself still needs a session.
+    assert anon.get("/api/v1/people").status_code in (401, 403)
+
+
+def test_website_rebuild_dispatch(admin, monkeypatch):
+    """When WEBSITE_REPO + WEBSITE_DISPATCH_TOKEN are set, changes to what
+    the public People page shows poke the website repository with a GitHub
+    repository_dispatch so the page rebuilds right away; unset (the default),
+    nothing is sent and the nightly schedule is the only trigger."""
+    import httpx
+
+    from app.config import get_settings
+
+    calls: list[tuple[str, dict]] = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    pid = admin.post(
+        "/api/v1/people/register",
+        json={
+            "given_name": "Wanda",
+            "family_name": "Webhook",
+            "email": "wanda.webhook@example.edu",
+        },
+    ).json()["id"]
+
+    # Default (unset): approving a member sends nothing.
+    get_settings.cache_clear()
+    assert admin.post(f"/api/v1/people/{pid}/status", json={"status": "active"}).status_code == 200
+    assert calls == []
+
+    monkeypatch.setenv("WEBSITE_REPO", "example-org/example-site")
+    monkeypatch.setenv("WEBSITE_DISPATCH_TOKEN", "test-token")
+    get_settings.cache_clear()
+    try:
+        r = admin.patch(f"/api/v1/people/{pid}", json={"public_listing_consent": True})
+        assert r.status_code == 200, r.text
+        assert len(calls) == 1
+        url, kwargs = calls[0]
+        assert url == "https://api.github.com/repos/example-org/example-site/dispatches"
+        assert kwargs["json"] == {"event_type": "membership-updated"}
+        assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+
+        # A dispatch failure is logged, never surfaced to the member.
+        def failing_post(url, **kwargs):
+            raise httpx.ConnectError("github unreachable")
+
+        monkeypatch.setattr(httpx, "post", failing_post)
+        r = admin.post(f"/api/v1/people/{pid}/status", json={"status": "inactive"})
+        assert r.status_code == 200, r.text
+    finally:
+        monkeypatch.delenv("WEBSITE_REPO")
+        monkeypatch.delenv("WEBSITE_DISPATCH_TOKEN")
+        get_settings.cache_clear()
 
 
 def test_talk_and_event_links_must_be_http(admin):
