@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -339,9 +340,9 @@ export default function AdminPage() {
               </Table.Td>
               <Table.Td>
                 {u.person_id ? (
-                  <Text size="sm" component={Link} to={`/people/${u.person_id}`} c="indigo">
+                  <Anchor component={Link} to={`/people/${u.person_id}`} size="sm">
                     {personName.get(u.person_id) ?? `#${u.person_id}`}
-                  </Text>
+                  </Anchor>
                 ) : (
                   <Text size="sm" c="dimmed">
                     —

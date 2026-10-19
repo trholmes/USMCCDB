@@ -10,7 +10,7 @@ import {
   Title,
 } from '@mantine/core'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { PersonSummary } from '../api/types'
 import ExportEmails from '../components/ExportEmails'
@@ -64,11 +64,20 @@ export default function DirectoryPage() {
 
   const filtered = useMemo(() => {
     const needle = q.toLowerCase()
+    // Match on the given, preferred and family names in any combination —
+    // "Preferred Family" as shown in the table, "Given Family" as registered,
+    // or any single name — plus email (issue #181).
+    const matchesName = (p: PersonSummary) =>
+      [
+        `${p.given_name} ${p.family_name}`,
+        `${p.preferred_name ?? ''} ${p.family_name}`,
+        `${p.family_name}, ${p.preferred_name || p.given_name}`,
+        p.preferred_name ?? '',
+        p.email,
+      ].some((s) => s.toLowerCase().includes(needle))
     return people.filter(
       (p) =>
-        (!needle ||
-          `${p.given_name} ${p.family_name}`.toLowerCase().includes(needle) ||
-          p.email.toLowerCase().includes(needle)) &&
+        (!needle || matchesName(p)) &&
         (statuses.length === 0 || statuses.includes(p.status)) &&
         (stages.length === 0 || stages.includes(p.career_stage)) &&
         (institutions.length === 0 ||
@@ -179,18 +188,14 @@ export default function DirectoryPage() {
               </Table.Td>
               <Table.Td>
                 {p.primary_institution && (
-                  <Text
+                  <Anchor
+                    component={Link}
+                    to={`/institutions/${p.primary_institution.id}`}
                     size="sm"
-                    c="blue"
-                    component="span"
-                    style={{ cursor: 'pointer' }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      navigate(`/institutions/${p.primary_institution!.id}`)
-                    }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {p.primary_institution.short_name || p.primary_institution.name}
-                  </Text>
+                  </Anchor>
                 )}
               </Table.Td>
               <Table.Td>{p.email}</Table.Td>

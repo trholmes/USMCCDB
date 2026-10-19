@@ -27,6 +27,7 @@ import { useSession } from '../auth/SessionContext'
 import { useEmailConfirm } from '../emailWarnings'
 import { TALK_TYPES } from '../constants'
 import { today } from '../dates'
+import { safeUrl } from '../urls'
 
 const emptyForm = {
   title: '',
@@ -149,8 +150,22 @@ export default function TalksPage() {
     setCreateOpen(true)
   }
 
+  // Links are rendered as hrefs for everyone, so only http(s) is accepted —
+  // the API refuses anything else too (issue #188).
+  const linksValid = () => {
+    const bad = (['url', 'slides_url', 'recording_url'] as const).find(
+      (k) => form[k] && !safeUrl(form[k]),
+    )
+    if (!bad) return true
+    notifications.show({
+      color: 'red',
+      message: 'Links must be full http:// or https:// addresses',
+    })
+    return false
+  }
+
   const saveEdit = async () => {
-    if (!editing) return
+    if (!editing || !linksValid()) return
     // Setting a (new) speaker directly on the talk mails them — unless it is
     // the editor assigning themself.
     const newSpeaker = form.speaker_person_id ? Number(form.speaker_person_id) : null
@@ -184,6 +199,7 @@ export default function TalksPage() {
   }
 
   const createTalk = async () => {
+    if (!linksValid()) return
     const speakerId = form.speaker_person_id ? Number(form.speaker_person_id) : null
     // A talk added with a speaker is already settled: given if the date has
     // passed, assigned otherwise. Without a speaker it stays open for
@@ -264,7 +280,16 @@ export default function TalksPage() {
   return (
     <>
       <Group justify="space-between" mb="md">
-        <Title order={3}>Talks & speakers</Title>
+        <div>
+          <Title order={3}>Talks & speakers</Title>
+          <Text size="xs" c="dimmed">
+            Assigned and given talks also appear on the{' '}
+            <Anchor component={Link} to="/public/talks" inherit>
+              public talks page
+            </Anchor>{' '}
+            (speakers named only with their public-listing consent).
+          </Text>
+        </div>
         <Button onClick={openCreate}>Add talk</Button>
       </Group>
 
@@ -334,18 +359,14 @@ export default function TalksPage() {
               </Table.Td>
               <Table.Td>
                 {t.speaker ? (
-                  <Text
+                  <Anchor
+                    component={Link}
+                    to={`/people/${t.speaker.id}`}
                     size="sm"
-                    c="blue"
-                    component="span"
-                    style={{ cursor: 'pointer' }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      navigate(`/people/${t.speaker!.id}`)
-                    }}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {t.speaker.given_name} {t.speaker.family_name}
-                  </Text>
+                  </Anchor>
                 ) : (
                   '—'
                 )}
@@ -391,33 +412,26 @@ export default function TalksPage() {
                 </Group>
               )}
             </Group>
-            {(detail.url || detail.slides_url || detail.recording_url) && (
+            {(safeUrl(detail.url) || safeUrl(detail.slides_url) || safeUrl(detail.recording_url)) && (
               <Group gap="md">
-                {detail.url && (
-                  <Anchor href={detail.url} target="_blank" rel="noopener noreferrer" size="sm">
-                    Talk page ↗
-                  </Anchor>
-                )}
-                {detail.slides_url && (
-                  <Anchor
-                    href={detail.slides_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    size="sm"
-                  >
-                    Slides ↗
-                  </Anchor>
-                )}
-                {detail.recording_url && (
-                  <Anchor
-                    href={detail.recording_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    size="sm"
-                  >
-                    Recording ↗
-                  </Anchor>
-                )}
+                {(
+                  [
+                    ['Talk page', detail.url],
+                    ['Slides', detail.slides_url],
+                    ['Recording', detail.recording_url],
+                  ] as const
+                ).map(([label, raw]) => {
+                  // Stored links are member input: only http(s) reaches an
+                  // href (issue #188).
+                  const href = safeUrl(raw)
+                  return (
+                    href && (
+                      <Anchor key={label} href={href} target="_blank" rel="noopener noreferrer" size="sm">
+                        {label} ↗
+                      </Anchor>
+                    )
+                  )
+                })}
               </Group>
             )}
             {detail.notes && <Text size="sm">{detail.notes}</Text>}
@@ -433,9 +447,9 @@ export default function TalksPage() {
               )}
               {detail.nominations.map((n) => (
                 <Group key={n.id} justify="space-between" mb={4}>
-                  <Text size="sm" component={Link} to={`/people/${n.person.id}`} c="blue">
+                  <Anchor component={Link} to={`/people/${n.person.id}`} size="sm">
                     {n.person.given_name} {n.person.family_name}
-                  </Text>
+                  </Anchor>
                   <Group gap="xs">
                     <StatusBadge status={n.status} />
                     {canManageTalks && n.status !== 'assigned' && (

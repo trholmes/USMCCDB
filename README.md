@@ -28,7 +28,9 @@ ORCID sign-in.
 - **Speakers bureau** — conferences, talk records (plenary/parallel/poster/
   seminar/outreach, invited vs. contributed) with links to the talk page,
   slides, and recording, member nominations, office assignment, and
-  fair-share statistics per person and institution.
+  fair-share statistics per person and institution. A public talks page
+  (`/public/talks`, no sign-in) lists assigned and given talks by conference,
+  naming speakers only with their public-listing consent.
 - **Publications** — paper/proceedings/note/white-paper registry any member
   can add to (the creator becomes the paper's contact), with a status workflow
   (in progress → collaboration review → submitted → published). Contacts

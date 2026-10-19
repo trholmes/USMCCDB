@@ -923,8 +923,8 @@ export default function PersonPage() {
             <Text size="sm">
               <b>Public people page:</b>{' '}
               {person.public_listing_consent
-                ? 'listed (name and photo on muoncollider.us/people)'
-                : 'opted out of muoncollider.us/people'}
+                ? 'listed (name and photo on muoncollider.us/people; named on the public talks page)'
+                : 'opted out of muoncollider.us/people and of being named on the public talks page'}
             </Text>
             {STUDENT_STAGES.includes(person.career_stage) && (
               <Text size="sm">
@@ -967,7 +967,11 @@ export default function PersonPage() {
                 )}
                 {isSelf && (
                   <Text size="sm" c="dimmed">
-                    — join or leave on the <Link to="/working-groups">working groups</Link> page
+                    — join or leave on the{' '}
+                    <Anchor component={Link} to="/working-groups" inherit>
+                      working groups
+                    </Anchor>{' '}
+                    page
                   </Text>
                 )}
               </Group>
@@ -1185,7 +1189,9 @@ export default function PersonPage() {
           {person.affiliations.map((a) => (
             <Table.Tr key={a.id}>
               <Table.Td>
-                <Link to={`/institutions/${a.institution.id}`}>{a.institution.name}</Link>
+                <Anchor component={Link} to={`/institutions/${a.institution.id}`} size="sm">
+                  {a.institution.name}
+                </Anchor>
               </Table.Td>
               <Table.Td>{careerStageLabel(a.career_stage) || '—'}</Table.Td>
               <Table.Td>{a.is_primary ? 'yes' : ''}</Table.Td>
@@ -1369,7 +1375,11 @@ export default function PersonPage() {
       <Title order={5}>Talks</Title>
       {talks.length === 0 ? (
         <Text size="sm" c="dimmed">
-          No talks recorded. Browse <Link to="/talks">talks & speakers</Link>.
+          No talks recorded. Browse{' '}
+          <Anchor component={Link} to="/talks" inherit>
+            talks & speakers
+          </Anchor>
+          .
         </Text>
       ) : (
         <Table.ScrollContainer minWidth={600} maw={860}>
@@ -1387,7 +1397,9 @@ export default function PersonPage() {
               <Table.Tr key={t.id}>
                 <Table.Td>{t.date}</Table.Td>
                 <Table.Td>
-                  <Link to="/talks">{t.title}</Link>
+                  <Anchor component={Link} to="/talks" size="sm">
+                    {t.title}
+                  </Anchor>
                 </Table.Td>
                 <Table.Td>
                   {t.talk_type}

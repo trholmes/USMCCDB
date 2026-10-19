@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import type { EventItem } from '../api/types'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
+import { safeUrl } from '../urls'
 
 const ACCESSORS: Accessors<EventItem> = {
   name: (e) => e.name,
@@ -12,17 +13,6 @@ const ACCESSORS: Accessors<EventItem> = {
   dates: (e) => e.start_date,
   abstract_deadline: (e) => e.abstract_deadline,
   talks: (e) => e.talk_count,
-}
-
-// Stored URLs render as clickable links for everyone, so only http(s) may
-// ever reach an href (a stored javascript: URL would execute on click).
-const safeUrl = (url: string | null): string | null => {
-  if (!url) return null
-  try {
-    return ['http:', 'https:'].includes(new URL(url).protocol) ? url : null
-  } catch {
-    return null
-  }
 }
 
 const EMPTY_FORM = {

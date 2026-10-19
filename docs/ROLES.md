@@ -42,7 +42,8 @@ the roles below it.**
 - **Own profile**: edit the `SELF_EDITABLE` fields — preferred name, email,
   career stage, professional title, department, research time on µC,
   research areas, expertise, voting flag, public-listing consent (name and
-  photo on muoncollider.us/people), grant numbers, acknowledgement text — and
+  photo on muoncollider.us/people, and being named as the speaker on the
+  public talks page), grant numbers, acknowledgement text — and
   upload/remove their photo. **Not** their ORCID iD (set only by
   an authenticated ORCID sign-in or the office, because the sign-in auto-link
   trusts it), names, or notes.
@@ -153,6 +154,10 @@ positions change.
   acknowledgement).
 - Read the public institution list (for the registration form) and the public
   publication list.
+- Read the public talks list (`GET /talks/public`, the `/public/talks` page,
+  issue #175): assigned and given talks with title, conference, date, type and
+  links. The speaker is named only when they consented to public listing;
+  notes, nominations and the selection status are never exposed.
 - Start an ORCID sign-in. After one that matched no record: read the iD and
   name waiting to be registered, and ask for a "link my record" verification
   link to the email on an existing record (rate limited; always the same

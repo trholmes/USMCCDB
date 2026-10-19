@@ -1,10 +1,11 @@
 import {
   ActionIcon,
   Alert,
+  Anchor,
   AppShell,
   Badge,
-  Button,
   Burger,
+  Button,
   Group,
   Loader,
   NavLink,
@@ -30,6 +31,7 @@ import LoginPage from './pages/Login'
 import PersonPage from './pages/Person'
 import PublicationsPage from './pages/Publications'
 import PublicationDetailPage from './pages/PublicationDetail'
+import PublicTalksPage from './pages/PublicTalks'
 import StatsPage from './pages/Stats'
 import TalksPage from './pages/Talks'
 import WorkingGroupsPage from './pages/WorkingGroups'
@@ -79,13 +81,15 @@ export default function App() {
     )
   }
 
-  // Unauthenticated users only see login + registration.
+  // Unauthenticated users see login, registration and the public talks
+  // page (issue #175).
   if (!me) {
     return (
       <>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/public/talks" element={<PublicTalksPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <Footer />
@@ -142,29 +146,27 @@ export default function App() {
             >
               ⚙
             </ActionIcon>
-            <Text
+            <Anchor
               component={Link}
               to={me.person_id ? `/people/${me.person_id}` : '/account'}
               size="sm"
-              c="indigo"
-              style={{ cursor: 'pointer' }}
               title={me.person_id ? 'View / edit your profile' : 'Account settings'}
               visibleFrom="sm"
             >
               {me.display_name || me.user.username || me.user.orcid}
               {me.display_name && me.user.username ? ` (${me.user.username})` : ''}
-            </Text>
-            <Text
+            </Anchor>
+            <Anchor
+              component="button"
               size="sm"
-              c="indigo"
-              style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}
+              style={{ whiteSpace: 'nowrap' }}
               onClick={async () => {
                 await logout()
                 navigate('/login')
               }}
             >
               Sign out
-            </Text>
+            </Anchor>
           </Group>
         </Group>
       </AppShell.Header>
@@ -248,6 +250,7 @@ export default function App() {
           <Route path="/leadership" element={<LeadershipPage />} />
           <Route path="/events" element={<EventsPage />} />
           <Route path="/talks" element={<TalksPage />} />
+          <Route path="/public/talks" element={<PublicTalksPage />} />
           <Route path="/publications" element={<PublicationsPage />} />
           <Route path="/publications/:id" element={<PublicationDetailPage />} />
           <Route path="/stats" element={<StatsPage />} />
