@@ -309,9 +309,13 @@ selection they made on the old system.
 `GET /api/v1/people/public` (no sign-in) lists the active members who
 consented to public listing — name, career stage, research areas, current
 institution, ORCID iD — and `GET /api/v1/people/public/{id}/photo` serves
-their photo under the same consent. The website's `scripts/getPeople.py`
-(in the muoncollider.us repository) rebuilds the public People page from
-this feed, so opt-outs are enforced at the source.
+their photo under the same consent. `GET /api/v1/people/public/stats`
+returns anonymous aggregate counts over **all** active members (career
+stages, research areas), since the consent covers names and photos, not the
+headcount. The website's `scripts/getPeople.py` (in the muoncollider.us
+repository) rebuilds the public People page from these feeds, so opt-outs
+are enforced at the source while the page's charts still reflect the whole
+collaboration.
 
 #### The whole sequence at a glance
 

@@ -5647,6 +5647,11 @@ def test_public_people_list(admin, tmp_path_factory):
         "/api/v1/institutions", json={"name": "Public Export U", "short_name": "PubU"}
     ).json()
 
+    anon = TestClient(app)
+    # Snapshot the public stats before adding anyone; the DB is module-scoped,
+    # so the assertions below work on deltas.
+    stats_before = anon.get("/api/v1/people/public/stats").json()
+
     def make(given: str, family: str, consent: bool, status: str | None = "active") -> int:
         r = admin.post(
             "/api/v1/people/register",
@@ -5685,7 +5690,6 @@ def test_public_people_list(admin, tmp_path_factory):
         )
         assert r.status_code == 201, r.text
 
-    anon = TestClient(app)
     r = anon.get("/api/v1/people/public")
     assert r.status_code == 200, r.text
     rows = {p["id"]: p for p in r.json()}
@@ -5713,10 +5717,26 @@ def test_public_people_list(admin, tmp_path_factory):
     assert anon.get(f"/api/v1/people/public/{private}/photo").status_code == 404
     assert anon.get("/api/v1/people/public/999999/photo").status_code == 404
 
+    # The anonymous stats count ALL active members — opted-out included,
+    # pending and inactive not: of the four added, listed + private are the
+    # two new active ones (both postdocs with one research area).
+    stats = anon.get("/api/v1/people/public/stats").json()
+    assert stats["total"] == stats_before["total"] + 2
+    assert (
+        stats["by_career_stage"].get("postdoc", 0)
+        == stats_before["by_career_stage"].get("postdoc", 0) + 2
+    )
+    assert (
+        stats["by_research_area"].get("Accelerator Physics", 0)
+        == stats_before["by_research_area"].get("Accelerator Physics", 0) + 2
+    )
+
     # Withdrawing consent takes the member (and photo) off immediately.
     admin.patch(f"/api/v1/people/{listed}", json={"public_listing_consent": False})
     assert listed not in {p["id"] for p in anon.get("/api/v1/people/public").json()}
     assert anon.get(f"/api/v1/people/public/{listed}/photo").status_code == 404
+    # ... but never out of the headcount.
+    assert anon.get("/api/v1/people/public/stats").json()["total"] == stats["total"]
 
     # The member directory itself still needs a session.
     assert anon.get("/api/v1/people").status_code in (401, 403)

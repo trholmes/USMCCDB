@@ -49,6 +49,7 @@ from app.schemas.membership import (
     PersonRegistration,
     PersonOut,
     PersonPublic,
+    PersonPublicStats,
     PersonSummary,
     PersonUpdate,
     RegistrationAck,
@@ -454,6 +455,31 @@ def list_people_public(db: Session = Depends(get_db)) -> list[PersonPublic]:
             )
         )
     return out
+
+
+@router.get("/public/stats")
+def public_member_stats(db: Session = Depends(get_db)) -> PersonPublicStats:
+    """Unauthenticated, anonymous aggregates over ALL active members for the
+    public page's membership charts. Unlike the /public listing, this counts
+    members who opted out of public listing too — the consent covers their
+    name and photo, not their presence in a headcount."""
+    rows = db.execute(
+        select(Person.career_stage, Person.research_areas).where(
+            Person.status == MemberStatus.active
+        )
+    ).all()
+    by_stage: dict[str, int] = {}
+    by_area: dict[str, int] = {}
+    for stage, areas_raw in rows:
+        by_stage[stage.value] = by_stage.get(stage.value, 0) + 1
+        areas = [a.strip() for a in (areas_raw or "").split(",") if a.strip()]
+        if len(areas) > 1:
+            by_area["Multiple"] = by_area.get("Multiple", 0) + 1
+        elif areas:
+            by_area[areas[0]] = by_area.get(areas[0], 0) + 1
+    return PersonPublicStats(
+        total=len(rows), by_career_stage=by_stage, by_research_area=by_area
+    )
 
 
 @router.get("/public/{person_id}/photo")

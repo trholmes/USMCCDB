@@ -379,6 +379,20 @@ class PersonPublic(BaseModel):
     has_photo: bool = False
 
 
+class PersonPublicStats(BaseModel):
+    """Anonymous aggregates over ALL active members for the public page's
+    charts (issue #173). The public-listing consent governs names and photos,
+    not these counts, so opted-out members are still counted here."""
+
+    total: int
+    # CareerStage value -> number of active members.
+    by_career_stage: dict[str, int] = {}
+    # Standard research area -> active members with exactly that one area;
+    # "Multiple" counts those with more than one. Members with no recorded
+    # area appear only in total / by_career_stage.
+    by_research_area: dict[str, int] = {}
+
+
 class WorkingGroupRef(ORMModel):
     """Small reference used for cross-links (collab-role rows, etc.)."""
 
