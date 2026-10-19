@@ -1,6 +1,6 @@
 import { Button, Checkbox, Divider, Group, Modal, Stack, Text, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { fetchRorRecord, parseRorRecord, type RorParsed } from '../api/ror'
 import type { CollabRole, Institution, PersonSummary } from '../api/types'
@@ -40,24 +40,35 @@ export default function InstitutionEditModal({
   // needs a persisted id, so it's hidden while creating a new institution.
   const instId = target !== null && target !== 'new' ? target.id : null
 
+  // Which record the modal is open on: null (closed), 'new', or an id.
+  // Assigning or ending a contact asks the parent to refetch, which hands
+  // us a fresh `target` object for the *same* institution — the form must
+  // not be reset from the server copy then, or unsaved edits (a ROR fill,
+  // the Active checkbox) are silently wiped (issue #179). So the reset keys
+  // on this identity, not on the object, and reads the latest target from
+  // a ref.
+  const targetKey = target === null ? null : target === 'new' ? 'new' : target.id
+  const targetRef = useRef(target)
+  targetRef.current = target
   useEffect(() => {
-    if (target === null) return
+    const t = targetRef.current
+    if (t === null) return
     setContactSel(null)
     setForm(
-      target === 'new'
+      t === 'new'
         ? EMPTY_FORM
         : {
-            name: target.name,
-            short_name: target.short_name ?? '',
-            ror_id: target.ror_id ?? '',
-            latex_address: target.latex_address ?? '',
-            is_us: target.is_us,
-            is_active: target.is_active,
-            latitude: target.latitude != null ? String(target.latitude) : '',
-            longitude: target.longitude != null ? String(target.longitude) : '',
+            name: t.name,
+            short_name: t.short_name ?? '',
+            ror_id: t.ror_id ?? '',
+            latex_address: t.latex_address ?? '',
+            is_us: t.is_us,
+            is_active: t.is_active,
+            latitude: t.latitude != null ? String(t.latitude) : '',
+            longitude: t.longitude != null ? String(t.longitude) : '',
           },
     )
-  }, [target])
+  }, [targetKey])
 
   const loadContacts = useCallback(() => {
     if (instId == null) {
