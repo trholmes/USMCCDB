@@ -319,6 +319,22 @@ export default function PersonPage() {
       setEditing(false)
       return
     }
+    // A stage change saved here is stamped onto the current affiliation, so a
+    // promotion that came with an institution move would rewrite the position
+    // held at the OLD institution — steer those to the move form, which
+    // records the new stage together with the move.
+    if (
+      'career_stage' in payload &&
+      !window.confirm(
+        'You changed the position / career stage.\n\n' +
+          'If this change came with a move to a new institution, press Cancel and use ' +
+          '“Change institution” instead — it records the new position together with the ' +
+          'move, so the old institution keeps the position held there.\n\n' +
+          `OK: the new position is at the current institution` +
+          `${currentPrimary ? ` (${currentPrimary.institution.name})` : ''}.`,
+      )
+    )
+      return
     try {
       await api.patch(`/people/${person.id}`, payload)
       notifications.show({ message: 'Profile updated' })
@@ -371,6 +387,32 @@ export default function PersonPage() {
         ...(effectiveDate ? { effective_date: effectiveDate } : {}),
       })
       notifications.show({ message: `Status set to ${status}` })
+      // Leaving active membership usually means leaving the author list too,
+      // but the authorship period doesn't close itself — offer to end it now
+      // rather than surface it later as an "open-ended authorship" alert.
+      if (isOffice && status !== 'active') {
+        const endDate = effectiveDate ?? today()
+        const open = person.author_periods.find(
+          (p) => p.end_date === null && p.start_date <= endDate,
+        )
+        if (
+          open &&
+          window.confirm(
+            `${person.given_name} ${person.family_name} still has an open authorship period ` +
+              `(since ${open.start_date}). End it on ${endDate} as well? ` +
+              `They stay on author lists generated up to that date and drop off after it.`,
+          )
+        ) {
+          try {
+            await api.patch(`/people/${person.id}/author-periods/${open.id}`, {
+              end_date: endDate,
+            })
+            notifications.show({ message: `Authorship period ended ${endDate}` })
+          } catch (err: any) {
+            notifications.show({ color: 'red', message: err.message })
+          }
+        }
+      }
       load()
       loadEvents()
       return true
