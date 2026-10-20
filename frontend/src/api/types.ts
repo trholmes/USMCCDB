@@ -391,6 +391,15 @@ export interface AdminAlerts {
   active_without_affiliation: PersonAlert[]
   ineligible_voting_members: PersonAlert[]
   open_author_periods_not_active: PersonAlert[]
+  affiliation_changes_to_review: AffiliationChangeAlert[]
   migrations_pending: boolean
   total: number
+}
+
+export interface AffiliationChangeAlert {
+  affiliation_id: number
+  person_id: number
+  name: string
+  email: string | null
+  detail: string
 }

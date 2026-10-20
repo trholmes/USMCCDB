@@ -234,6 +234,9 @@ class Affiliation(TimestampedBase):
     )
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date)
+    # Set when a member moved institutions themselves; the office (told by
+    # email) confirms the change from the Alerts page, which clears it.
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     person = relationship("Person", back_populates="affiliations")
     institution = relationship("Institution", back_populates="affiliations")

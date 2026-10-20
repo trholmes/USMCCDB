@@ -969,11 +969,16 @@ def change_institution(
         )
 
     open_primary = _open_primary(db, person_id)
+    old_institution = open_primary.institution if open_primary is not None else None
     if open_primary is not None:
         if open_primary.institution_id == institution_id:
             raise HTTPException(400, "That is already your current institution")
         _close_primary(db, open_primary, body.start_date)
 
+    # A member's own move is applied immediately but flagged for the office
+    # to confirm (Alerts page + email below); an office-made move needs no
+    # second pair of eyes.
+    self_service = not is_office(user)
     affil = Affiliation(
         person_id=person_id,
         institution_id=institution_id,
@@ -981,10 +986,23 @@ def change_institution(
         career_stage=person.career_stage,
         start_date=body.start_date,
         end_date=None,
+        needs_review=self_service,
     )
     db.add(affil)
     db.commit()
     db.refresh(affil)
+    if self_service:
+        notifications.queue(
+            background,
+            notifications.institution_changed(
+                db,
+                person,
+                old_institution,
+                db.get(Institution, institution_id),
+                body.start_date,
+                user,
+            ),
+        )
     website.queue(background)
     return AffiliationOut.model_validate(affil)
 
@@ -1085,6 +1103,9 @@ def update_affiliation(
     person = _get_person(db, person_id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(affil, field, value)
+    # An office edit is a review: correcting a member-made move must also
+    # clear it from the Alerts page, not leave it waiting for a confirmation.
+    affil.needs_review = False
     # The schema catches an inverted range when both bounds are sent; a
     # partial update must also be checked against the stored other bound —
     # an inverted range matches no cutoff date and silently drops the person
