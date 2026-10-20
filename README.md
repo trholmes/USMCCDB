@@ -49,7 +49,7 @@ ORCID sign-in.
   username/password accounts; admins can create as many local accounts as
   needed. Roles: `admin`, `office`, `leadership` (Leadership Council
   representatives and deputies: working groups, publications, talks), `speakers_committee`
-  (speakers committee: talks and events), `member` (+ working-group conveners
+  (speakers committee: talks and events), `member` (+ working-group coordinators
   and administrative institutional contacts with scoped rights). Roles are
   assigned by an admin; the alerts panel suggests one when a person's
   leadership position and their account disagree.
@@ -162,7 +162,7 @@ backend at an SMTP server. When configured, the instance sends:
 - **Speakers bureau** — the speakers committee is told of new nominations and
   assigned speakers are told of their talk.
 - **Working groups** — the leadership and the person are told when a
-  convener is named or their term ends.
+  coordinator is named or their term ends.
 - **Publication workflow** — the admins and the leadership are notified when
   someone requests collaboration review, reviewers are notified when they are
   assigned, and a paper's contacts are notified of status changes.

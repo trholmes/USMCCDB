@@ -25,7 +25,7 @@ from app.services import notifications
 from app.security import (
     can_manage_working_groups,
     get_current_user,
-    is_convener_of,
+    is_wg_coordinator_of,
     is_office,
     require_admin,
     require_leadership,
@@ -80,7 +80,7 @@ def update_wg(wg_id: int, body: WorkingGroupUpdate, db: Session = Depends(get_db
 
 @router.delete("/working-groups/{wg_id}", dependencies=[Depends(require_admin)], status_code=204)
 def delete_wg(wg_id: int, db: Session = Depends(get_db)) -> None:
-    """Remove a working group entirely. Memberships and convener roles go with
+    """Remove a working group entirely. Memberships and coordinator roles go with
     it (FK cascade); talks and publications tagged with it keep the row but
     lose the tag (SET NULL)."""
     wg = db.get(WorkingGroup, wg_id)
@@ -123,12 +123,12 @@ def add_wg_member(
     person = db.get(Person, body.person_id)
     if person is None:
         raise HTTPException(404, "Person not found")
-    # Members may join a WG themselves; adding others needs convener /
+    # Members may join a WG themselves; adding others needs coordinator /
     # leadership / office.
     if body.person_id != user.person_id and not (
-        can_manage_working_groups(user) or is_convener_of(db, user, wg_id)
+        can_manage_working_groups(user) or is_wg_coordinator_of(db, user, wg_id)
     ):
-        raise HTTPException(403, "Only conveners or the office can add other people")
+        raise HTTPException(403, "Only coordinators or the office can add other people")
     exists = db.execute(
         select(WorkingGroupMember).where(
             WorkingGroupMember.working_group_id == wg_id,
@@ -150,9 +150,9 @@ def remove_wg_member(
     user: User = Depends(get_current_user),
 ) -> None:
     if person_id != user.person_id and not (
-        can_manage_working_groups(user) or is_convener_of(db, user, wg_id)
+        can_manage_working_groups(user) or is_wg_coordinator_of(db, user, wg_id)
     ):
-        raise HTTPException(403, "Only conveners or the office can remove other people")
+        raise HTTPException(403, "Only coordinators or the office can remove other people")
     membership = db.execute(
         select(WorkingGroupMember).where(
             WorkingGroupMember.working_group_id == wg_id,
@@ -165,18 +165,18 @@ def remove_wg_member(
     db.commit()
 
 
-# --- Collaboration roles (office; leadership for conveners) -------------------
+# --- Collaboration roles (office; leadership for coordinators) ----------------
 
 
 def _require_collab_role_editor(user: User, role: CollabRoleType) -> None:
     """Office manages every position. Leadership accounts (representatives
-    and deputies, issue #167) may name and end working-group conveners —
-    part of setting up a working group — but not other positions: conveners
+    and deputies, issue #167) may name and end working-group coordinators —
+    part of setting up a working group — but not other positions: coordinators
     grant no access beyond the group, whereas e.g. an administrative contact
     can edit members and approve registrations."""
     if is_office(user):
         return
-    if can_manage_working_groups(user) and role == CollabRoleType.convener:
+    if can_manage_working_groups(user) and role == CollabRoleType.wg_coordinator:
         return
     raise HTTPException(403, "Insufficient permissions")
 
@@ -235,8 +235,8 @@ def create_collab_role(
     person = db.get(Person, body.person_id)
     if person is None:
         raise HTTPException(404, "Person not found")
-    if body.role.value == "convener" and body.working_group_id is None:
-        raise HTTPException(422, "convener role requires working_group_id")
+    if body.role.value == "wg_coordinator" and body.working_group_id is None:
+        raise HTTPException(422, "wg_coordinator role requires working_group_id")
     if body.role.value in ("ib_rep", "admin_contact") and body.institution_id is None:
         raise HTTPException(422, f"{body.role.value} role requires institution_id")
     if body.role in DETAIL_REQUIRED_ROLES and body.detail is None:
@@ -245,13 +245,13 @@ def create_collab_role(
     data["detail"] = _normalize_area(body.role, body.detail)
     role = CollabRole(**data)
     db.add(role)
-    if role.role == CollabRoleType.convener:
+    if role.role == CollabRoleType.wg_coordinator:
         wg = db.get(WorkingGroup, role.working_group_id)
         if wg is None:
             raise HTTPException(404, "Working group not found")
         if role.end_date is None or role.end_date >= date.today():
             notifications.queue(
-                background, notifications.convener_changed(db, person, wg, "added", user)
+                background, notifications.wg_coordinator_changed(db, person, wg, "added", user)
             )
     db.commit()
     db.refresh(role)
@@ -281,13 +281,13 @@ def update_collab_role(
     was_open = role.end_date is None or role.end_date >= date.today()
     for field, value in updates.items():
         setattr(role, field, value)
-    # Closing a convener's term (end date set to today or earlier) tells the
+    # Closing a coordinator's term (end date set to today or earlier) tells the
     # leadership and the person, like a removal (issue #166).
     now_open = role.end_date is None or role.end_date >= date.today()
-    if role.role == CollabRoleType.convener and was_open and not now_open:
+    if role.role == CollabRoleType.wg_coordinator and was_open and not now_open:
         notifications.queue(
             background,
-            notifications.convener_changed(
+            notifications.wg_coordinator_changed(
                 db, role.person, role.working_group, "term ended", user
             ),
         )
@@ -307,12 +307,12 @@ def delete_collab_role(
     if role is None:
         raise HTTPException(404, "Role not found")
     _require_collab_role_editor(user, role.role)
-    if role.role == CollabRoleType.convener and (
+    if role.role == CollabRoleType.wg_coordinator and (
         role.end_date is None or role.end_date >= date.today()
     ):
         notifications.queue(
             background,
-            notifications.convener_changed(db, role.person, role.working_group, "removed", user),
+            notifications.wg_coordinator_changed(db, role.person, role.working_group, "removed", user),
         )
     db.delete(role)
     db.commit()

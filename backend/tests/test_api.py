@@ -1765,7 +1765,7 @@ def test_collab_roles_lifecycle(admin):
     # Scoped roles keep their existing requirements.
     assert admin.post(
         "/api/v1/collab-roles",
-        json={"person_id": pid, "role": "convener", "start_date": "2025-01-01"},
+        json={"person_id": pid, "role": "wg_coordinator", "start_date": "2025-01-01"},
     ).status_code == 422
 
     # Listings resolve the person (for the leadership page).
@@ -2182,7 +2182,7 @@ def test_working_group_crud(admin):
     ).status_code == 200
     assert office.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 403
 
-    # An admin deletes the group; memberships and convener roles go with it.
+    # An admin deletes the group; memberships and coordinator roles go with it.
     assert admin.post(
         f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": pid}
     ).status_code == 201
@@ -2190,7 +2190,7 @@ def test_working_group_crud(admin):
         "/api/v1/collab-roles",
         json={
             "person_id": pid,
-            "role": "convener",
+            "role": "wg_coordinator",
             "working_group_id": wg["id"],
             "start_date": "2025-01-01",
         },
@@ -4387,7 +4387,7 @@ def test_bulk_add_publication_people(admin):
     )
     assert r.status_code == 404
 
-    # A member who is neither contact, convener, nor office cannot bulk-add…
+    # A member who is neither contact, coordinator, nor office cannot bulk-add…
     member, mid = _linked_member(
         admin, given="Nadia", family="Nonauthor", email="nadia.nonauthor@example.edu"
     )
@@ -4979,7 +4979,7 @@ def test_speakers_role_manages_talks_only(admin):
 
 def test_leadership_role_manages_working_groups(admin):
     """Leadership accounts (representatives / deputies, issue #167): working
-    groups, their members and conveners, plus everything speakers can do —
+    groups, their members and coordinators, plus everything speakers can do —
     but no other positions and no membership moderation."""
     lead, lpid, _ = _role_account(
         admin, given="Rep", family="Resentative", email="rep.resentative@example.edu", role="leadership"
@@ -5000,14 +5000,14 @@ def test_leadership_role_manages_working_groups(admin):
     # Deleting a group stays admin-only.
     assert lead.delete(f"/api/v1/working-groups/{wg['id']}").status_code == 403
 
-    # Conveners yes; any other position no.
+    # Coordinators yes; any other position no.
     r = lead.post(
         "/api/v1/collab-roles",
-        json={"person_id": mpid, "role": "convener", "working_group_id": wg["id"], "start_date": "2026-01-01"},
+        json={"person_id": mpid, "role": "wg_coordinator", "working_group_id": wg["id"], "start_date": "2026-01-01"},
     )
     assert r.status_code == 201, r.text
-    convener_role = r.json()
-    assert lead.patch(f"/api/v1/collab-roles/{convener_role['id']}", json={"end_date": "2026-12-31"}).status_code == 200
+    coordinator_role = r.json()
+    assert lead.patch(f"/api/v1/collab-roles/{coordinator_role['id']}", json={"end_date": "2026-12-31"}).status_code == 200
     assert lead.post(
         "/api/v1/collab-roles",
         json={"person_id": mpid, "role": "speakers_comm", "start_date": "2026-01-01"},
@@ -5023,7 +5023,7 @@ def test_leadership_role_manages_working_groups(admin):
     ).json()
     assert lead.patch(f"/api/v1/collab-roles/{office_role['id']}", json={"end_date": "2026-06-30"}).status_code == 403
     assert lead.delete(f"/api/v1/collab-roles/{office_role['id']}").status_code == 403
-    assert lead.delete(f"/api/v1/collab-roles/{convener_role['id']}").status_code == 204
+    assert lead.delete(f"/api/v1/collab-roles/{coordinator_role['id']}").status_code == 204
 
     # Talks and events come with the role.
     assert lead.post("/api/v1/events", json={"name": "Leadership Retreat"}).status_code == 201
@@ -5219,7 +5219,7 @@ def test_merge_keeps_more_privileged_new_role(admin):
 def test_notification_routing_and_email_log(admin, monkeypatch):
     """Issue #166: registrants hear back on approval / rejection, office-made
     status changes tell the member, nominations reach the speakers committee,
-    assigned speakers and new conveners are told, the admin list can be a
+    assigned speakers and new coordinators are told, the admin list can be a
     separate address from CONTACT_EMAIL, and every send lands in the admin
     email log."""
     import app.services.email as email_mod
@@ -5340,7 +5340,7 @@ def test_notification_routing_and_email_log(admin, monkeypatch):
         ).status_code == 200
         assert [m["To"] for m in sent] == ["sam.speakers@example.edu"]
 
-        # --- Working groups: a new convener is announced to the leadership
+        # --- Working groups: a new coordinator is announced to the leadership
         # (role account or Council position) and to the person.
         lead, lead_pid = _linked_member(
             admin, given="Lena", family="Leader", email="lena.leader@example.edu"
@@ -5359,14 +5359,14 @@ def test_notification_routing_and_email_log(admin, monkeypatch):
             "/api/v1/collab-roles",
             json={
                 "person_id": pid,
-                "role": "convener",
+                "role": "wg_coordinator",
                 "working_group_id": wg["id"],
                 "start_date": "2026-01-01",
             },
         )
         assert role.status_code == 201, role.text
         assert len(sent) == 1
-        assert sent[0]["Subject"] == "New convener for Notify WG: Nadia Newcomer"
+        assert sent[0]["Subject"] == "New coordinator for Notify WG: Nadia Newcomer"
         for addr in ("lena.leader@example.edu", "nadia.newcomer@example.edu"):
             assert addr in sent[0]["To"]
         # Ending the term (patch) and removing (delete) both announce; a
@@ -5379,7 +5379,7 @@ def test_notification_routing_and_email_log(admin, monkeypatch):
         assert admin.patch(
             f"/api/v1/collab-roles/{role.json()['id']}", json={"end_date": "2026-01-31"}
         ).status_code == 200
-        assert [m["Subject"] for m in sent] == ["Ended convener for Notify WG: Nadia Newcomer"]
+        assert [m["Subject"] for m in sent] == ["Ended coordinator for Notify WG: Nadia Newcomer"]
         sent.clear()
         assert admin.delete(f"/api/v1/collab-roles/{role.json()['id']}").status_code == 204
         assert sent == []  # already closed — nothing to announce
@@ -5390,7 +5390,7 @@ def test_notification_routing_and_email_log(admin, monkeypatch):
         page = admin.get("/api/v1/email-log?limit=5").json()
         assert page["total"] >= 8
         assert len(page["items"]) == 5
-        assert page["items"][0]["kind"] == "convener_changed"
+        assert page["items"][0]["kind"] == "wg_coordinator_changed"
         assert page["items"][0]["status"] == "sent"
         assert page["items"][0]["person_name"] == "Nadia Newcomer"
         assert page["items"][0]["actor_login"] == "testadmin"

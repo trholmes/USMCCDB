@@ -25,7 +25,7 @@ logged, never raised.
 
 Every action in the web UI that makes the server send one of the messages
 below asks for confirmation first and names the recipients, so nobody mails a
-member by accident (a status change, a convener term, a nomination, a review
+member by accident (a status change, a coordinator term, a nomination, a review
 request, …). The recipient wording lives in `frontend/src/emailWarnings.ts`
 (`EMAIL_RECIPIENTS`) — update it alongside this catalogue. When the server has
 no mail delivery configured (`SMTP_HOST` empty; `email_enabled` on `/auth/me`)
@@ -48,7 +48,7 @@ action triggered it, who already knows.
 | **leadership** | Every active `leadership` account, plus everyone currently holding a Leadership Council position — chair, vice chair, representative, deputy representative — whether or not they have a sign-in. |
 | **speakers committee** | Every active `speakers_committee` account, plus everyone currently holding a `speakers_comm` position. |
 | **institution admin contacts** | Active Administrative Institutional Contacts of one institution. |
-| **working group conveners** | Active conveners of one working group (available, not yet used by a message). |
+| **working group coordinators** | Active coordinators of one working group (available, not yet used by a message). |
 | **publication contacts** | People attached to a paper with the `contact` role. |
 | **the person** | The member the message is about, at the email on their record. |
 
@@ -79,7 +79,7 @@ Kind is the key shown in the Admin → Email log and stored in `email_log.kind`.
 
 | Kind | Trigger | Recipients | Notes |
 |---|---|---|---|
-| `convener_changed` | A convener position is added, removed, or its end date is set to today or earlier. | leadership + the person; minus the actor. | Subject starts "New / Removed / Ended convener for *WG*". Editing dates while the term stays open sends nothing; removing an already-ended term sends nothing. |
+| `wg_coordinator_changed` | A working-group coordinator position is added, removed, or its end date is set to today or earlier. | leadership + the person; minus the actor. | Subject starts "New / Removed / Ended coordinator for *WG*". Editing dates while the term stays open sends nothing; removing an already-ended term sends nothing. |
 
 ### Speakers bureau
 
@@ -106,7 +106,7 @@ Kind is the key shown in the Admin → Email log and stored in `email_log.kind`.
 
 Things that happen without an email today, listed so the gaps are deliberate:
 
-- A member joining or leaving a working group themselves, or being added by a convener.
+- A member joining or leaving a working group themselves, or being added by a coordinator.
 - New talks, events or publications being created.
 - Institution changes (a member moving institution, a new institution awaiting office review — these appear in the admin **Alerts** panel instead).
 - Account changes (role changes, password resets — the temporary password is shown to the admin, not mailed).

@@ -17,37 +17,37 @@ export default function WorkingGroupsPage() {
   const [addPersonId, setAddPersonId] = useState<string | null>(null)
   const { me, canManageWGs, isAdmin } = useSession()
 
-  // Conveners may manage their own group's membership (mirrors the backend
+  // Coordinators may manage their own group's membership (mirrors the backend
   // rule on POST/DELETE /working-groups/{id}/members).
-  const [convenerWgIds, setConvenerWgIds] = useState<number[]>([])
+  const [coordinatorWgIds, setCoordinatorWgIds] = useState<number[]>([])
   useEffect(() => {
     if (me?.person_id == null || canManageWGs) {
-      setConvenerWgIds([])
+      setCoordinatorWgIds([])
       return
     }
     const t = today()
     api
-      .get<CollabRole[]>(`/collab-roles?person_id=${me.person_id}&role=convener`)
+      .get<CollabRole[]>(`/collab-roles?person_id=${me.person_id}&role=wg_coordinator`)
       .then((rs) =>
-        setConvenerWgIds(
+        setCoordinatorWgIds(
           rs
             .filter((r) => r.start_date <= t && (!r.end_date || r.end_date >= t))
             .map((r) => r.working_group_id)
             .filter((x): x is number => x != null),
         ),
       )
-      .catch(() => setConvenerWgIds([]))
+      .catch(() => setCoordinatorWgIds([]))
   }, [me?.person_id, canManageWGs])
 
-  const canManage = (wgId: number) => canManageWGs || convenerWgIds.includes(wgId)
+  const canManage = (wgId: number) => canManageWGs || coordinatorWgIds.includes(wgId)
 
   // One shared directory load for the per-group "Add member" pickers (every
   // accordion panel stays mounted, so self-loading pickers would each fetch).
   const [people, setPeople] = useState<PersonSummary[]>([])
   useEffect(() => {
-    if (!canManageWGs && convenerWgIds.length === 0) return
+    if (!canManageWGs && coordinatorWgIds.length === 0) return
     api.get<PersonSummary[]>('/people').then(setPeople).catch(() => setPeople([]))
-  }, [canManageWGs, convenerWgIds])
+  }, [canManageWGs, coordinatorWgIds])
 
   const load = useCallback(() => {
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
@@ -118,7 +118,7 @@ export default function WorkingGroupsPage() {
     if (
       !window.confirm(
         `Delete the working group "${wg.name}"? Its ${wg.member_count} membership(s) and ` +
-          'any convener roles are removed with it; talks and publications tagged with it lose the tag.',
+          'any coordinator roles are removed with it; talks and publications tagged with it lose the tag.',
       )
     )
       return

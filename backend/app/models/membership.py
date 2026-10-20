@@ -72,7 +72,7 @@ class CollabRoleType(str, enum.Enum):
     # info of the members at their institution up to date and can verify they
     # are authorized to engage in USMCC work. Not a scientific leadership role.
     admin_contact = "admin_contact"
-    convener = "convener"
+    wg_coordinator = "wg_coordinator"  # working group coordinator
     speakers_comm = "speakers_comm"
     pub_chair = "pub_chair"
     secretary = "secretary"
@@ -281,8 +281,8 @@ class CollabRole(TimestampedBase):
     __tablename__ = "collab_roles"
     __table_args__ = (
         CheckConstraint(
-            "(role != 'convener') OR (working_group_id IS NOT NULL)",
-            name="convener_requires_wg",
+            "(role != 'wg_coordinator') OR (working_group_id IS NOT NULL)",
+            name="wg_coordinator_requires_wg",
         ),
         CheckConstraint(
             "(role != 'ib_rep') OR (institution_id IS NOT NULL)",

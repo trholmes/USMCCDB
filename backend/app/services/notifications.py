@@ -150,10 +150,10 @@ def institution_admin_contacts(db, institution_id: int | None) -> set[str]:
     return position_holders(db, CollabRoleType.admin_contact, institution_id=institution_id)
 
 
-def working_group_conveners(db, working_group_id: int | None) -> set[str]:
+def working_group_coordinators(db, working_group_id: int | None) -> set[str]:
     if working_group_id is None:
         return set()
-    return position_holders(db, CollabRoleType.convener, working_group_id=working_group_id)
+    return position_holders(db, CollabRoleType.wg_coordinator, working_group_id=working_group_id)
 
 
 def publication_contacts(db, pub: Publication) -> set[str]:
@@ -558,20 +558,21 @@ def institution_changed(
 # --- Working groups ---------------------------------------------------------------
 
 
-def convener_changed(
+def wg_coordinator_changed(
     db, person: Person, wg: WorkingGroup, change: str, actor: User
 ) -> Message | None:
-    """Tell the leadership and the person that a working group convener was
-    added or removed (`change` is 'added', 'removed' or 'term ended')."""
+    """Tell the leadership and the person that a working group coordinator
+    (role `wg_coordinator`) was added or removed (`change` is 'added', 'removed'
+    or 'term ended')."""
     to = finalize(leadership(db) | person_address(person), exclude=_actor_email(db, actor))
     if not to:
         return None
     site = _site()
     lines = [
-        f"{person.display_name} was {change} as convener of the "
+        f"{person.display_name} was {change} as coordinator of the "
         f"{wg.name} working group by {_actor_name(db, actor)}."
         if change != "term ended"
-        else f"{person.display_name}'s term as convener of the {wg.name} working "
+        else f"{person.display_name}'s term as coordinator of the {wg.name} working "
         f"group was ended by {_actor_name(db, actor)}.",
     ]
     if site:
@@ -580,9 +581,9 @@ def convener_changed(
     verb = {"added": "New", "removed": "Removed", "term ended": "Ended"}.get(change, "Changed")
     return Message(
         to,
-        f"{verb} convener for {wg.name}: {person.display_name}",
+        f"{verb} coordinator for {wg.name}: {person.display_name}",
         "\n".join(lines),
-        kind="convener_changed",
+        kind="wg_coordinator_changed",
         person_id=person.id,
         actor_user_id=actor_id(actor),
         context=f"working group {wg.name}",

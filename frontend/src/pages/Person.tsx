@@ -36,7 +36,7 @@ import { PublicListingChoice } from '../components/PublicListingChoice'
 import RoleDetailInput from '../components/RoleDetailInput'
 import StatusBadge from '../components/StatusBadge'
 import { useSession } from '../auth/SessionContext'
-import { convenerChangeEmails, useEmailConfirm } from '../emailWarnings'
+import { coordinatorChangeEmails, useEmailConfirm } from '../emailWarnings'
 import {
   CAREER_STAGES,
   careerStageLabel,
@@ -208,10 +208,10 @@ export default function PersonPage() {
   }, [canManageWGs])
 
   // Office manages every role; leadership accounts (representatives and
-  // deputies) only working-group conveners — mirrors _require_collab_role_editor.
-  const canEditRole = (role: string) => isOffice || (canManageWGs && role === 'convener')
+  // deputies) only working-group coordinators — mirrors _require_collab_role_editor.
+  const canEditRole = (role: string) => isOffice || (canManageWGs && role === 'wg_coordinator')
   const rolePickerData = COLLAB_ROLES.filter(
-    (r) => !r.hidden && (isOffice || r.value === 'convener'),
+    (r) => !r.hidden && (isOffice || r.value === 'wg_coordinator'),
   ).map((r) => ({ value: r.value, label: r.label }))
 
   const uploadPhoto = async (file: File | undefined) => {
@@ -541,8 +541,8 @@ export default function PersonPage() {
   const addRole = async () => {
     if (!roleType) return
     if (
-      convenerChangeEmails({ role: roleType, end_date: null }, 'add') &&
-      !confirmEmail(`Add ${person.given_name} ${person.family_name} as convener?`, 'convener_changed')
+      coordinatorChangeEmails({ role: roleType, end_date: null }, 'add') &&
+      !confirmEmail(`Add ${person.given_name} ${person.family_name} as coordinator?`, 'wg_coordinator_changed')
     )
       return
     setRoleBusy(true)
@@ -570,7 +570,7 @@ export default function PersonPage() {
   }
 
   const endRole = async (r: CollabRole) => {
-    if (convenerChangeEmails(r, 'end') && !confirmEmail('End this convener term today?', 'convener_changed'))
+    if (coordinatorChangeEmails(r, 'end') && !confirmEmail('End this coordinator term today?', 'wg_coordinator_changed'))
       return
     try {
       await api.patch(`/collab-roles/${r.id}`, { end_date: today() })
@@ -583,8 +583,8 @@ export default function PersonPage() {
 
   const deleteRole = async (r: CollabRole) => {
     const question = 'Delete this role? This removes it from the leadership history.'
-    if (convenerChangeEmails(r, 'delete')) {
-      if (!confirmEmail(question, 'convener_changed', { always: true })) return
+    if (coordinatorChangeEmails(r, 'delete')) {
+      if (!confirmEmail(question, 'wg_coordinator_changed', { always: true })) return
     } else if (!window.confirm(question)) return
     try {
       await api.delete(`/collab-roles/${r.id}`)
@@ -603,8 +603,8 @@ export default function PersonPage() {
   const saveRoleEdit = async () => {
     if (!roleEdit) return
     if (
-      convenerChangeEmails(roleEdit, { end_date: roleForm.end_date || null }) &&
-      !confirmEmail('Save these dates? The convener term ends with them.', 'convener_changed')
+      coordinatorChangeEmails(roleEdit, { end_date: roleForm.end_date || null }) &&
+      !confirmEmail('Save these dates? The coordinator term ends with them.', 'wg_coordinator_changed')
     )
       return
     try {
@@ -1321,7 +1321,7 @@ export default function PersonPage() {
           {canManageWGs && (
             <Card withBorder w={{ base: '100%', xs: 340 }}>
               <Stack gap="sm">
-                <Title order={6}>{isOffice ? 'Add role' : 'Add working group convener'}</Title>
+                <Title order={6}>{isOffice ? 'Add role' : 'Add working group coordinator'}</Title>
                 <Select
                   label="Role"
                   placeholder="Select role…"

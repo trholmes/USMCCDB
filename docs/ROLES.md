@@ -7,7 +7,7 @@ this:
    assigned explicitly by an admin. This is what the API checks.
 2. **Collaboration positions** — leadership and committee posts a *person*
    holds (`collab_roles`, with start/end dates). These are directory facts.
-   Two of them carry scoped permissions of their own (working-group convener,
+   Two of them carry scoped permissions of their own (working-group coordinator,
    Administrative Institutional Contact); none of them changes an account's
    role. The admin **Alerts** panel *suggests* a role change when an active
    position and the account's role disagree, and the admin decides
@@ -18,7 +18,7 @@ for member-level accounts.
 
 Code: `backend/app/models/auth.py` (`UserRole`, `ROLE_RANK`),
 `backend/app/security.py` (`require_*`, `has_role`, `can_manage_*`,
-`is_convener_of`, `is_admin_contact_for`, `membership_block_reason`),
+`is_wg_coordinator_of`, `is_admin_contact_for`, `membership_block_reason`),
 `backend/app/routers/people.py` (`SELF_EDITABLE`, `ADMIN_CONTACT_EDITABLE`,
 `SELF_SETTABLE_STATUSES`). The frontend mirrors the rules in
 `frontend/src/constants.ts` and gates the UI from the `permissions` list that
@@ -33,7 +33,7 @@ the roles below it.**
 |---|---|---|
 | `admin` | The people running the database. | User accounts (create, link to a person, merge, reset passwords, change roles, deactivate, delete), site settings (banner, login message, map key), the full Alerts panel (account and role-suggestion alerts, pending migrations), the Email log and test email, backups and restore, system status, deleting working groups, deleting a person record outright (`DELETE /people/{id}`, any status, confirmed in the UI — the record's affiliations, history, positions, nominations and photo go with it, and a member-role login linked to it is deleted too; talks given and emails sent keep a null reference); **view as** any other account (below). Cannot demote or deactivate their own account, nor delete their own record. |
 | `office` | The collaboration office: membership administration. | Approve/reject registrations and change anyone's status; edit any profile field (including ORCID iD and office-internal notes); create/edit/delete institutions; manage every affiliation and author period; assign and end every collaboration position; register people directly (gets a real response instead of the neutral acknowledgement, and no rate limit); see membership-event notes and actors; the membership and institution alerts in the Alerts panel (pending registrations, institutions to review or without a contact, affiliation, voting and authorship problems). |
-| `leadership` | Leadership Council representatives and deputies. | Create and edit working groups, add or remove anyone from them, name and end **conveners** (no other position); edit any publication, its status, people and reviewers, build and preview author lists (`can_manage_publications`). |
+| `leadership` | Leadership Council representatives and deputies. | Create and edit working groups, add or remove anyone from them, name and end **working-group coordinators** (no other position); edit any publication, its status, people and reviewers, build and preview author lists (`can_manage_publications`). |
 | `speakers_committee` | The speakers committee. | Create/edit/delete events; edit or delete **any** talk; act on any nomination (shortlist, assign, decline) (`can_manage_talks`). |
 | `member` | Everyone else with a sign-in. | See the directory, institutions, working groups, leadership, events, talks, publications and statistics; the self-service actions below. |
 
@@ -68,7 +68,7 @@ Some permissions come from a relationship to the record rather than the role:
 | Context | Permission |
 |---|---|
 | **Publication contact** (attached with the `contact` role; the creator automatically) | Edit the paper, attach and remove people (except reviewers), request collaboration review and withdraw that request, generate the paper's author list. |
-| **Working-group convener** (active `convener` position for that group) | Add and remove members of the group. For publications tagged with the group: the same as a contact. |
+| **Working-group coordinator** (active `wg_coordinator` position for that group) | Add and remove members of the group. For publications tagged with the group: the same as a contact. |
 | **Administrative Institutional Contact** (active `admin_contact` position for that institution) | Edit the `ADMIN_CONTACT_EDITABLE` fields — career stage, professional title, department, research time — of people currently at the institution, and approve or reject **pending** registrations of people at the institution (Approve / Reject buttons on the profile page). The Alerts panel shows them those pending registrations and nothing else. |
 | **Talk creator** | Edit or delete the talk. |
 
@@ -133,13 +133,13 @@ start and end.
 | `lsg_member` | — | — | Nothing (Leadership Strategy Group). |
 | `ib_rep` | — | institution | Nothing. Not offered in the UI. |
 | `admin_contact` | — | institution (required) | The Administrative Institutional Contact permissions above; audience for registration mail from that institution. Assigned from the institution page. |
-| `convener` | — | working group (required) | The convener permissions above; suggests nothing. |
+| `wg_coordinator` | — | working group (required) | The coordinator permissions above; suggests nothing. |
 | `speakers_comm` | — | — | Nothing by itself; speakers-committee audience for email; suggests the `speakers_committee` account role. |
 | `pub_chair`, `secretary` | — | — | Nothing. Not offered in the UI. |
 | `other` | Required: the full title | — | Nothing. |
 
 **Who may assign positions**: the office assigns and ends every position;
-`leadership` accounts may name and end conveners only. Positions never
+`leadership` accounts may name and end working-group coordinators only. Positions never
 change an account's role: the alerts panel suggests promoting an account
 whose person holds an active chair, vice chair, representative, deputy or
 speakers-committee position, and demoting a `leadership` /
@@ -175,5 +175,5 @@ positions change.
   contacts should too, `ADMIN_CONTACT_EDITABLE`) in `routers/people.py`, the
   matching form in `frontend/src/pages/Person.tsx`, and this file.
 - Give a position a permission: add an `is_<position>_for`-style helper in
-  `security.py` next to `is_convener_of`, check it in the router, and
+  `security.py` next to `is_wg_coordinator_of`, check it in the router, and
   document it here and in `CLAUDE.md`.

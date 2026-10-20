@@ -69,7 +69,7 @@ BACKUP_HOUR=02
 - **institutions**: name, short_name unique, ror_id, country, is_us (gates voting eligibility), latex_address, is_active
 - **affiliations**: person↔institution, is_primary, career_stage nullable (stage held while at that institution), start_date, end_date nullable; partial unique index one open primary per person
 - **working_groups** + **working_group_members** (unique wg+person)
-- **collab_roles**: person, role enum(chair, vice_chair, ib_rep, convener, speakers_comm, pub_chair, secretary), working_group_id (required iff convener), institution_id (required iff ib_rep), start/end dates — conveners' scoped permissions derive from this
+- **collab_roles**: person, role enum(chair, vice_chair, ib_rep, wg_coordinator, speakers_comm, pub_chair, secretary), working_group_id (required iff wg_coordinator), institution_id (required iff ib_rep), start/end dates — coordinators' scoped permissions derive from this
 - **membership_events**: append-only status-change audit (from/to, actor, note)
 - **author_periods**: person, start/end dates, signing_name override; no-overlap EXCLUDE constraint — authorship eligibility distinct from membership
 - **events** (conferences): name, url, location, dates, abstract_deadline
@@ -80,7 +80,7 @@ BACKUP_HOUR=02
 - **publication_events**: status audit like membership_events
 - **author_lists**: publication FK nullable, cutoff_date, generated_by, **snapshot jsonb** (frozen ordered author array) — exports render from snapshot only
 
-### API (/api/v1, JWT in httpOnly cookie; roles A=admin O=office C=convener-scoped M=member P=public)
+### API (/api/v1, JWT in httpOnly cookie; roles A=admin O=office C=coordinator-scoped M=member P=public)
 
 - Auth: GET /auth/orcid/login + /callback (P), POST /auth/login (local), /auth/logout, GET /auth/me, POST/PATCH /auth/users (A — create local accounts, reset, role, deactivate)
 - Membership: POST /people/register (P); GET /people (M, filters); GET /people/public + /people/public/{id}/photo (P — active members with public-listing consent, feeds muoncollider.us/people) + /people/public/stats (P — anonymous counts over all active members for that page's charts); PATCH /people/{id} (Self limited / O); POST /people/{id}/status (O, writes membership_events); affiliations + author-periods sub-resources (O); CRUD /institutions, /working-groups (O/A, M read); WG members (C/O, self-join); /collab-roles (O)
@@ -88,7 +88,7 @@ BACKUP_HOUR=02
 - Publications: POST /publications (M — creator becomes editor); GET list (M; P sees published-only minimal); PATCH (editor/C/O); POST status transitions (O; editor/C may request collab review); people sub-resource (editor/C/O; reviewers O-only); GET /publications/{id}/acknowledgment (M — suggested USMCC + reviewer credit text)
 - Author lists: POST /publications/{id}/author-list (O/editor; scope=collaboration|involved), GET /author-lists/{id}, GET /author-lists/{id}/export?format=txt|tex|xml, POST /author-lists/preview (O, arbitrary cutoff dry-run)
 
-Permissions: FastAPI dependencies `require_role()`, `require_self_or(office)`, `require_convener_of(wg)` querying collab_roles. No ACL tables.
+Permissions: FastAPI dependencies `require_role()`, `require_self_or(office)`, `require_wg_coordinator_of(wg)` querying collab_roles. No ACL tables.
 
 ### ORCID OAuth (authlib)
 
