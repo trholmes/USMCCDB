@@ -47,12 +47,14 @@ const ACCESSORS: Accessors<CollabRole> = {
 function RoleRows({
   roles,
   past,
+  canEditRole,
   onEnd,
   onEdit,
   onDelete,
 }: {
   roles: CollabRole[]
   past?: boolean
+  canEditRole?: (role: string) => boolean
   onEnd?: (r: CollabRole) => void
   onEdit?: (r: CollabRole) => void
   onDelete?: (r: CollabRole) => void
@@ -97,26 +99,28 @@ function RoleRows({
             <Table.Td>{r.end_date ?? '—'}</Table.Td>
             {canEdit && (
               <Table.Td>
-                <Group gap="xs" justify="flex-end" wrap="nowrap">
-                  {!r.end_date && onEnd && (
-                    <Button size="compact-xs" variant="light" onClick={() => onEnd(r)}>
-                      End today
+                {(!canEditRole || canEditRole(r.role)) && (
+                  <Group gap="xs" justify="flex-end" wrap="nowrap">
+                    {!r.end_date && onEnd && (
+                      <Button size="compact-xs" variant="light" onClick={() => onEnd(r)}>
+                        End today
+                      </Button>
+                    )}
+                    <Button size="compact-xs" variant="subtle" onClick={() => onEdit!(r)}>
+                      Edit
                     </Button>
-                  )}
-                  <Button size="compact-xs" variant="subtle" onClick={() => onEdit!(r)}>
-                    Edit
-                  </Button>
-                  {onDelete && (
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      color="red"
-                      onClick={() => onDelete(r)}
-                    >
-                      Delete
-                    </Button>
-                  )}
-                </Group>
+                    {onDelete && (
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={() => onDelete(r)}
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </Group>
+                )}
               </Table.Td>
             )}
           </Table.Tr>
@@ -130,10 +134,10 @@ function RoleRows({
 export default function LeadershipPage() {
   const [roles, setRoles] = useState<CollabRole[]>([])
   const [showPast, setShowPast] = useState(false)
-  const { isOffice } = useSession()
+  const { isOffice, canManageWGs } = useSession()
   const confirmEmail = useEmailConfirm()
 
-  // Add-role form (office only).
+  // Add-role form (office; leadership accounts for conveners only).
   const [addPerson, setAddPerson] = useState<string | null>(null)
   const [roleType, setRoleType] = useState<string | null>(null)
   const [roleDetail, setRoleDetail] = useState('')
@@ -160,10 +164,17 @@ export default function LeadershipPage() {
   useEffect(loadRoles, [loadRoles])
 
   useEffect(() => {
-    if (!isOffice) return // lists feed the add-role form only
+    // Lists feed the add-role form only; leadership accounts never add
+    // institution-scoped roles, so they don't need the institution list.
+    if (!canManageWGs) return
     api.get<WorkingGroup[]>('/working-groups').then(setWgs).catch(() => setWgs([]))
-    api.get<Institution[]>('/institutions').then(setInstitutions).catch(() => setInstitutions([]))
-  }, [isOffice])
+    if (isOffice)
+      api.get<Institution[]>('/institutions').then(setInstitutions).catch(() => setInstitutions([]))
+  }, [isOffice, canManageWGs])
+
+  // Office manages every role; leadership accounts (representatives and
+  // deputies) only working-group conveners — mirrors _require_collab_role_editor.
+  const canEditRole = (role: string) => isOffice || (canManageWGs && role === 'convener')
 
   const roleDef = COLLAB_ROLES.find((r) => r.value === roleType)
 
@@ -266,8 +277,8 @@ export default function LeadershipPage() {
     return { current, former }
   }, [roles])
 
-  const officeActions = isOffice
-    ? { onEnd: endRole, onEdit: openRoleEdit, onDelete: deleteRole }
+  const editActions = canManageWGs
+    ? { canEditRole, onEnd: endRole, onEdit: openRoleEdit, onDelete: deleteRole }
     : {}
 
   return (
@@ -281,13 +292,13 @@ export default function LeadershipPage() {
           No current leadership roles recorded.
         </Text>
       ) : (
-        <RoleRows roles={current} {...officeActions} />
+        <RoleRows roles={current} {...editActions} />
       )}
 
-      {isOffice && (
+      {canManageWGs && (
         <Card withBorder maw={720} mt="md">
           <Stack gap="sm">
-            <Title order={6}>Add role</Title>
+            <Title order={6}>{isOffice ? 'Add role' : 'Add working group convener'}</Title>
             <Group gap="sm" align="flex-start" wrap="wrap">
               <PersonSelect
                 label="Person"
@@ -299,9 +310,9 @@ export default function LeadershipPage() {
                 label="Role"
                 placeholder="Select role…"
                 // admin_contact is assigned from the institution pages, not here.
-                data={COLLAB_ROLES.filter((r) => !r.hidden && r.value !== 'admin_contact').map(
-                  (r) => ({ value: r.value, label: r.label }),
-                )}
+                data={COLLAB_ROLES.filter(
+                  (r) => !r.hidden && r.value !== 'admin_contact' && canEditRole(r.value),
+                ).map((r) => ({ value: r.value, label: r.label }))}
                 value={roleType}
                 onChange={setRoleType}
                 searchable
@@ -379,7 +390,7 @@ export default function LeadershipPage() {
               <Title order={4} mt="md" mb="xs">
                 Past leadership
               </Title>
-              <RoleRows roles={former} past {...officeActions} />
+              <RoleRows roles={former} past {...editActions} />
             </>
           )}
         </>
