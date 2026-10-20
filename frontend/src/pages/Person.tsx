@@ -964,16 +964,8 @@ export default function PersonPage() {
             )}
             <Text size="sm">
               <b>Public people page:</b>{' '}
-              {person.public_listing_consent
-                ? 'listed (name and photo on muoncollider.us/people; named on the public talks page)'
-                : 'opted out of muoncollider.us/people and of being named on the public talks page'}
+              {person.public_listing_consent ? 'listed' : 'opted out'}
             </Text>
-            {STUDENT_STAGES.includes(person.career_stage) && (
-              <Text size="sm">
-                <b>Advisor approval:</b>{' '}
-                {person.advisor_approved ? 'confirmed at registration' : 'not confirmed'}
-              </Text>
-            )}
             {person.acknowledgement_text && (
               <Text size="sm">
                 <b>Funding acknowledgement:</b> {person.acknowledgement_text}
