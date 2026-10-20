@@ -546,6 +546,68 @@ def test_member_self_institution_move_keeps_history(admin):
     assert all(x["institution"]["id"] != b["id"] for x in person["affiliations"])
 
 
+def test_member_institution_move_needs_confirmation(admin, monkeypatch):
+    """A member's own institution move is applied immediately but mailed to
+    the office and flagged on the Alerts page until the office confirms it;
+    an office-made move needs neither."""
+    import app.services.email as email_mod
+
+    from app.config import get_settings
+
+    sent = []
+    monkeypatch.setattr(email_mod, "_deliver", sent.append)
+    monkeypatch.setenv("ADMIN_EMAIL", "db-admins@example.edu")
+    get_settings.cache_clear()
+    try:
+        member, pid = _linked_member(
+            admin, given="Mona", family="Mover", email="mona.mover@example.edu"
+        )
+        a = admin.post("/api/v1/institutions", json={"name": "Gamma University"}).json()
+        b = admin.post("/api/v1/institutions", json={"name": "Delta Institute"}).json()
+
+        # An office-made placement raises no flag and sends no mail.
+        sent.clear()
+        assert admin.post(
+            f"/api/v1/people/{pid}/institution",
+            json={"institution_id": a["id"], "start_date": "2025-01-01"},
+        ).status_code == 201
+        assert pid not in [
+            x["person_id"]
+            for x in admin.get("/api/v1/alerts").json()["affiliation_changes_to_review"]
+        ]
+        assert sent == []
+
+        # The member's own move is applied, mailed, and flagged.
+        assert member.post(
+            f"/api/v1/people/{pid}/institution",
+            json={"institution_id": b["id"], "start_date": "2026-06-01"},
+        ).status_code == 201
+        assert [m["Subject"] for m in sent] == ["Institution change: Mona Mover"]
+        assert "db-admins@example.edu" in sent[0]["To"]
+        assert "mona.mover@example.edu" not in sent[0]["To"]  # never the mover
+        alerts = admin.get("/api/v1/alerts").json()
+        row = next(
+            x for x in alerts["affiliation_changes_to_review"] if x["person_id"] == pid
+        )
+        assert "Gamma University" in row["detail"]
+        assert "Delta Institute" in row["detail"]
+        assert "2026-06-01" in row["detail"]
+
+        # Members cannot confirm; the office can, and the alert clears.
+        assert member.post(
+            f"/api/v1/alerts/affiliation-changes/{row['affiliation_id']}/reviewed"
+        ).status_code == 403
+        assert admin.post(
+            f"/api/v1/alerts/affiliation-changes/{row['affiliation_id']}/reviewed"
+        ).status_code == 204
+        assert pid not in [
+            x["person_id"]
+            for x in admin.get("/api/v1/alerts").json()["affiliation_changes_to_review"]
+        ]
+    finally:
+        get_settings.cache_clear()
+
+
 def test_secondary_affiliation(admin):
     """One additional, non-primary affiliation alongside the primary (issue #3):
     members add it for themselves, it shows in author lists next to the
@@ -4746,6 +4808,7 @@ def test_admin_alerts(admin):
         + len(alerts["active_without_affiliation"])
         + len(alerts["ineligible_voting_members"])
         + len(alerts["open_author_periods_not_active"])
+        + len(alerts["affiliation_changes_to_review"])
         + (1 if alerts["migrations_pending"] else 0)
     )
 

@@ -5,7 +5,12 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAlerts } from '../auth/AlertsContext'
 import { useSession } from '../auth/SessionContext'
-import type { InstitutionAlert, PersonAlert, RoleSuggestionAlert } from '../api/types'
+import type {
+  AffiliationChangeAlert,
+  InstitutionAlert,
+  PersonAlert,
+  RoleSuggestionAlert,
+} from '../api/types'
 
 function Section({
   title,
@@ -84,6 +89,43 @@ function IncompleteRegistrationRow({
       <PersonRow item={item} />
       <Button variant="light" color="red" size="compact-xs" loading={busy} onClick={discard}>
         Discard
+      </Button>
+    </Group>
+  )
+}
+
+function AffiliationChangeRow({
+  item,
+  onConfirmed,
+}: {
+  item: AffiliationChangeAlert
+  onConfirmed: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const confirm = async () => {
+    setBusy(true)
+    try {
+      await api.post(`/alerts/affiliation-changes/${item.affiliation_id}/reviewed`, {})
+      notifications.show({ message: `${item.name}'s institution change confirmed` })
+      onConfirmed()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Group gap="xs" wrap="nowrap" justify="space-between">
+      <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+        <Anchor component={Link} to={`/people/${item.person_id}`} size="sm">
+          {item.name}
+        </Anchor>
+        <Text size="sm" c="dimmed" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          — {item.detail}
+        </Text>
+      </Group>
+      <Button size="compact-xs" variant="light" loading={busy} onClick={confirm}>
+        Confirm
       </Button>
     </Group>
   )
@@ -294,6 +336,16 @@ export default function AlertsPage() {
       >
         {alerts.ineligible_voting_members.map((p) => (
           <PersonRow key={p.person_id} item={p} />
+        ))}
+      </Section>
+
+      <Section
+        title="Institution changes to confirm"
+        count={alerts.affiliation_changes_to_review.length}
+        description="Members who moved their own primary institution. The change is already applied and the office and institution admin contacts were emailed — check it looks right (correct the affiliation history on the profile page if not), then confirm."
+      >
+        {alerts.affiliation_changes_to_review.map((a) => (
+          <AffiliationChangeRow key={a.affiliation_id} item={a} onConfirmed={refresh} />
         ))}
       </Section>
 
