@@ -670,16 +670,16 @@ def seed_demo():
                 db.add(AuthorPeriod(person_id=person.id, start_date=date(2024, 6, 1)))
             people.append(person)
 
-        for name, slug in [
-            ("Accelerator", "accelerator"),
-            ("Detector", "detector"),
-            ("Physics", "physics"),
-            ("Community Engagement", "community"),
+        for name, slug, areas in [
+            ("Accelerator", "accelerator", "Accelerator"),
+            ("Detector", "detector", "Experimental"),
+            ("Physics", "physics", "Experimental, Theory"),
+            ("Community Engagement", "community", None),
         ]:
             if not db.execute(
                 select(WorkingGroup).where(WorkingGroup.slug == slug)
             ).scalar_one_or_none():
-                db.add(WorkingGroup(name=name, slug=slug))
+                db.add(WorkingGroup(name=name, slug=slug, areas=areas))
         db.flush()
 
         # Leadership roles mirroring the organigram shapes (person idx, role,

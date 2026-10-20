@@ -5,6 +5,7 @@ import {
   Checkbox,
   Group,
   Modal,
+  MultiSelect,
   Stack,
   Table,
   Text,
@@ -18,6 +19,7 @@ import { api } from '../api/client'
 import type { CollabRole, PersonSummary, WorkingGroup } from '../api/types'
 import { useSession } from '../auth/SessionContext'
 import PersonSelect from '../components/PersonSelect'
+import { joinList, REPRESENTATIVE_AREAS, splitList } from '../constants'
 import { today } from '../dates'
 
 const slugify = (name: string) =>
@@ -30,7 +32,13 @@ export default function WorkingGroupsPage() {
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
   const [members, setMembers] = useState<Record<number, PersonSummary[]>>({})
   const [modal, setModal] = useState<WorkingGroup | 'new' | null>(null)
-  const [form, setForm] = useState({ name: '', slug: '', description: '', is_active: true })
+  const [form, setForm] = useState({
+    name: '',
+    slug: '',
+    description: '',
+    is_active: true,
+    areas: [] as string[],
+  })
   const [slugTouched, setSlugTouched] = useState(false)
   // Person selected in the "Add member" picker of the open accordion panel.
   const [addPersonId, setAddPersonId] = useState<string | null>(null)
@@ -156,12 +164,13 @@ export default function WorkingGroupsPage() {
   const open = (target: WorkingGroup | 'new') => {
     setForm(
       target === 'new'
-        ? { name: '', slug: '', description: '', is_active: true }
+        ? { name: '', slug: '', description: '', is_active: true, areas: [] }
         : {
             name: target.name,
             slug: target.slug,
             description: target.description ?? '',
             is_active: target.is_active,
+            areas: splitList(target.areas),
           },
     )
     setSlugTouched(false)
@@ -176,12 +185,14 @@ export default function WorkingGroupsPage() {
           slug: form.slug,
           description: form.description || null,
           is_active: form.is_active,
+          areas: joinList(form.areas),
         })
       } else if (modal) {
         await api.patch(`/working-groups/${modal.id}`, {
           name: form.name,
           description: form.description || null,
           is_active: form.is_active,
+          areas: joinList(form.areas),
         })
       }
       setModal(null)
@@ -209,6 +220,11 @@ export default function WorkingGroupsPage() {
               <Group>
                 <Text fw={600}>{wg.name}</Text>
                 <Badge variant="light">{wg.member_count} members</Badge>
+                {splitList(wg.areas).map((area) => (
+                  <Badge key={area} variant="outline" color="gray">
+                    {area}
+                  </Badge>
+                ))}
                 {!wg.is_active && <Badge color="gray">inactive</Badge>}
               </Group>
             </Accordion.Control>
@@ -328,6 +344,15 @@ export default function WorkingGroupsPage() {
             minRows={2}
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.currentTarget.value })}
+          />
+          <MultiSelect
+            label="Areas"
+            description="Leadership Council area(s) the group falls under — none, one, or several."
+            placeholder={form.areas.length ? undefined : 'Select areas…'}
+            data={REPRESENTATIVE_AREAS}
+            value={form.areas}
+            onChange={(v) => setForm({ ...form, areas: v })}
+            clearable
           />
           <Checkbox
             label="Active"

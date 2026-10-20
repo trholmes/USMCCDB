@@ -160,6 +160,8 @@ export interface WorkingGroup {
   slug: string
   description: string | null
   is_active: boolean
+  // Comma-separated subset of REPRESENTATIVE_AREAS; null for none.
+  areas: string | null
   member_count: number
 }
 
