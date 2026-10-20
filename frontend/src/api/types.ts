@@ -126,6 +126,11 @@ export interface PersonSummary {
   primary_institution: { id: number; name: string; short_name: string | null } | null
 }
 
+export interface WGMember extends PersonSummary {
+  // Holds an active coordinator role for the working group being listed.
+  is_coordinator: boolean
+}
+
 export interface Person extends PersonSummary {
   middle_name: string | null
   professional_title: string | null
@@ -175,7 +180,7 @@ export interface CollabRole {
   start_date: string
   end_date: string | null
   person: PersonSummary | null
-  working_group: { id: number; name: string; slug: string } | null
+  working_group: { id: number; name: string; slug: string; areas: string | null } | null
   institution: { id: number; name: string; short_name: string | null } | null
 }
 
