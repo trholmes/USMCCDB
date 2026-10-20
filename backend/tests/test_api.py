@@ -2080,6 +2080,30 @@ def test_working_group_crud(admin):
     assert r.json()["is_active"] is False
     assert admin.patch("/api/v1/working-groups/999999", json={"name": "x"}).status_code == 404
 
+    # Leadership Council areas: zero or more of REPRESENTATIVE_AREAS, matched
+    # case-insensitively and normalized to the canonical names; unknown values
+    # are rejected; null clears them.
+    assert wg["areas"] is None
+    r = admin.patch(
+        f"/api/v1/working-groups/{wg['id']}", json={"areas": "experimental, THEORY"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["areas"] == "Experimental, Theory"
+    assert admin.patch(
+        f"/api/v1/working-groups/{wg['id']}", json={"areas": "Detectors"}
+    ).status_code == 422
+    r = admin.post(
+        "/api/v1/working-groups",
+        json={"name": "Cooling", "slug": "cooling", "areas": "Accelerator"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["areas"] == "Accelerator"
+    assert admin.post(
+        "/api/v1/working-groups", json={"name": "Bad Area", "slug": "bad-area", "areas": "Nope"}
+    ).status_code == 422
+    r = admin.patch(f"/api/v1/working-groups/{wg['id']}", json={"areas": None})
+    assert r.status_code == 200 and r.json()["areas"] is None
+
     # Members can see the list but cannot create or edit groups.
     member, pid = _linked_member(
         admin, given="Wanda", family="Groupless", email="wanda.groupless@example.edu"

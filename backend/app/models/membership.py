@@ -249,6 +249,10 @@ class WorkingGroup(TimestampedBase):
     slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Leadership Council areas the group falls under: a comma-separated subset
+    # of REPRESENTATIVE_AREAS (normalized and validated in the schemas), NULL
+    # for none — same single-text-column pattern as people.research_areas.
+    areas: Mapped[str | None] = mapped_column(Text)
 
     members = relationship(
         "WorkingGroupMember", back_populates="working_group", cascade="all, delete-orphan"

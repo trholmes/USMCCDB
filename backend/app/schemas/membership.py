@@ -4,19 +4,19 @@ from datetime import date, datetime
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from app.models import CareerStage, CollabRoleType, MemberStatus
-from app.models.membership import RESEARCH_AREAS
+from app.models.membership import REPRESENTATIVE_AREAS, RESEARCH_AREAS
 from app.schemas.common import ORMModel
 
 ORCID_RE = r"^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$"
 
 
-def _normalize_research_areas(v: str | None) -> str | None:
-    """people.research_areas is a comma-separated subset of RESEARCH_AREAS:
-    match case-insensitively, normalize to the canonical names, drop
-    duplicates, reject unknown values."""
+def _normalize_area_list(v: str | None, allowed: tuple[str, ...], label: str) -> str | None:
+    """A comma-separated subset of `allowed` in one text column: match
+    case-insensitively, normalize to the canonical names, drop duplicates,
+    reject unknown values."""
     if v is None:
         return None
-    canonical = {a.lower(): a for a in RESEARCH_AREAS}
+    canonical = {a.lower(): a for a in allowed}
     values: list[str] = []
     unknown: list[str] = []
     for token in v.split(","):
@@ -30,10 +30,19 @@ def _normalize_research_areas(v: str | None) -> str | None:
             values.append(area)
     if unknown:
         raise ValueError(
-            f"unknown research area(s): {', '.join(unknown)}; "
-            f"allowed: {', '.join(RESEARCH_AREAS)}"
+            f"unknown {label}(s): {', '.join(unknown)}; allowed: {', '.join(allowed)}"
         )
     return ", ".join(values) or None
+
+
+def _normalize_research_areas(v: str | None) -> str | None:
+    return _normalize_area_list(v, RESEARCH_AREAS, "research area")
+
+
+def _normalize_wg_areas(v: str | None) -> str | None:
+    """working_groups.areas: the Leadership Council areas (same list the
+    representatives stand for), zero or more of them."""
+    return _normalize_area_list(v, REPRESENTATIVE_AREAS, "area")
 
 
 def _check_date_order(start_date: date | None, end_date: date | None) -> None:
@@ -424,12 +433,25 @@ class WorkingGroupCreate(BaseModel):
     slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9-]+$")
     description: str | None = None
     is_active: bool = True
+    # Comma-separated subset of REPRESENTATIVE_AREAS; None for no areas.
+    areas: str | None = None
+
+    @field_validator("areas")
+    @classmethod
+    def check_areas(cls, v: str | None) -> str | None:
+        return _normalize_wg_areas(v)
 
 
 class WorkingGroupUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     is_active: bool | None = None
+    areas: str | None = None
+
+    @field_validator("areas")
+    @classmethod
+    def check_areas(cls, v: str | None) -> str | None:
+        return _normalize_wg_areas(v)
 
 
 class WorkingGroupOut(ORMModel):
@@ -438,6 +460,7 @@ class WorkingGroupOut(ORMModel):
     slug: str
     description: str | None
     is_active: bool
+    areas: str | None = None
     member_count: int = 0
 
 
