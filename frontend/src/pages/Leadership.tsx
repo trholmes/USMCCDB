@@ -24,8 +24,14 @@ import WorkingGroupModal from '../components/WorkingGroupModal'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import { coordinatorChangeEmails, useEmailConfirm } from '../emailWarnings'
-import { COLLAB_ROLES, collabRoleLabel } from '../constants'
+import { AREA_CONSTRAINED_ROLES, COLLAB_ROLES, collabRoleLabel } from '../constants'
 import { today } from '../dates'
+
+// Leadership Council area(s) a role row belongs to: the working group's
+// areas for group-scoped roles, else the area a representative or deputy
+// stands for (their detail).
+const roleAreas = (r: CollabRole): string | null =>
+  r.working_group ? r.working_group.areas : AREA_CONSTRAINED_ROLES.includes(r.role) ? r.detail : null
 
 // Sort in organigram order (COLLAB_ROLES order, then qualifier, then name).
 const roleOrder = (r: CollabRole) => {
@@ -41,6 +47,7 @@ const ACCESSORS: Accessors<CollabRole> = {
   role: (r) => roleOrder(r),
   person: (r) => (r.person ? `${r.person.family_name} ${r.person.given_name}` : null),
   scope: (r) => r.working_group?.name ?? r.institution?.name,
+  area: (r) => roleAreas(r),
   from: (r) => r.start_date,
   to: (r) => r.end_date,
 }
@@ -63,13 +70,14 @@ function RoleRows({
   const { sorted, sort, toggle } = useSortable(roles, ACCESSORS)
   const canEdit = Boolean(onEdit)
   return (
-    <Table.ScrollContainer minWidth={700} maw={860}>
+    <Table.ScrollContainer minWidth={780} maw={960}>
     <Table>
       <Table.Thead>
         <Table.Tr>
           <SortableTh label="Role" k="role" sort={sort} toggle={toggle} />
           <SortableTh label="Person" k="person" sort={sort} toggle={toggle} />
           <SortableTh label="Scope" k="scope" sort={sort} toggle={toggle} />
+          <SortableTh label="Area" k="area" sort={sort} toggle={toggle} />
           <SortableTh label={past ? 'From' : 'Since'} k="from" sort={sort} toggle={toggle} />
           <SortableTh label={past ? 'To' : 'Until'} k="to" sort={sort} toggle={toggle} />
           {canEdit && <Table.Th />}
@@ -96,6 +104,7 @@ function RoleRows({
               )}
             </Table.Td>
             <Table.Td>{r.working_group?.name ?? r.institution?.name ?? '—'}</Table.Td>
+            <Table.Td>{roleAreas(r) ?? '—'}</Table.Td>
             <Table.Td>{r.start_date}</Table.Td>
             <Table.Td>{r.end_date ?? '—'}</Table.Td>
             {canEdit && (

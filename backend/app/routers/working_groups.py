@@ -17,6 +17,7 @@ from app.schemas.membership import (
     CollabRoleUpdate,
     PersonSummary,
     WGMemberAdd,
+    WGMemberOut,
     WorkingGroupCreate,
     WorkingGroupOut,
     WorkingGroupUpdate,
@@ -93,7 +94,7 @@ def delete_wg(wg_id: int, db: Session = Depends(get_db)) -> None:
 @router.get("/working-groups/{wg_id}/members")
 def list_wg_members(
     wg_id: int, db: Session = Depends(get_db), _user: User = Depends(get_current_user)
-) -> list[PersonSummary]:
+) -> list[WGMemberOut]:
     wg = db.get(WorkingGroup, wg_id)
     if wg is None:
         raise HTTPException(404, "Working group not found")
@@ -107,7 +108,25 @@ def list_wg_members(
         .scalars()
         .all()
     )
-    return [PersonSummary.model_validate(p) for p in people]
+    today = date.today()
+    coordinator_ids = set(
+        db.execute(
+            select(CollabRole.person_id).where(
+                CollabRole.working_group_id == wg_id,
+                CollabRole.role == CollabRoleType.wg_coordinator,
+                CollabRole.start_date <= today,
+                (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out = []
+    for p in people:
+        m = WGMemberOut.model_validate(p)
+        m.is_coordinator = p.id in coordinator_ids
+        out.append(m)
+    return out
 
 
 @router.post("/working-groups/{wg_id}/members", status_code=201)
@@ -250,6 +269,17 @@ def create_collab_role(
         if wg is None:
             raise HTTPException(404, "Working group not found")
         if role.end_date is None or role.end_date >= date.today():
+            # A coordinator belongs to their group: add the membership row if
+            # the person isn't in it yet (they stay a plain member when the
+            # term ends). Recording an already-ended term adds nothing.
+            member = db.execute(
+                select(WorkingGroupMember).where(
+                    WorkingGroupMember.working_group_id == wg.id,
+                    WorkingGroupMember.person_id == person.id,
+                )
+            ).scalar_one_or_none()
+            if member is None:
+                db.add(WorkingGroupMember(working_group_id=wg.id, person_id=person.id))
             notifications.queue(
                 background, notifications.wg_coordinator_changed(db, person, wg, "added", user)
             )

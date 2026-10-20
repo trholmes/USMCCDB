@@ -4992,7 +4992,9 @@ def test_leadership_role_manages_working_groups(admin):
     r = lead.post("/api/v1/working-groups", json={"name": "Targetry", "slug": "targetry"})
     assert r.status_code == 201, r.text
     wg = r.json()
-    assert lead.patch(f"/api/v1/working-groups/{wg['id']}", json={"description": "Targets"}).status_code == 200
+    assert lead.patch(
+        f"/api/v1/working-groups/{wg['id']}", json={"description": "Targets", "areas": "Accelerator"}
+    ).status_code == 200
     # Adding somebody else to a group (members may only add themselves).
     assert member.post(f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": lpid}).status_code == 403
     assert lead.post(f"/api/v1/working-groups/{wg['id']}/members", json={"person_id": mpid}).status_code == 201
@@ -5007,6 +5009,12 @@ def test_leadership_role_manages_working_groups(admin):
     )
     assert r.status_code == 201, r.text
     coordinator_role = r.json()
+    # Naming a coordinator re-adds them to the group's members (they were
+    # removed above) and the member listing tags them; role listings carry
+    # the group's areas for the Leadership page's Area column.
+    members = lead.get(f"/api/v1/working-groups/{wg['id']}/members").json()
+    assert [(m["id"], m["is_coordinator"]) for m in members] == [(mpid, True)]
+    assert coordinator_role["working_group"]["areas"] == "Accelerator"
     assert lead.patch(f"/api/v1/collab-roles/{coordinator_role['id']}", json={"end_date": "2026-12-31"}).status_code == 200
     assert lead.post(
         "/api/v1/collab-roles",
@@ -5024,6 +5032,9 @@ def test_leadership_role_manages_working_groups(admin):
     assert lead.patch(f"/api/v1/collab-roles/{office_role['id']}", json={"end_date": "2026-06-30"}).status_code == 403
     assert lead.delete(f"/api/v1/collab-roles/{office_role['id']}").status_code == 403
     assert lead.delete(f"/api/v1/collab-roles/{coordinator_role['id']}").status_code == 204
+    # The membership survives the role: still listed, no longer tagged.
+    members = lead.get(f"/api/v1/working-groups/{wg['id']}/members").json()
+    assert [(m["id"], m["is_coordinator"]) for m in members] == [(mpid, False)]
 
     # Talks and events come with the role.
     assert lead.post("/api/v1/events", json={"name": "Leadership Retreat"}).status_code == 201

@@ -133,7 +133,7 @@ start and end.
 | `lsg_member` | — | — | Nothing (Leadership Strategy Group). |
 | `ib_rep` | — | institution | Nothing. Not offered in the UI. |
 | `admin_contact` | — | institution (required) | The Administrative Institutional Contact permissions above; audience for registration mail from that institution. Assigned from the institution page. |
-| `wg_coordinator` | — | working group (required) | The coordinator permissions above; suggests nothing. |
+| `wg_coordinator` | — | working group (required) | The coordinator permissions above; suggests nothing. Naming one with an open term also adds the person to the group's members (the membership outlives the term). |
 | `speakers_comm` | — | — | Nothing by itself; speakers-committee audience for email; suggests the `speakers_committee` account role. |
 | `pub_chair`, `secretary` | — | — | Nothing. Not offered in the UI. |
 | `other` | Required: the full title | — | Nothing. |

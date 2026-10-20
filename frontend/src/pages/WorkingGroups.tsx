@@ -1,18 +1,28 @@
-import { Accordion, Badge, Button, Group, Table, Text, Title } from '@mantine/core'
+import { Accordion, Badge, Button, Group, SegmentedControl, Table, Text, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
-import type { CollabRole, PersonSummary, WorkingGroup } from '../api/types'
+import type { CollabRole, PersonSummary, WGMember, WorkingGroup } from '../api/types'
 import { useSession } from '../auth/SessionContext'
 import PersonSelect from '../components/PersonSelect'
 import WorkingGroupModal from '../components/WorkingGroupModal'
-import { splitList } from '../constants'
+import { REPRESENTATIVE_AREAS, splitList } from '../constants'
 import { today } from '../dates'
+
+// Sort key for "by area": the canonical order of the group's first area;
+// groups without any area sort last.
+const areaOrder = (wg: WorkingGroup) => {
+  const first = splitList(wg.areas)[0]
+  if (!first) return REPRESENTATIVE_AREAS.length + 1
+  const idx = REPRESENTATIVE_AREAS.indexOf(first)
+  return idx === -1 ? REPRESENTATIVE_AREAS.length : idx
+}
 
 export default function WorkingGroupsPage() {
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
-  const [members, setMembers] = useState<Record<number, PersonSummary[]>>({})
+  const [members, setMembers] = useState<Record<number, WGMember[]>>({})
   const [modal, setModal] = useState<WorkingGroup | 'new' | null>(null)
+  const [sortBy, setSortBy] = useState<'name' | 'area'>('name')
   // Person selected in the "Add member" picker of the open accordion panel.
   const [addPersonId, setAddPersonId] = useState<string | null>(null)
   const { me, canManageWGs, isAdmin } = useSession()
@@ -55,8 +65,12 @@ export default function WorkingGroupsPage() {
   useEffect(load, [load])
 
   const loadMembers = async (wgId: number) => {
-    const list = await api.get<PersonSummary[]>(`/working-groups/${wgId}/members`)
-    setMembers((m) => ({ ...m, [wgId]: list }))
+    const list = await api.get<WGMember[]>(`/working-groups/${wgId}/members`)
+    // Coordinators first, each block keeping the server's family-name order.
+    setMembers((m) => ({
+      ...m,
+      [wgId]: [...list].sort((a, b) => Number(b.is_coordinator) - Number(a.is_coordinator)),
+    }))
   }
 
   const join = async (wgId: number) => {
@@ -134,10 +148,36 @@ export default function WorkingGroupsPage() {
   const isMember = (wgId: number) =>
     me?.person_id != null && (members[wgId] ?? []).some((p) => p.id === me.person_id)
 
+  // The API lists groups by name; "by area" regroups them in canonical area
+  // order (groups without an area last), then by name.
+  const sortedWgs = useMemo(
+    () =>
+      sortBy === 'name'
+        ? wgs
+        : [...wgs].sort(
+            (a, b) =>
+              areaOrder(a) - areaOrder(b) ||
+              (a.areas ?? '').localeCompare(b.areas ?? '') ||
+              a.name.localeCompare(b.name),
+          ),
+    [wgs, sortBy],
+  )
+
   return (
     <>
       <Group justify="space-between" mb="md">
-        <Title order={3}>Working groups</Title>
+        <Group gap="md">
+          <Title order={3}>Working groups</Title>
+          <SegmentedControl
+            size="xs"
+            data={[
+              { label: 'By name', value: 'name' },
+              { label: 'By area', value: 'area' },
+            ]}
+            value={sortBy}
+            onChange={(v) => setSortBy(v as 'name' | 'area')}
+          />
+        </Group>
         {canManageWGs && <Button onClick={() => setModal('new')}>Add working group</Button>}
       </Group>
       <Accordion
@@ -146,14 +186,14 @@ export default function WorkingGroupsPage() {
           if (v) loadMembers(Number(v))
         }}
       >
-        {wgs.map((wg) => (
+        {sortedWgs.map((wg) => (
           <Accordion.Item key={wg.id} value={String(wg.id)}>
             <Accordion.Control>
               <Group>
                 <Text fw={600}>{wg.name}</Text>
                 <Badge variant="light">{wg.member_count} members</Badge>
                 {splitList(wg.areas).map((area) => (
-                  <Badge key={area} variant="outline" color="gray">
+                  <Badge key={area} variant="light" color="grape">
                     {area}
                   </Badge>
                 ))}
@@ -208,7 +248,16 @@ export default function WorkingGroupsPage() {
                   {(members[wg.id] ?? []).map((p) => (
                     <Table.Tr key={p.id}>
                       <Table.Td>
-                        {p.given_name} {p.family_name}
+                        <Group gap="xs" wrap="nowrap">
+                          <Text size="sm">
+                            {p.given_name} {p.family_name}
+                          </Text>
+                          {p.is_coordinator && (
+                            <Badge size="sm" variant="light" color="teal">
+                              Coordinator
+                            </Badge>
+                          )}
+                        </Group>
                       </Table.Td>
                       <Table.Td>{p.career_stage}</Table.Td>
                       <Table.Td>{p.email}</Table.Td>

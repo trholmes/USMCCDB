@@ -408,6 +408,9 @@ class WorkingGroupRef(ORMModel):
     id: int
     name: str
     slug: str
+    # Leadership Council areas of the group (comma-separated) — lets role
+    # listings show and sort coordinators by their group's areas.
+    areas: str | None = None
 
 
 class PersonOut(PersonSummary):
@@ -466,6 +469,11 @@ class WorkingGroupOut(ORMModel):
 
 class WGMemberAdd(BaseModel):
     person_id: int
+
+
+class WGMemberOut(PersonSummary):
+    # Holds an active coordinator role for this working group.
+    is_coordinator: bool = False
 
 
 class CollabRoleCreate(BaseModel):
