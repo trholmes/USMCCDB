@@ -989,6 +989,8 @@ export default function PersonPage() {
                 <Text size="xs" c="dimmed">
                   Records a move as of the date you enter; your current affiliation is closed
                   on that date and history is kept.
+                  {!isOffice &&
+                    ' The office and your institutions’ administrative contacts are notified of the change.'}
                 </Text>
                 <Select
                   label="New institution"

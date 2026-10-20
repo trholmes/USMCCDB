@@ -30,6 +30,7 @@ from app.routers.site import migration_state
 from app.schemas.alerts import (
     AccountAlert,
     AdminAlerts,
+    AffiliationChangeAlert,
     InstitutionAlert,
     PersonAlert,
     RoleSuggestionAlert,
@@ -409,6 +410,65 @@ def _ineligible_voting_members(db: Session) -> list[PersonAlert]:
     return out
 
 
+def _affiliation_changes_to_review(db: Session) -> list[AffiliationChangeAlert]:
+    """Primary-institution moves members made themselves, applied immediately
+    but flagged for the office to confirm ("Confirm" clears the flag)."""
+    rows = db.execute(
+        select(Affiliation, Person)
+        .join(Person, Affiliation.person_id == Person.id)
+        .where(Affiliation.needs_review.is_(True))
+        .order_by(Affiliation.created_at.desc())
+    ).all()
+    out = []
+    for affil, person in rows:
+        # The affiliation the move closed: inclusive ranges, so it ends on the
+        # move date (a same-day move deletes it instead — then there is none).
+        prev = db.execute(
+            select(Institution.name)
+            .join(Affiliation, Affiliation.institution_id == Institution.id)
+            .where(
+                Affiliation.person_id == person.id,
+                Affiliation.is_primary.is_(True),
+                Affiliation.end_date == affil.start_date,
+                Affiliation.id != affil.id,
+            )
+        ).scalar_one_or_none()
+        detail = (
+            f"moved from {prev} to {affil.institution.name}"
+            if prev
+            else f"moved to {affil.institution.name}"
+        ) + f", effective {affil.start_date}"
+        out.append(
+            AffiliationChangeAlert(
+                affiliation_id=affil.id,
+                person_id=person.id,
+                name=person.display_name,
+                email=person.email,
+                detail=detail,
+            )
+        )
+    return out
+
+
+@router.post("/affiliation-changes/{affiliation_id}/reviewed", status_code=204)
+def confirm_affiliation_change(
+    affiliation_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(get_current_user),
+) -> None:
+    """Confirm a member-made institution move: clears the review flag so the
+    alert goes away. The affiliation itself is untouched — corrections go
+    through the profile page's affiliation editing."""
+    if not is_office(actor):
+        raise HTTPException(403, "Only the office confirms affiliation changes")
+    affil = db.get(Affiliation, affiliation_id)
+    if affil is None:
+        raise HTTPException(404, "Affiliation not found")
+    if affil.needs_review:
+        affil.needs_review = False
+        db.commit()
+
+
 def _open_author_periods_not_active(db: Session) -> list[PersonAlert]:
     """Open-ended authorship for people who are no longer active members.
     Authorship legitimately outlives membership for a while, but only with an
@@ -461,6 +521,7 @@ def admin_alerts(
         active_without_affiliation=_active_without_affiliation(db) if office else [],
         ineligible_voting_members=_ineligible_voting_members(db) if office else [],
         open_author_periods_not_active=_open_author_periods_not_active(db) if office else [],
+        affiliation_changes_to_review=_affiliation_changes_to_review(db) if office else [],
         migrations_pending=migrations_pending,
         total=0,
     )
@@ -474,6 +535,7 @@ def admin_alerts(
         + len(alerts.active_without_affiliation)
         + len(alerts.ineligible_voting_members)
         + len(alerts.open_author_periods_not_active)
+        + len(alerts.affiliation_changes_to_review)
         + (1 if alerts.migrations_pending else 0)
     )
     return alerts

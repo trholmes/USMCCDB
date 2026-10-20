@@ -73,6 +73,7 @@ Kind is the key shown in the Admin → Email log and stored in `email_log.kind`.
 | `registration_approved` | A pending person is set to **active** by the office or an institution admin contact. | the person | Welcome note with the site link and how to sign in: "use your account" if one is linked, "Sign in with ORCID" if ORCID is enabled, otherwise "the office will send your details". |
 | `registration_rejected` | A pending person is set to **rejected**. | the person | Deliberately neutral; the office's note on the transition is internal and is **never** included. Gives `CONTACT_EMAIL`. |
 | `membership_status_changed` | Any other status change made by someone other than the person (active → inactive, alumni, back to active, …). | the person | Names the old and new status and who made the change. A member's own status change tells nobody. |
+| `institution_changed` | A member moves their own primary institution (self-service "Change institution"). An office-made move sends nothing. | office + admin contacts of the old and new institutions; never the member. | Automatic (announced on the form, no confirmation prompt). The move is applied immediately and also listed under Alerts ("Institution changes to confirm") until the office confirms it. |
 
 ### Working groups
 

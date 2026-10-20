@@ -9,6 +9,18 @@ class PersonAlert(BaseModel):
     detail: str | None = None
 
 
+class AffiliationChangeAlert(BaseModel):
+    """A primary-institution move a member made themselves, waiting for the
+    office to confirm it (needs_review on the new affiliation)."""
+
+    affiliation_id: int
+    person_id: int
+    name: str
+    email: str | None = None
+    # "moved from X to Y, effective 2026-10-20"
+    detail: str
+
+
 class InstitutionAlert(BaseModel):
     institution_id: int
     name: str
@@ -64,5 +76,6 @@ class AdminAlerts(BaseModel):
     active_without_affiliation: list[PersonAlert]
     ineligible_voting_members: list[PersonAlert]
     open_author_periods_not_active: list[PersonAlert]
+    affiliation_changes_to_review: list[AffiliationChangeAlert]
     migrations_pending: bool
     total: int

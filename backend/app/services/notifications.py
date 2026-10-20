@@ -25,6 +25,7 @@ from app.models import (
     Affiliation,
     CollabRole,
     CollabRoleType,
+    Institution,
     Person,
     Publication,
     PublicationPerson,
@@ -503,6 +504,52 @@ def membership_status_changed(
         f"Your USMCC membership status is now {to_status}",
         "\n".join(lines),
         kind="membership_status_changed",
+        person_id=person.id,
+        actor_user_id=actor_id(actor),
+    )
+
+
+def institution_changed(
+    db,
+    person: Person,
+    old_institution: Institution | None,
+    new_institution: Institution,
+    start_date,
+    actor: User,
+) -> Message | None:
+    """Tell the office and the admin contacts of both institutions that a
+    member moved their own primary institution, so someone looks it over
+    (the move also lands on the Alerts page until confirmed). Not sent for
+    office-made moves — the office already knows."""
+    to = finalize(
+        office(db)
+        | institution_admin_contacts(db, old_institution.id if old_institution else None)
+        | institution_admin_contacts(db, new_institution.id),
+        exclude=_actor_email(db, actor) | person_address(person),
+    )
+    if not to:
+        return None
+    lines = [
+        f"{person.display_name} changed their institution in the collaboration "
+        "database.",
+        "",
+        f"From: {old_institution.name if old_institution else '(no previous institution)'}",
+        f"To: {new_institution.name}",
+        f"Effective: {start_date}",
+    ]
+    lines += _person_link(person)
+    lines += [
+        "",
+        "The change is already applied and listed under Alerts until someone "
+        "from the office confirms it. If it looks wrong, correct the "
+        "affiliation history on the profile page.",
+    ]
+    lines += _footer()
+    return Message(
+        to,
+        f"Institution change: {person.display_name}",
+        "\n".join(lines),
+        kind="institution_changed",
         person_id=person.id,
         actor_user_id=actor_id(actor),
     )
