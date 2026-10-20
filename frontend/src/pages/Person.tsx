@@ -319,6 +319,22 @@ export default function PersonPage() {
       setEditing(false)
       return
     }
+    // A stage change saved here is stamped onto the current affiliation, so a
+    // promotion that came with an institution move would rewrite the position
+    // held at the OLD institution — steer those to the move form, which
+    // records the new stage together with the move.
+    if (
+      'career_stage' in payload &&
+      !window.confirm(
+        'You changed the position / career stage.\n\n' +
+          'If this change came with a move to a new institution, press Cancel and use ' +
+          '“Change institution” instead — it records the new position together with the ' +
+          'move, so the old institution keeps the position held there.\n\n' +
+          `OK: the new position is at the current institution` +
+          `${currentPrimary ? ` (${currentPrimary.institution.name})` : ''}.`,
+      )
+    )
+      return
     try {
       await api.patch(`/people/${person.id}`, payload)
       notifications.show({ message: 'Profile updated' })
