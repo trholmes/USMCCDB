@@ -20,6 +20,7 @@ import type { CollabRole, Institution, WorkingGroup } from '../api/types'
 import PersonAvatar from '../components/PersonAvatar'
 import PersonSelect from '../components/PersonSelect'
 import RoleDetailInput from '../components/RoleDetailInput'
+import WorkingGroupModal from '../components/WorkingGroupModal'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
 import { convenerChangeEmails, useEmailConfirm } from '../emailWarnings'
@@ -147,6 +148,9 @@ export default function LeadershipPage() {
   const [roleBusy, setRoleBusy] = useState(false)
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
   const [institutions, setInstitutions] = useState<Institution[]>([])
+  // Create a working group without leaving the add-convener flow (it opens
+  // the shared modal, which prompts for the group's areas too).
+  const [wgModal, setWgModal] = useState<'new' | null>(null)
 
   // Edit modal.
   const [roleEdit, setRoleEdit] = useState<CollabRole | null>(null)
@@ -328,15 +332,20 @@ export default function LeadershipPage() {
               />
             )}
             {roleDef?.needsWG && (
-              <Select
-                label="Working group"
-                placeholder="Select working group…"
-                data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
-                value={roleWG}
-                onChange={setRoleWG}
-                searchable
-                maw={340}
-              />
+              <Group gap="xs" align="flex-end">
+                <Select
+                  label="Working group"
+                  placeholder="Select working group…"
+                  data={wgs.map((w) => ({ value: String(w.id), label: w.name }))}
+                  value={roleWG}
+                  onChange={setRoleWG}
+                  searchable
+                  w={340}
+                />
+                <Button variant="light" onClick={() => setWgModal('new')}>
+                  New working group…
+                </Button>
+              </Group>
             )}
             {roleDef?.needsInstitution && (
               <Select
@@ -395,6 +404,18 @@ export default function LeadershipPage() {
           )}
         </>
       )}
+
+      <WorkingGroupModal
+        target={wgModal}
+        onClose={() => setWgModal(null)}
+        onSaved={(wg) => {
+          setWgs((prev) =>
+            [...prev, wg].sort((a, b) => a.name.localeCompare(b.name)),
+          )
+          setRoleWG(String(wg.id))
+          notifications.show({ message: `Working group "${wg.name}" created` })
+        }}
+      />
 
       <Modal opened={roleEdit !== null} onClose={() => setRoleEdit(null)} title="Edit role">
         {roleEdit && (
