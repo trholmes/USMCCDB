@@ -99,7 +99,7 @@ itself, so the database just has to exist.
   `can_manage_working_groups` in `app/security.py`). `speakers_committee` (speakers
   committee) edits any talk, event or nomination; `leadership` (Leadership
   Council representatives and deputies) additionally manages working groups,
-  their members and convener roles, and any publication and author list
+  their members and coordinator roles, and any publication and author list
   (`can_manage_publications`). Roles are assigned explicitly by an admin
   — a person's leadership positions (`collab_roles`) never grant them; the
   admin alerts panel only *suggests* a change (`_role_suggestions` in

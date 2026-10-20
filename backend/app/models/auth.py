@@ -30,7 +30,7 @@ class UserRole(str, enum.Enum):
     # below.
     office = "office"
     # Leadership Council representatives and deputy representatives: working
-    # groups and their conveners, publications and author lists, plus
+    # groups and their coordinators, publications and author lists, plus
     # everything the speakers committee can do.
     leadership = "leadership"
     # Speakers committee: full edit access to talks, events and nominations.

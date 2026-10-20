@@ -328,7 +328,7 @@ def require_role(*roles: UserRole):
 require_admin = require_role()  # admin only
 require_office = require_role(UserRole.office)  # office or admin
 # Leadership Council representatives / deputies (issue #167): working groups
-# and their conveners, plus everything the speakers committee may do.
+# and their coordinators, plus everything the speakers committee may do.
 require_leadership = require_role(UserRole.office, UserRole.leadership)
 # Speakers committee: full edit access to talks, events and nominations.
 require_speakers_committee = require_role(
@@ -346,7 +346,7 @@ def is_office(user: User) -> bool:
 
 
 def can_manage_working_groups(user: User) -> bool:
-    """Create/edit working groups, add or remove anyone, name conveners."""
+    """Create/edit working groups, add or remove anyone, name coordinators."""
     return has_role(user, UserRole.leadership)
 
 
@@ -361,15 +361,15 @@ def can_manage_talks(user: User) -> bool:
     return has_role(user, UserRole.speakers_committee)
 
 
-def is_convener_of(db: Session, user: User, working_group_id: int | None) -> bool:
-    """True if the user's person holds an active convener role for the WG."""
+def is_wg_coordinator_of(db: Session, user: User, working_group_id: int | None) -> bool:
+    """True if the user's person holds an active coordinator role for the WG."""
     if user.person_id is None or working_group_id is None:
         return False
     today = datetime.now(UTC).date()
     row = db.execute(
         select(CollabRole.id).where(
             CollabRole.person_id == user.person_id,
-            CollabRole.role == CollabRoleType.convener,
+            CollabRole.role == CollabRoleType.wg_coordinator,
             CollabRole.working_group_id == working_group_id,
             CollabRole.start_date <= today,
             (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),

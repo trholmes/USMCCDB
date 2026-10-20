@@ -20,8 +20,8 @@ const slugify = (name: string) =>
     .replace(/^-+|-+$/g, '')
 
 /** Create/edit modal for a working group — shared by the Working Groups page
- * and the Leadership page's add-convener flow (which creates a group on the
- * spot before naming its convener). `target` is 'new', the group being
+ * and the Leadership page's add-coordinator flow (which creates a group on the
+ * spot before naming its coordinator). `target` is 'new', the group being
  * edited, or null while closed. */
 export default function WorkingGroupModal({
   target,

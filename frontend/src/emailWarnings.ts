@@ -9,7 +9,7 @@ export const EMAIL_RECIPIENTS = {
   registration_approved: 'the person (a welcome note with how to sign in)',
   registration_rejected: 'the person (a neutral "not approved" note with the contact address)',
   membership_status_changed: 'the person (naming the old and new status and who changed it)',
-  convener_changed: 'the leadership list and the person',
+  wg_coordinator_changed: 'the leadership list and the person',
   nomination_submitted: 'the speakers committee',
   speaker_assigned: 'the speaker',
   publication_review_requested: "the admin list and leadership, plus the paper's contacts",
@@ -44,15 +44,15 @@ export function useEmailConfirm() {
 
 const isOpen = (r: Pick<CollabRole, 'end_date'>) => !r.end_date || r.end_date >= today()
 
-/** Which convener changes mail leadership and the person (convener_changed):
- * adding an open convener role, and ending, deleting or back-dating the end
- * of one that is still open. Other roles, and date edits that leave the
- * term open, send nothing. */
-export const convenerChangeEmails = (
+/** Which working-group coordinator changes mail leadership and the person
+ * (wg_coordinator_changed): adding an open coordinator role, and ending,
+ * deleting or back-dating the end of one that is still open. Other roles,
+ * and date edits that leave the term open, send nothing. */
+export const coordinatorChangeEmails = (
   role: Pick<CollabRole, 'role' | 'end_date'>,
   change: 'add' | 'end' | 'delete' | { end_date: string | null },
 ): boolean => {
-  if (role.role !== 'convener') return false
+  if (role.role !== 'wg_coordinator') return false
   if (change === 'add') return true
   if (!isOpen(role)) return false
   if (change === 'end' || change === 'delete') return true

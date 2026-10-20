@@ -128,7 +128,7 @@ export const COLLAB_ROLES: CollabRoleDef[] = [
     hidden: true,
   },
   { value: 'admin_contact', label: 'Administrative Institutional Contact', needsInstitution: true },
-  { value: 'convener', label: 'Working Group Convener', needsWG: true },
+  { value: 'wg_coordinator', label: 'Working Group Coordinator', needsWG: true },
   { value: 'speakers_comm', label: 'Speakers Committee' },
   { value: 'pub_chair', label: 'Publications Committee Chair', hidden: true },
   { value: 'secretary', label: 'Secretary', hidden: true },

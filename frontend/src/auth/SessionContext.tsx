@@ -15,7 +15,7 @@ interface Session {
   isOffice: boolean
   isAdmin: boolean
   // Leadership Council representatives / deputies (or office): working
-  // groups, their members and conveners (issue #167).
+  // groups, their members and coordinators (issue #167).
   canManageWGs: boolean
   // Same accounts: any publication, its people, status and author lists.
   canManagePubs: boolean

@@ -32,7 +32,7 @@ from app.security import (
     actor_id,
     get_current_user,
     get_optional_user,
-    is_convener_of,
+    is_wg_coordinator_of,
     can_manage_publications,
 )
 from app.services import notifications
@@ -189,9 +189,9 @@ def update_publication(
     if not (
         can_manage_publications(user)
         or _is_contact(db, user, pub_id)
-        or is_convener_of(db, user, pub.working_group_id)
+        or is_wg_coordinator_of(db, user, pub.working_group_id)
     ):
-        raise HTTPException(403, "Only contacts, conveners, or the office can edit")
+        raise HTTPException(403, "Only contacts, coordinators, or the office can edit")
     data = body.model_dump(exclude_unset=True)
     # Same check as create: a dangling reference must 404, not surface as an
     # IntegrityError 500 (issue #61).
@@ -217,10 +217,10 @@ def change_status(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not can_manage_publications(user):
-        # Contacts and WG conveners may request collaboration review and revoke
+        # Contacts and WG coordinators may request collaboration review and revoke
         # that request; everything else (submitted, published, other backwards
         # moves) stays with the office.
-        allowed = (_is_contact(db, user, pub_id) or is_convener_of(db, user, pub.working_group_id)) and (
+        allowed = (_is_contact(db, user, pub_id) or is_wg_coordinator_of(db, user, pub.working_group_id)) and (
             (
                 pub.status == PublicationStatus.in_progress
                 and body.status == PublicationStatus.collab_review
@@ -260,7 +260,7 @@ def _can_manage_people(db: Session, user: User, pub: Publication) -> bool:
     return (
         can_manage_publications(user)
         or _is_contact(db, user, pub.id)
-        or is_convener_of(db, user, pub.working_group_id)
+        or is_wg_coordinator_of(db, user, pub.working_group_id)
     )
 
 
@@ -276,7 +276,7 @@ def add_person(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not _can_manage_people(db, user, pub):
-        raise HTTPException(403, "Only contacts, conveners, or the office can add people")
+        raise HTTPException(403, "Only contacts, coordinators, or the office can add people")
     if body.role == PublicationPersonRole.reviewer and not can_manage_publications(user):
         raise HTTPException(403, "Only the office can assign reviewers")
     person = db.get(Person, body.person_id)
@@ -320,7 +320,7 @@ def add_people(
     if pub is None:
         raise HTTPException(404, "Publication not found")
     if not _can_manage_people(db, user, pub):
-        raise HTTPException(403, "Only contacts, conveners, or the office can add people")
+        raise HTTPException(403, "Only contacts, coordinators, or the office can add people")
     if body.role == PublicationPersonRole.reviewer and not can_manage_publications(user):
         raise HTTPException(403, "Only the office can assign reviewers")
     person_ids = list(dict.fromkeys(body.person_ids))  # dedupe, keep order
@@ -367,14 +367,14 @@ def update_person_contribution(
     user: User = Depends(get_current_user),
 ) -> PubPersonOut:
     """Each person describes their own contribution to the paper; the
-    publication's contacts (and conveners/office) can edit anyone's."""
+    publication's contacts (and coordinators/office) can edit anyone's."""
     pp = db.get(PublicationPerson, pp_id)
     if pp is None or pp.publication_id != pub_id:
         raise HTTPException(404, "Assignment not found")
     pub = db.get(Publication, pub_id)
     if not (user.person_id == pp.person_id or _can_manage_people(db, user, pub)):
         raise HTTPException(
-            403, "Only the person themselves, contacts, conveners, or the office can edit this"
+            403, "Only the person themselves, contacts, coordinators, or the office can edit this"
         )
     pp.contribution = (body.contribution or "").strip() or None
     db.commit()
@@ -394,7 +394,7 @@ def remove_person(
         raise HTTPException(404, "Assignment not found")
     pub = db.get(Publication, pub_id)
     if not _can_manage_people(db, user, pub):
-        raise HTTPException(403, "Only contacts, conveners, or the office can remove people")
+        raise HTTPException(403, "Only contacts, coordinators, or the office can remove people")
     if pp.role == PublicationPersonRole.reviewer and not can_manage_publications(user):
         raise HTTPException(403, "Only the office can remove reviewers")
     db.delete(pp)

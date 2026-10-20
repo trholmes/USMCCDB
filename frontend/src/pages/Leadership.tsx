@@ -23,7 +23,7 @@ import RoleDetailInput from '../components/RoleDetailInput'
 import WorkingGroupModal from '../components/WorkingGroupModal'
 import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { useSession } from '../auth/SessionContext'
-import { convenerChangeEmails, useEmailConfirm } from '../emailWarnings'
+import { coordinatorChangeEmails, useEmailConfirm } from '../emailWarnings'
 import { COLLAB_ROLES, collabRoleLabel } from '../constants'
 import { today } from '../dates'
 
@@ -138,7 +138,7 @@ export default function LeadershipPage() {
   const { isOffice, canManageWGs } = useSession()
   const confirmEmail = useEmailConfirm()
 
-  // Add-role form (office; leadership accounts for conveners only).
+  // Add-role form (office; leadership accounts for coordinators only).
   const [addPerson, setAddPerson] = useState<string | null>(null)
   const [roleType, setRoleType] = useState<string | null>(null)
   const [roleDetail, setRoleDetail] = useState('')
@@ -148,7 +148,7 @@ export default function LeadershipPage() {
   const [roleBusy, setRoleBusy] = useState(false)
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
   const [institutions, setInstitutions] = useState<Institution[]>([])
-  // Create a working group without leaving the add-convener flow (it opens
+  // Create a working group without leaving the add-coordinator flow (it opens
   // the shared modal, which prompts for the group's areas too).
   const [wgModal, setWgModal] = useState<'new' | null>(null)
 
@@ -177,16 +177,16 @@ export default function LeadershipPage() {
   }, [isOffice, canManageWGs])
 
   // Office manages every role; leadership accounts (representatives and
-  // deputies) only working-group conveners — mirrors _require_collab_role_editor.
-  const canEditRole = (role: string) => isOffice || (canManageWGs && role === 'convener')
+  // deputies) only working-group coordinators — mirrors _require_collab_role_editor.
+  const canEditRole = (role: string) => isOffice || (canManageWGs && role === 'wg_coordinator')
 
   const roleDef = COLLAB_ROLES.find((r) => r.value === roleType)
 
   const addRole = async () => {
     if (!addPerson || !roleType) return
     if (
-      convenerChangeEmails({ role: roleType, end_date: null }, 'add') &&
-      !confirmEmail('Add this convener role?', 'convener_changed')
+      coordinatorChangeEmails({ role: roleType, end_date: null }, 'add') &&
+      !confirmEmail('Add this coordinator role?', 'wg_coordinator_changed')
     )
       return
     setRoleBusy(true)
@@ -215,7 +215,7 @@ export default function LeadershipPage() {
   }
 
   const endRole = async (r: CollabRole) => {
-    if (convenerChangeEmails(r, 'end') && !confirmEmail('End this convener term today?', 'convener_changed'))
+    if (coordinatorChangeEmails(r, 'end') && !confirmEmail('End this coordinator term today?', 'wg_coordinator_changed'))
       return
     try {
       await api.patch(`/collab-roles/${r.id}`, { end_date: today() })
@@ -228,8 +228,8 @@ export default function LeadershipPage() {
 
   const deleteRole = async (r: CollabRole) => {
     const question = 'Delete this role? This removes it from the leadership history.'
-    if (convenerChangeEmails(r, 'delete')) {
-      if (!confirmEmail(question, 'convener_changed', { always: true })) return
+    if (coordinatorChangeEmails(r, 'delete')) {
+      if (!confirmEmail(question, 'wg_coordinator_changed', { always: true })) return
     } else if (!window.confirm(question)) return
     try {
       await api.delete(`/collab-roles/${r.id}`)
@@ -248,8 +248,8 @@ export default function LeadershipPage() {
   const saveRoleEdit = async () => {
     if (!roleEdit) return
     if (
-      convenerChangeEmails(roleEdit, { end_date: roleForm.end_date || null }) &&
-      !confirmEmail('Save these dates? The convener term ends with them.', 'convener_changed')
+      coordinatorChangeEmails(roleEdit, { end_date: roleForm.end_date || null }) &&
+      !confirmEmail('Save these dates? The coordinator term ends with them.', 'wg_coordinator_changed')
     )
       return
     try {
@@ -302,7 +302,7 @@ export default function LeadershipPage() {
       {canManageWGs && (
         <Card withBorder maw={720} mt="md">
           <Stack gap="sm">
-            <Title order={6}>{isOffice ? 'Add role' : 'Add working group convener'}</Title>
+            <Title order={6}>{isOffice ? 'Add role' : 'Add working group coordinator'}</Title>
             <Group gap="sm" align="flex-start" wrap="wrap">
               <PersonSelect
                 label="Person"
