@@ -1,12 +1,24 @@
-import { Accordion, Badge, Button, Group, SegmentedControl, Table, Text, Title } from '@mantine/core'
+import {
+  Accordion,
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  SegmentedControl,
+  Table,
+  Text,
+  Title,
+} from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { CollabRole, PersonSummary, WGMember, WorkingGroup } from '../api/types'
 import { useSession } from '../auth/SessionContext'
 import PersonSelect from '../components/PersonSelect'
 import WorkingGroupModal from '../components/WorkingGroupModal'
 import { REPRESENTATIVE_AREAS, splitList } from '../constants'
+import { coordinatorChangeEmails, useEmailConfirm } from '../emailWarnings'
 import { today } from '../dates'
 
 // Sort key for "by area": the canonical order of the group's first area;
@@ -26,6 +38,7 @@ export default function WorkingGroupsPage() {
   // Person selected in the "Add member" picker of the open accordion panel.
   const [addPersonId, setAddPersonId] = useState<string | null>(null)
   const { me, canManageWGs, isAdmin } = useSession()
+  const confirmEmail = useEmailConfirm()
 
   // Coordinators may manage their own group's membership (mirrors the backend
   // rule on POST/DELETE /working-groups/{id}/members).
@@ -123,6 +136,62 @@ export default function WorkingGroupsPage() {
       notifications.show({ message: 'Member removed.' })
       loadMembers(wg.id)
       load()
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  // Name a coordinator straight from the member row (leadership / office —
+  // mirrors _require_collab_role_editor; group coordinators cannot).
+  const makeCoordinator = async (wg: WorkingGroup, p: WGMember) => {
+    if (
+      coordinatorChangeEmails({ role: 'wg_coordinator', end_date: null }, 'add') &&
+      !confirmEmail(
+        `Make ${p.given_name} ${p.family_name} coordinator of "${wg.name}"?`,
+        'wg_coordinator_changed',
+      )
+    )
+      return
+    try {
+      await api.post('/collab-roles', {
+        person_id: p.id,
+        role: 'wg_coordinator',
+        working_group_id: wg.id,
+        start_date: today(),
+      })
+      notifications.show({ message: 'Coordinator added.' })
+      loadMembers(wg.id)
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
+  const endCoordinator = async (wg: WorkingGroup, p: WGMember) => {
+    try {
+      const t = today()
+      const roles = await api.get<CollabRole[]>(
+        `/collab-roles?person_id=${p.id}&role=wg_coordinator`,
+      )
+      const active = roles.find(
+        (r) =>
+          r.working_group_id === wg.id && r.start_date <= t && (!r.end_date || r.end_date >= t),
+      )
+      if (!active) {
+        notifications.show({ color: 'yellow', message: 'No active coordinator term found.' })
+        loadMembers(wg.id)
+        return
+      }
+      if (
+        coordinatorChangeEmails(active, 'end') &&
+        !confirmEmail(
+          `End ${p.given_name} ${p.family_name}'s coordinator term today?`,
+          'wg_coordinator_changed',
+        )
+      )
+        return
+      await api.patch(`/collab-roles/${active.id}`, { end_date: t })
+      notifications.show({ message: 'Coordinator term ended today.' })
+      loadMembers(wg.id)
     } catch (err: any) {
       notifications.show({ color: 'red', message: err.message })
     }
@@ -249,9 +318,9 @@ export default function WorkingGroupsPage() {
                     <Table.Tr key={p.id}>
                       <Table.Td>
                         <Group gap="xs" wrap="nowrap">
-                          <Text size="sm">
+                          <Anchor component={Link} to={`/people/${p.id}`} size="sm">
                             {p.given_name} {p.family_name}
-                          </Text>
+                          </Anchor>
                           {p.is_coordinator && (
                             <Badge size="sm" variant="light" color="teal">
                               Coordinator
@@ -263,16 +332,36 @@ export default function WorkingGroupsPage() {
                       <Table.Td>{p.email}</Table.Td>
                       {canManage(wg.id) && (
                         <Table.Td>
-                          {p.id !== me?.person_id && (
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              color="red"
-                              onClick={() => removeMember(wg, p)}
-                            >
-                              Remove
-                            </Button>
-                          )}
+                          <Group gap="xs" justify="flex-end" wrap="nowrap">
+                            {canManageWGs &&
+                              (p.is_coordinator ? (
+                                <Button
+                                  size="compact-xs"
+                                  variant="subtle"
+                                  onClick={() => endCoordinator(wg, p)}
+                                >
+                                  End coordinator term
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="compact-xs"
+                                  variant="subtle"
+                                  onClick={() => makeCoordinator(wg, p)}
+                                >
+                                  Make coordinator
+                                </Button>
+                              ))}
+                            {p.id !== me?.person_id && (
+                              <Button
+                                size="compact-xs"
+                                variant="subtle"
+                                color="red"
+                                onClick={() => removeMember(wg, p)}
+                              >
+                                Remove
+                              </Button>
+                            )}
+                          </Group>
                         </Table.Td>
                       )}
                     </Table.Tr>
