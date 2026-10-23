@@ -368,6 +368,10 @@ class PersonSummary(ORMModel):
     research_areas: str | None = None
     # Current primary institution, populated on directory listings.
     primary_institution: InstitutionRef | None = None
+    # When listing an institution's former members (institution_id + former):
+    # the person's most recent affiliation period at that institution.
+    affiliation_start: date | None = None
+    affiliation_end: date | None = None
 
 
 class PersonPublic(BaseModel):
@@ -474,6 +478,8 @@ class WGMemberAdd(BaseModel):
 class WGMemberOut(PersonSummary):
     # Holds an active coordinator role for this working group.
     is_coordinator: bool = False
+    # That role's end date (inclusive): today means the term ends tonight.
+    coordinator_until: date | None = None
 
 
 class CollabRoleCreate(BaseModel):

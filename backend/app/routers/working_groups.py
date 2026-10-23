@@ -109,22 +109,27 @@ def list_wg_members(
         .all()
     )
     today = date.today()
-    coordinator_ids = set(
-        db.execute(
-            select(CollabRole.person_id).where(
-                CollabRole.working_group_id == wg_id,
-                CollabRole.role == CollabRoleType.wg_coordinator,
-                CollabRole.start_date <= today,
-                (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
-            )
+    # Active coordinator terms; keep each person's latest end date (an open
+    # term, end_date None, wins over any dated one).
+    coordinator_until: dict[int, date | None] = {}
+    for person_id, end_date in db.execute(
+        select(CollabRole.person_id, CollabRole.end_date).where(
+            CollabRole.working_group_id == wg_id,
+            CollabRole.role == CollabRoleType.wg_coordinator,
+            CollabRole.start_date <= today,
+            (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
         )
-        .scalars()
-        .all()
-    )
+    ).all():
+        prev = coordinator_until.get(person_id, today)
+        if person_id not in coordinator_until or (
+            prev is not None and (end_date is None or end_date > prev)
+        ):
+            coordinator_until[person_id] = end_date
     out = []
     for p in people:
         m = WGMemberOut.model_validate(p)
-        m.is_coordinator = p.id in coordinator_ids
+        m.is_coordinator = p.id in coordinator_until
+        m.coordinator_until = coordinator_until.get(p.id)
         out.append(m)
     return out
 

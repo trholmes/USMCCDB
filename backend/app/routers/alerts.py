@@ -30,6 +30,7 @@ from app.routers.site import migration_state
 from app.schemas.alerts import (
     AccountAlert,
     AdminAlerts,
+    AdminContactAwayAlert,
     AffiliationChangeAlert,
     InstitutionAlert,
     PersonAlert,
@@ -170,6 +171,49 @@ def _institutions_missing_admin_contact(
         for i in _institutions_with_members(db, member_counts, active=True)
         if i.id not in covered
     ]
+
+
+def _admin_contacts_away(db: Session, today) -> list[AdminContactAwayAlert]:
+    """Active Administrative Institutional Contacts whose current primary
+    affiliation is no longer at the institution they are the contact of —
+    they moved away (or have no current affiliation at all), so the role
+    needs re-assigning. Clears when the admin_contact role is ended (the
+    missing-contact alert then asks for a replacement) or the person
+    returns."""
+    rows = db.execute(
+        select(CollabRole, Person, Institution)
+        .join(Person, Person.id == CollabRole.person_id)
+        .join(Institution, Institution.id == CollabRole.institution_id)
+        .where(
+            CollabRole.role == CollabRoleType.admin_contact,
+            CollabRole.start_date <= today,
+            (CollabRole.end_date.is_(None)) | (CollabRole.end_date >= today),
+        )
+        .order_by(Institution.name, Person.family_name, Person.given_name)
+    ).all()
+    current_institution = dict(
+        db.execute(
+            select(Affiliation.person_id, Institution)
+            .join(Institution, Institution.id == Affiliation.institution_id)
+            .where(*OPEN_PRIMARY, Affiliation.person_id.in_([p.id for _, p, _ in rows]))
+        ).all()
+    )
+    out = []
+    for _, person, institution in rows:
+        at = current_institution.get(person.id)
+        if at is not None and at.id == institution.id:
+            continue
+        out.append(
+            AdminContactAwayAlert(
+                person_id=person.id,
+                name=person.display_name,
+                email=person.email,
+                institution_id=institution.id,
+                institution=institution.name,
+                detail=f"now at {at.name}" if at else "no current affiliation",
+            )
+        )
+    return out
 
 
 def _unlinked_accounts(db: Session) -> list[AccountAlert]:
@@ -515,6 +559,7 @@ def admin_alerts(
         institutions_missing_admin_contact=(
             _institutions_missing_admin_contact(db, member_counts, today) if office else []
         ),
+        admin_contacts_away=_admin_contacts_away(db, today) if office else [],
         incomplete_orcid_registrations=_incomplete_orcid_registrations(db) if admin else [],
         unlinked_accounts=_unlinked_accounts(db) if admin else [],
         role_suggestions=_role_suggestions(db, today) if admin else [],
@@ -529,6 +574,7 @@ def admin_alerts(
         len(alerts.pending_registrations)
         + len(alerts.unreviewed_institutions)
         + len(alerts.institutions_missing_admin_contact)
+        + len(alerts.admin_contacts_away)
         + len(alerts.incomplete_orcid_registrations)
         + len(alerts.unlinked_accounts)
         + len(alerts.role_suggestions)

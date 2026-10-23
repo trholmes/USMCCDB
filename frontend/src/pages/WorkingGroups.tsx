@@ -1,28 +1,28 @@
 import {
-  Accordion,
   Anchor,
   Badge,
   Button,
   Group,
-  SegmentedControl,
   Table,
   Text,
   Title,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { CollabRole, PersonSummary, WGMember, WorkingGroup } from '../api/types'
 import { useSession } from '../auth/SessionContext'
 import PersonSelect from '../components/PersonSelect'
 import WorkingGroupModal from '../components/WorkingGroupModal'
+import { SortableTh, useSortable, type Accessors } from '../components/sortable'
 import { REPRESENTATIVE_AREAS, splitList } from '../constants'
 import { coordinatorChangeEmails, useEmailConfirm } from '../emailWarnings'
 import { today } from '../dates'
 
-// Sort key for "by area": the canonical order of the group's first area;
-// groups without any area sort last.
+// Sort key for the Areas column: the canonical order of the group's first
+// area; groups without any area sort last. Ties keep the API's name order
+// (Array.prototype.sort is stable).
 const areaOrder = (wg: WorkingGroup) => {
   const first = splitList(wg.areas)[0]
   if (!first) return REPRESENTATIVE_AREAS.length + 1
@@ -30,12 +30,19 @@ const areaOrder = (wg: WorkingGroup) => {
   return idx === -1 ? REPRESENTATIVE_AREAS.length : idx
 }
 
+const ACCESSORS: Accessors<WorkingGroup> = {
+  name: (wg) => wg.name,
+  areas: (wg) => areaOrder(wg),
+  members: (wg) => wg.member_count,
+}
+
 export default function WorkingGroupsPage() {
   const [wgs, setWgs] = useState<WorkingGroup[]>([])
   const [members, setMembers] = useState<Record<number, WGMember[]>>({})
   const [modal, setModal] = useState<WorkingGroup | 'new' | null>(null)
-  const [sortBy, setSortBy] = useState<'name' | 'area'>('name')
-  // Person selected in the "Add member" picker of the open accordion panel.
+  // The one expanded group (its detail panel renders below its table row).
+  const [expanded, setExpanded] = useState<number | null>(null)
+  // Person selected in the "Add member" picker of the expanded panel.
   const [addPersonId, setAddPersonId] = useState<string | null>(null)
   const { me, canManageWGs, isAdmin } = useSession()
   const confirmEmail = useEmailConfirm()
@@ -217,59 +224,70 @@ export default function WorkingGroupsPage() {
   const isMember = (wgId: number) =>
     me?.person_id != null && (members[wgId] ?? []).some((p) => p.id === me.person_id)
 
-  // The API lists groups by name; "by area" regroups them in canonical area
-  // order (groups without an area last), then by name.
-  const sortedWgs = useMemo(
-    () =>
-      sortBy === 'name'
-        ? wgs
-        : [...wgs].sort(
-            (a, b) =>
-              areaOrder(a) - areaOrder(b) ||
-              (a.areas ?? '').localeCompare(b.areas ?? '') ||
-              a.name.localeCompare(b.name),
-          ),
-    [wgs, sortBy],
-  )
+  // The API lists groups by name; the column headers re-sort client-side.
+  const { sorted, sort, toggle } = useSortable(wgs, ACCESSORS)
+
+  const toggleExpanded = (wgId: number) => {
+    setAddPersonId(null)
+    if (expanded === wgId) {
+      setExpanded(null)
+    } else {
+      setExpanded(wgId)
+      loadMembers(wgId)
+    }
+  }
 
   return (
     <>
       <Group justify="space-between" mb="md">
-        <Group gap="md">
-          <Title order={3}>Working groups</Title>
-          <SegmentedControl
-            size="xs"
-            data={[
-              { label: 'By name', value: 'name' },
-              { label: 'By area', value: 'area' },
-            ]}
-            value={sortBy}
-            onChange={(v) => setSortBy(v as 'name' | 'area')}
-          />
-        </Group>
+        <Title order={3}>Working groups</Title>
         {canManageWGs && <Button onClick={() => setModal('new')}>Add working group</Button>}
       </Group>
-      <Accordion
-        onChange={(v) => {
-          setAddPersonId(null)
-          if (v) loadMembers(Number(v))
-        }}
-      >
-        {sortedWgs.map((wg) => (
-          <Accordion.Item key={wg.id} value={String(wg.id)}>
-            <Accordion.Control>
-              <Group>
-                <Text fw={600}>{wg.name}</Text>
-                <Badge variant="light">{wg.member_count} members</Badge>
-                {splitList(wg.areas).map((area) => (
-                  <Badge key={area} variant="light" color="grape">
-                    {area}
-                  </Badge>
-                ))}
-                {!wg.is_active && <Badge color="gray">inactive</Badge>}
-              </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
+      <Table.ScrollContainer minWidth={500}>
+      <Table highlightOnHover>
+        <Table.Thead>
+          <Table.Tr>
+            <SortableTh label="Name" k="name" sort={sort} toggle={toggle} />
+            <SortableTh label="Areas" k="areas" sort={sort} toggle={toggle} />
+            <SortableTh label="Members" k="members" sort={sort} toggle={toggle} />
+            <Table.Th />
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+        {sorted.map((wg) => (
+          <Fragment key={wg.id}>
+            <Table.Tr style={{ cursor: 'pointer' }} onClick={() => toggleExpanded(wg.id)}>
+              <Table.Td>
+                <Group gap="xs" wrap="nowrap">
+                  <Text size="sm" fw={600}>
+                    {wg.name}
+                  </Text>
+                  {!wg.is_active && (
+                    <Badge color="gray" variant="light">
+                      inactive
+                    </Badge>
+                  )}
+                </Group>
+              </Table.Td>
+              <Table.Td>
+                <Group gap="xs">
+                  {splitList(wg.areas).map((area) => (
+                    <Badge key={area} variant="light" color="grape">
+                      {area}
+                    </Badge>
+                  ))}
+                </Group>
+              </Table.Td>
+              <Table.Td>{wg.member_count}</Table.Td>
+              <Table.Td ta="right">
+                <Text size="sm" c="dimmed" aria-hidden>
+                  {expanded === wg.id ? '▾' : '▸'}
+                </Text>
+              </Table.Td>
+            </Table.Tr>
+            {expanded === wg.id && (
+            <Table.Tr>
+              <Table.Td colSpan={4} p="md">
               {wg.description && (
                 <Text size="sm" c="dimmed" mb="sm">
                   {wg.description}
@@ -322,8 +340,19 @@ export default function WorkingGroupsPage() {
                             {p.given_name} {p.family_name}
                           </Anchor>
                           {p.is_coordinator && (
-                            <Badge size="sm" variant="light" color="teal">
-                              Coordinator
+                            <Badge
+                              size="sm"
+                              variant="light"
+                              color={p.coordinator_until === today() ? 'gray' : 'teal'}
+                              title={
+                                p.coordinator_until === today()
+                                  ? 'Date ranges are inclusive — the term runs through the end of today'
+                                  : undefined
+                              }
+                            >
+                              {p.coordinator_until === today()
+                                ? 'Coordinator — ends today'
+                                : 'Coordinator'}
                             </Badge>
                           )}
                         </Group>
@@ -335,6 +364,7 @@ export default function WorkingGroupsPage() {
                           <Group gap="xs" justify="flex-end" wrap="nowrap">
                             {canManageWGs &&
                               (p.is_coordinator ? (
+                                p.coordinator_until !== today() && (
                                 <Button
                                   size="compact-xs"
                                   variant="subtle"
@@ -342,6 +372,7 @@ export default function WorkingGroupsPage() {
                                 >
                                   End coordinator term
                                 </Button>
+                                )
                               ) : (
                                 <Button
                                   size="compact-xs"
@@ -369,10 +400,14 @@ export default function WorkingGroupsPage() {
                 </Table.Tbody>
               </Table>
               </Table.ScrollContainer>
-            </Accordion.Panel>
-          </Accordion.Item>
+              </Table.Td>
+            </Table.Tr>
+            )}
+          </Fragment>
         ))}
-      </Accordion>
+        </Table.Tbody>
+      </Table>
+      </Table.ScrollContainer>
 
       <WorkingGroupModal target={modal} onClose={() => setModal(null)} onSaved={load} />
     </>
