@@ -4827,6 +4827,7 @@ def test_admin_alerts(admin):
         len(alerts["pending_registrations"])
         + len(alerts["unreviewed_institutions"])
         + len(alerts["institutions_missing_admin_contact"])
+        + len(alerts["admin_contacts_away"])
         + len(alerts["unlinked_accounts"])
         + len(alerts["role_suggestions"])
         + len(alerts["active_without_affiliation"])
@@ -4887,6 +4888,12 @@ def test_admin_alerts(admin):
     assert r.status_code == 200, r.text
     alerts = admin.get("/api/v1/alerts").json()
     assert pid in [p["person_id"] for p in alerts["active_without_affiliation"]]
+    # …and flags them as an administrative contact who is no longer at the
+    # institution they are the contact of.
+    away = {c["person_id"]: c for c in alerts["admin_contacts_away"]}
+    assert pid in away
+    assert away[pid]["institution"] == "Alertless University"
+    assert away[pid]["detail"] == "no current affiliation"
 
     # A stale voting flag (the API clears them on every edit path, so plant
     # one directly, as a bulk import or manual SQL could) is reported with
@@ -4915,6 +4922,81 @@ def test_admin_alerts(admin):
     stale = {p["person_id"]: p for p in alerts["open_author_periods_not_active"]}
     assert member_pid in stale
     assert stale[member_pid]["detail"] == "status is alumni"
+
+
+def test_admin_contact_away_alert(admin):
+    """An administrative contact who moves their primary affiliation away
+    from their institution is flagged for re-assignment; ending the
+    admin_contact position clears the alert."""
+    pid = _active_person(
+        admin, given="Connie", family="Tact", email="connie.tact@example.edu"
+    )
+    a = admin.post("/api/v1/institutions", json={"name": "Wandering Contact University"}).json()
+    b = admin.post("/api/v1/institutions", json={"name": "Faraway Institute"}).json()
+    assert admin.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": a["id"], "start_date": "2025-01-01"},
+    ).status_code == 201
+    r = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "admin_contact",
+            "institution_id": a["id"],
+            "start_date": "2025-01-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+    role_id = r.json()["id"]
+
+    # While they are at their institution, nothing is flagged.
+    assert pid not in [
+        c["person_id"] for c in admin.get("/api/v1/alerts").json()["admin_contacts_away"]
+    ]
+
+    # Moving the primary affiliation away raises the alert, naming both the
+    # institution they are the contact of and where they went.
+    assert admin.post(
+        f"/api/v1/people/{pid}/institution",
+        json={"institution_id": b["id"], "start_date": "2026-06-01"},
+    ).status_code == 201
+    alerts = admin.get("/api/v1/alerts").json()
+    away = {c["person_id"]: c for c in alerts["admin_contacts_away"]}
+    assert pid in away
+    assert away[pid]["institution_id"] == a["id"]
+    assert away[pid]["institution"] == "Wandering Contact University"
+    assert away[pid]["detail"] == "now at Faraway Institute"
+    assert alerts["total"] >= 1
+
+    # The institution page's past-members listing: the mover is gone from the
+    # current people list but shows under former=true with their period there
+    # (the move closed the old affiliation on the move date, inclusive).
+    assert pid not in [
+        p["id"] for p in admin.get(f"/api/v1/people?institution_id={a['id']}").json()
+    ]
+    former = admin.get(f"/api/v1/people?institution_id={a['id']}&former=true").json()
+    row = next(p for p in former if p["id"] == pid)
+    assert row["affiliation_start"] == "2025-01-01"
+    assert row["affiliation_end"] == "2026-06-01"
+    # Where they are now, they are current, not former.
+    assert pid not in [
+        p["id"]
+        for p in admin.get(f"/api/v1/people?institution_id={b['id']}&former=true").json()
+    ]
+
+    # The office sees the alert; a plain member sees nothing.
+    member, _ = _linked_member(
+        admin, given="Window", family="Shopper", email="window.shopper@example.edu"
+    )
+    assert member.get("/api/v1/alerts").json()["admin_contacts_away"] == []
+
+    # Ending the position resolves it.
+    assert admin.patch(
+        f"/api/v1/collab-roles/{role_id}", json={"end_date": "2026-06-01"}
+    ).status_code == 200
+    assert pid not in [
+        c["person_id"] for c in admin.get("/api/v1/alerts").json()["admin_contacts_away"]
+    ]
 
 
 def _role_account(admin, *, given, family, email, role):

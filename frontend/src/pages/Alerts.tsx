@@ -6,6 +6,7 @@ import { api } from '../api/client'
 import { useAlerts } from '../auth/AlertsContext'
 import { useSession } from '../auth/SessionContext'
 import type {
+  AdminContactAwayAlert,
   AffiliationChangeAlert,
   InstitutionAlert,
   PersonAlert,
@@ -127,6 +128,25 @@ function AffiliationChangeRow({
       <Button size="compact-xs" variant="light" loading={busy} onClick={confirm}>
         Confirm
       </Button>
+    </Group>
+  )
+}
+
+function AdminContactAwayRow({ item }: { item: AdminContactAwayAlert }) {
+  return (
+    <Group gap="xs" wrap="nowrap">
+      <Anchor component={Link} to={`/people/${item.person_id}`} size="sm">
+        {item.name}
+      </Anchor>
+      <Text size="sm" c="dimmed">
+        — contact for
+      </Text>
+      <Anchor component={Link} to={`/institutions/${item.institution_id}`} size="sm">
+        {item.institution}
+      </Anchor>
+      <Text size="sm" c="dimmed" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        , {item.detail}
+      </Text>
     </Group>
   )
 }
@@ -282,6 +302,16 @@ export default function AlertsPage() {
       >
         {alerts.institutions_missing_admin_contact.map((i) => (
           <InstitutionRow key={i.institution_id} item={i} />
+        ))}
+      </Section>
+
+      <Section
+        title="Administrative contacts who left their institution"
+        count={alerts.admin_contacts_away.length}
+        description="Administrative Institutional Contacts whose current primary affiliation is no longer at the institution they are the contact of. End the position on their profile page and assign a replacement from the institution page."
+      >
+        {alerts.admin_contacts_away.map((c) => (
+          <AdminContactAwayRow key={`${c.person_id}-${c.institution_id}`} item={c} />
         ))}
       </Section>
 

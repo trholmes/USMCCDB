@@ -124,9 +124,15 @@ export interface PersonSummary {
   photo_file: string | null
   research_areas: string | null
   primary_institution: { id: number; name: string; short_name: string | null } | null
+  // When listing an institution's former members (institution_id + former):
+  // the person's most recent affiliation period at that institution.
+  affiliation_start?: string | null
+  affiliation_end?: string | null
 }
 
 export interface WGMember extends PersonSummary {
+  // That role's end date (inclusive): today means the term ends tonight.
+  coordinator_until?: string | null
   // Holds an active coordinator role for the working group being listed.
   is_coordinator: boolean
 }
@@ -369,6 +375,16 @@ export interface InstitutionAlert {
   current_members: number
 }
 
+export interface AdminContactAwayAlert {
+  person_id: number
+  name: string
+  email: string | null
+  institution_id: number
+  institution: string
+  // Where they are instead: "now at X" or "no current affiliation".
+  detail: string
+}
+
 export interface AccountAlert {
   user_id: number
   login: string
@@ -392,6 +408,7 @@ export interface AdminAlerts {
   pending_registrations: PersonAlert[]
   unreviewed_institutions: InstitutionAlert[]
   institutions_missing_admin_contact: InstitutionAlert[]
+  admin_contacts_away: AdminContactAwayAlert[]
   incomplete_orcid_registrations: PersonAlert[]
   unlinked_accounts: AccountAlert[]
   role_suggestions: RoleSuggestionAlert[]

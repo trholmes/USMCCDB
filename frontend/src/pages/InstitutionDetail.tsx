@@ -1,4 +1,4 @@
-import { Anchor, Badge, Button, Card, Group, Stack, Table, Text, Title } from '@mantine/core'
+import { Anchor, Badge, Button, Card, Group, Stack, Switch, Table, Text, Title } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -19,6 +19,14 @@ const ACCESSORS: Accessors<PersonSummary> = {
   email: (p) => p.email,
 }
 
+const PAST_ACCESSORS: Accessors<PersonSummary> = {
+  name: (p) => `${p.family_name} ${p.given_name}`,
+  position: (p) => p.career_stage,
+  from: (p) => p.affiliation_start,
+  to: (p) => p.affiliation_end,
+  email: (p) => p.email,
+}
+
 export default function InstitutionDetailPage() {
   const { id } = useParams()
   const [inst, setInst] = useState<Institution | null>(null)
@@ -26,9 +34,21 @@ export default function InstitutionDetailPage() {
   const [roles, setRoles] = useState<CollabRole[]>([])
   const [editing, setEditing] = useState(false)
   const [contactSel, setContactSel] = useState<string | null>(null)
+  const [showPast, setShowPast] = useState(false)
+  const [past, setPast] = useState<PersonSummary[]>([])
   const { isOffice } = useSession()
   const navigate = useNavigate()
   const { sorted, sort, toggle } = useSortable(members, ACCESSORS)
+  const pastTable = useSortable(past, PAST_ACCESSORS)
+
+  // Past members (every affiliation here ended) are loaded only when shown.
+  useEffect(() => {
+    if (!showPast) return
+    api
+      .get<PersonSummary[]>(`/people?institution_id=${id}&former=true`)
+      .then(setPast)
+      .catch(() => setPast([]))
+  }, [id, showPast])
 
   const load = useCallback(() => {
     api.get<Institution>(`/institutions/${id}`).then(setInst).catch(() => setInst(null))
@@ -126,7 +146,12 @@ export default function InstitutionDetailPage() {
                 ) : (
                   <Text size="sm">—</Text>
                 )}
-                {isOffice && r.role === 'admin_contact' && (
+                {r.end_date === t && (
+                  <Badge color="gray" variant="light" title="Date ranges are inclusive — the role is active through the end of today and gone tomorrow">
+                    ends today
+                  </Badge>
+                )}
+                {isOffice && r.role === 'admin_contact' && r.end_date !== t && (
                   <Button size="compact-xs" variant="subtle" color="red" onClick={() => endRole(r)}>
                     End
                   </Button>
@@ -202,6 +227,58 @@ export default function InstitutionDetailPage() {
         </Table.Tbody>
       </Table>
       </Table.ScrollContainer>
+
+      <Switch
+        label="Show past members"
+        checked={showPast}
+        onChange={(e) => setShowPast(e.currentTarget.checked)}
+      />
+      {showPast && (
+        <>
+          <Title order={5}>Past members ({past.length})</Title>
+          {past.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No past members on record.
+            </Text>
+          ) : (
+            <Table.ScrollContainer minWidth={700} maw={900}>
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <SortableTh label="Name" k="name" sort={pastTable.sort} toggle={pastTable.toggle} />
+                  <SortableTh label="Position" k="position" sort={pastTable.sort} toggle={pastTable.toggle} />
+                  <SortableTh label="From" k="from" sort={pastTable.sort} toggle={pastTable.toggle} />
+                  <SortableTh label="To" k="to" sort={pastTable.sort} toggle={pastTable.toggle} />
+                  <SortableTh label="Email" k="email" sort={pastTable.sort} toggle={pastTable.toggle} />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {pastTable.sorted.map((p) => (
+                  <Table.Tr
+                    key={p.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/people/${p.id}`)}
+                  >
+                    <Table.Td>
+                      <Group gap="xs" wrap="nowrap">
+                        <PersonAvatar person={p} />
+                        <span>
+                          {p.family_name}, {p.preferred_name || p.given_name}
+                        </span>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td>{p.career_stage}</Table.Td>
+                    <Table.Td>{p.affiliation_start}</Table.Td>
+                    <Table.Td>{p.affiliation_end}</Table.Td>
+                    <Table.Td>{p.email}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+            </Table.ScrollContainer>
+          )}
+        </>
+      )}
       <InstitutionEditModal
         target={editing ? inst : null}
         onClose={() => setEditing(false)}

@@ -510,6 +510,11 @@ def list_people(
     status: MemberStatus | None = None,
     career_stage: CareerStage | None = None,
     institution_id: int | None = None,
+    former: bool = Query(
+        default=False,
+        description="with institution_id: list past members (every affiliation "
+        "there ended) instead of current ones, with their latest period there",
+    ),
     working_group_id: int | None = None,
     research_area: str | None = Query(default=None, description="standard research area name"),
     is_voting: bool | None = None,
@@ -546,10 +551,33 @@ def list_people(
             )
         )
     if institution_id is not None:
-        stmt = stmt.join(Affiliation).where(
-            Affiliation.institution_id == institution_id,
-            Affiliation.end_date.is_(None),
-        )
+        if former:
+            # Past members: at least one ended affiliation there and no open
+            # one (someone still there with a second, closed row isn't past).
+            ended_here = (
+                select(Affiliation.id)
+                .where(
+                    Affiliation.person_id == Person.id,
+                    Affiliation.institution_id == institution_id,
+                    Affiliation.end_date.isnot(None),
+                )
+                .exists()
+            )
+            open_here = (
+                select(Affiliation.id)
+                .where(
+                    Affiliation.person_id == Person.id,
+                    Affiliation.institution_id == institution_id,
+                    Affiliation.end_date.is_(None),
+                )
+                .exists()
+            )
+            stmt = stmt.where(ended_here, ~open_here)
+        else:
+            stmt = stmt.join(Affiliation).where(
+                Affiliation.institution_id == institution_id,
+                Affiliation.end_date.is_(None),
+            )
     if working_group_id is not None:
         stmt = stmt.join(WorkingGroupMember).where(
             WorkingGroupMember.working_group_id == working_group_id
@@ -563,6 +591,12 @@ def list_people(
         )
         if primary is not None:
             row.primary_institution = InstitutionRef.model_validate(primary.institution)
+        if institution_id is not None and former:
+            last = max(
+                (a for a in p.affiliations if a.institution_id == institution_id and a.end_date),
+                key=lambda a: a.end_date,
+            )
+            row.affiliation_start, row.affiliation_end = last.start_date, last.end_date
         out.append(row)
     return out
 

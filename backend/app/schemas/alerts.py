@@ -27,6 +27,21 @@ class InstitutionAlert(BaseModel):
     current_members: int
 
 
+class AdminContactAwayAlert(BaseModel):
+    """An active Administrative Institutional Contact whose current primary
+    affiliation is no longer at the institution they are the contact of —
+    the role needs re-assignment (end it; the missing-contact alert then
+    prompts for a replacement)."""
+
+    person_id: int
+    name: str
+    email: str | None = None
+    institution_id: int
+    institution: str
+    # Where they are instead: "now at X" or "no current affiliation".
+    detail: str
+
+
 class AccountAlert(BaseModel):
     user_id: int
     login: str
@@ -68,6 +83,7 @@ class AdminAlerts(BaseModel):
     pending_registrations: list[PersonAlert]
     unreviewed_institutions: list[InstitutionAlert]
     institutions_missing_admin_contact: list[InstitutionAlert]
+    admin_contacts_away: list[AdminContactAwayAlert]
     # Leftover stubs from ORCID sign-ins that never submitted the form
     # (admin): discard, or link the sign-in to the member's real record.
     incomplete_orcid_registrations: list[PersonAlert]

@@ -1,5 +1,6 @@
 import {
   Anchor,
+  Badge,
   Button,
   Card,
   Checkbox,
@@ -106,7 +107,19 @@ function RoleRows({
             <Table.Td>{r.working_group?.name ?? r.institution?.name ?? '—'}</Table.Td>
             <Table.Td>{roleAreas(r) ?? '—'}</Table.Td>
             <Table.Td>{r.start_date}</Table.Td>
-            <Table.Td>{r.end_date ?? '—'}</Table.Td>
+            <Table.Td>
+              {r.end_date === today() ? (
+                <Badge
+                  color="gray"
+                  variant="light"
+                  title="Date ranges are inclusive — the role is active through the end of today and moves to past leadership tomorrow"
+                >
+                  ends today
+                </Badge>
+              ) : (
+                r.end_date ?? '—'
+              )}
+            </Table.Td>
             {canEdit && (
               <Table.Td>
                 {(!canEditRole || canEditRole(r.role)) && (
