@@ -82,6 +82,25 @@ export default function InstitutionDetailPage() {
     }
   }
 
+  const deleteInstitution = async () => {
+    if (!inst) return
+    if (
+      !window.confirm(
+        `Delete "${inst.name}" permanently? Use this only for entries created by ` +
+          'mistake (e.g. a misspelled duplicate from a registration) — an ' +
+          'institution with member history should be marked inactive instead.',
+      )
+    )
+      return
+    try {
+      await api.delete(`/institutions/${id}`)
+      notifications.show({ message: 'Institution deleted.' })
+      navigate('/institutions')
+    } catch (err: any) {
+      notifications.show({ color: 'red', message: err.message })
+    }
+  }
+
   const endRole = async (r: CollabRole) => {
     const name = r.person ? `${r.person.given_name} ${r.person.family_name}` : 'this person'
     if (!window.confirm(`End ${name}'s "${collabRoleLabel(r.role, r.detail)}" role today?`))
@@ -127,7 +146,21 @@ export default function InstitutionDetailPage() {
             )}
           </Group>
         </div>
-        {isOffice && <Button variant="light" onClick={() => setEditing(true)}>Edit</Button>}
+        {isOffice && (
+          <Group gap="xs">
+            <Button variant="light" onClick={() => setEditing(true)}>Edit</Button>
+            {members.length === 0 && (
+              <Button
+                variant="light"
+                color="red"
+                onClick={deleteInstitution}
+                title="Remove an entry created by mistake; refused if any affiliation history or institution roles reference it"
+              >
+                Delete
+              </Button>
+            )}
+          </Group>
+        )}
       </Group>
 
       {(currentRoles.length > 0 || isOffice) && (

@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Affiliation, Institution, Person, User
+from app.models import Affiliation, CollabRole, Institution, Person, User
 from app.schemas.membership import (
     InstitutionCreate,
     InstitutionOut,
@@ -180,6 +180,27 @@ def delete_institution(institution_id: int, db: Session = Depends(get_db)) -> No
     if inst is None:
         raise HTTPException(404, "Institution not found")
     if inst.affiliations:
-        raise HTTPException(409, "Institution has affiliations — mark inactive instead")
+        if any(a.end_date is None for a in inst.affiliations):
+            raise HTTPException(
+                409,
+                "Institution has people currently affiliated — move them "
+                "first, or mark it inactive instead",
+            )
+        raise HTTPException(
+            409,
+            "Institution has past affiliations — mark it inactive instead, "
+            "or (if they were entered in error) delete those affiliations "
+            "from each person's page first",
+        )
+    # The collab_roles FK cascades on delete — deleting here would silently
+    # take institution-scoped roles (admin contacts, IB reps) with it.
+    has_role = db.execute(
+        select(CollabRole.id).where(CollabRole.institution_id == institution_id).limit(1)
+    ).first()
+    if has_role is not None:
+        raise HTTPException(
+            409,
+            "Institution has contact/representative roles — delete those first",
+        )
     db.delete(inst)
     db.commit()

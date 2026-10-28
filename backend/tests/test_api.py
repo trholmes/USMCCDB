@@ -767,6 +767,52 @@ def test_institution_people_count(admin):
     assert admin.get(f"/api/v1/institutions/{a['id']}").json()["people_count"] == 2
 
 
+def test_institution_delete(admin):
+    """Only an institution nothing references may be deleted — a free-text
+    registration against a misspelled name leaves an empty inactive entry
+    behind once the person is moved to the right one, and the office cleans
+    those up. Anything with history (even ended affiliations) or
+    institution-scoped roles is refused."""
+    inst = admin.post("/api/v1/institutions", json={"name": "Typo Tech"}).json()
+    pid = _active_person(admin, given="Dupe", family="Entry", email="dupe.entry@example.edu")
+    r = admin.post(
+        f"/api/v1/people/{pid}/affiliations",
+        json={"institution_id": inst["id"], "is_primary": True, "start_date": "2025-01-01"},
+    )
+    assert r.status_code == 201
+    affil_id = r.json()["id"]
+
+    # A current affiliation blocks deletion, and so does an ended one.
+    assert admin.delete(f"/api/v1/institutions/{inst['id']}").status_code == 409
+    assert admin.patch(
+        f"/api/v1/people/{pid}/affiliations/{affil_id}", json={"end_date": "2025-06-01"}
+    ).status_code == 200
+    assert admin.delete(f"/api/v1/institutions/{inst['id']}").status_code == 409
+    assert admin.delete(f"/api/v1/people/{pid}/affiliations/{affil_id}").status_code == 204
+
+    # An institution-scoped role blocks it too — the FK would cascade and
+    # silently take the role with it.
+    role = admin.post(
+        "/api/v1/collab-roles",
+        json={
+            "person_id": pid,
+            "role": "admin_contact",
+            "detail": None,
+            "working_group_id": None,
+            "institution_id": inst["id"],
+            "start_date": "2025-01-01",
+        },
+    ).json()
+    assert admin.delete(f"/api/v1/institutions/{inst['id']}").status_code == 409
+    assert admin.delete(f"/api/v1/collab-roles/{role['id']}").status_code == 204
+
+    # Only the office may delete; an unreferenced entry then goes.
+    member, _ = _linked_member(admin, given="Nod", family="Elete", email="nod.elete@example.edu")
+    assert member.delete(f"/api/v1/institutions/{inst['id']}").status_code == 403
+    assert admin.delete(f"/api/v1/institutions/{inst['id']}").status_code == 204
+    assert admin.get(f"/api/v1/institutions/{inst['id']}").status_code == 404
+
+
 def test_member_voting_eligibility(admin):
     # A grad student cannot self-assign voting membership.
     grad, gid = _linked_member(
